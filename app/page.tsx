@@ -1,0 +1,12665 @@
+"use client";
+
+export const dynamic = "force-static";
+
+import {
+  Anvil,
+  Archive,
+  Atom,
+  BookOpenText,
+  CircuitBoard,
+  Cog,
+  Cable,
+  Eye,
+  Factory,
+  FlameKindling,
+  Filter as FilterIcon,
+  FlaskConical,
+  FolderOpen,
+  Gem,
+  GitMerge,
+  Hammer,
+  HardDrive,
+  Lock,
+  LockOpen,
+  Map as MapIcon,
+  Menu,
+  Minus,
+  Mountain,
+  PackageOpen,
+  Palette,
+  Pause,
+  Pickaxe,
+  Play,
+  Plus,
+  Save,
+  Split,
+  Sprout,
+  Trash2,
+  TreePine,
+  TriangleAlert,
+  Unplug,
+  Zap,
+} from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Progress } from "@/components/ui/progress";
+import { SmoothProgress } from "@/components/ui/smooth-progress";
+import { Toaster } from "@/components/ui/sonner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+
+enum ResourceType {
+  RESOURCE = "RESOURCE",
+  IRON_ORE = "IRON_ORE",
+  COPPER_ORE = "COPPER_ORE",
+  STONE_CHUNKS = "STONE_CHUNKS",
+  FOREST = "FOREST",
+  METAL = "METAL",
+  IRON = "IRON",
+  COPPER = "COPPER",
+  STONE = "STONE",
+  WOOD = "WOOD",
+  CHARCOAL = "CHARCOAL",
+  PLATE = "PLATE",
+  IRON_PLATE = "IRON_PLATE",
+  COPPER_PLATE = "COPPER_PLATE",
+  GEAR = "GEAR",
+  IRON_GEAR = "IRON_GEAR",
+  COPPER_GEAR = "COPPER_GEAR",
+  WIRE = "WIRE",
+  IRON_WIRE = "IRON_WIRE",
+  COPPER_WIRE = "COPPER_WIRE",
+  MOTOR = "MOTOR",
+  CIRCUIT_A = "CIRCUIT_A",
+  AUTOMATA_CORE = "AUTOMATA_CORE",
+  FOREST_GROWTH = "FOREST_GROWTH",
+  POWER = "POWER",
+  ANY = "ANY",
+}
+
+const PRODUCTION_PORT_LABEL = "Production";
+
+const PortLabel = ({ label }: { label: string }) =>
+  label === PRODUCTION_PORT_LABEL ? (
+    <span className="production-port-label" title="Production">
+      <Factory aria-label="Production" />
+    </span>
+  ) : (
+    <span>{label}</span>
+  );
+
+type NodeId = string;
+type ProcessorKind =
+  | "furnace"
+  | "gearPress"
+  | "kiln"
+  | "wireMill"
+  | "motorFactory"
+  | "circuitAConduit"
+  | "automataCoreAssembler"
+  | "refiner"
+  | "assembler";
+type AssemblerRecipeId = "motor" | "circuitA";
+type RefinerRecipeId = "gear" | "wire";
+type ExtractorKind = "extractor";
+type PurchasableKind = ExtractorKind | "generator" | "powerSplitter" | "researchFoundry" | "treePlanter" | "miningDrill" | "splitter" | "merger" | "joint" | "inventorySource" | "filter" | "storage" | "woodenChest" | ProcessorKind;
+type NodeKind = "ironOre" | "copperOre" | "stone" | "forest" | PurchasableKind;
+type BuildCategory = "all" | "production" | "logistics" | "storage";
+type PortDirection = "input" | "output";
+type UnlockTimes = Partial<Record<PurchasableKind, number>>;
+type ResearchProjectId = "extractor2" | "treePlanter" | "miningDrill" | "exploration";
+type MiningDrillTarget = ResourceType.IRON_ORE | ResourceType.COPPER_ORE | ResourceType.STONE_CHUNKS;
+
+type ControlGroup = {
+  id: string;
+  nodeIds: NodeId[];
+  color: string;
+  colorName: string;
+};
+
+type MapNodeProgress = {
+  explored: boolean;
+  customName?: string | null;
+};
+
+type MapNodeProgressBySector = Record<string, MapNodeProgress>;
+
+type InventoryOverflowPrompt = {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  cancelLabel?: string;
+  suppressionLabel?: string;
+  suppressionDescription?: string;
+  loss: Array<[InventoryItemType, number]>;
+};
+
+type Port = {
+  id: string;
+  label: string;
+  type: ResourceType;
+  direction: PortDirection;
+};
+
+type NodeSpec = {
+  id: NodeId;
+  kind: NodeKind;
+  title: string;
+  eyebrow: string;
+  color: string;
+  icon: typeof Pickaxe;
+  inputs: Port[];
+  outputs: Port[];
+};
+
+type Connection = {
+  id: string;
+  sourceNode: NodeId;
+  sourcePort: string;
+  targetNode: NodeId;
+  targetPort: string;
+  type: ResourceType;
+};
+
+type Position = { x: number; y: number };
+type Positions = Record<NodeId, Position>;
+type NodeSize = { width: number; height: number };
+type SelectionBox = { start: Position; end: Position };
+type PortHandle = { nodeId: NodeId; port: Port };
+type InsertionPlan = { connection: Connection; input: Port; output: Port };
+type NodeConnectionOption = {
+  nodeId: NodeId;
+  title: string;
+  eyebrow: string;
+  color: string;
+  mode: "send" | "receive";
+  routes: string[];
+  connected: boolean;
+};
+
+type ModelTool = {
+  name: string;
+  title: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  annotations: { readOnlyHint: boolean; untrustedContentHint: boolean };
+  execute: (input: unknown) => unknown | Promise<unknown>;
+};
+
+type ModelContextApi = {
+  registerTool: (tool: ModelTool, options?: { signal?: AbortSignal }) => void | Promise<void>;
+};
+
+type ExtractorState = {
+  progress: number;
+  stored: number;
+  full: boolean;
+  /** Product already buffered in the output, retained when the input cable is removed. */
+  materialType?: InventoryItemType | null;
+};
+
+type Runtime = {
+  ironOre: { remaining: number };
+  copperOre: { remaining: number };
+  stone: { remaining: number };
+  forest: { remaining: number; regenerationElapsed: number };
+  extractors: Record<NodeId, ExtractorState>;
+  processors: Record<NodeId, {
+    progress: number;
+    stored: number;
+    full: boolean;
+    inputs: Record<string, number>;
+    materialType: ResourceType | null;
+    powerCommitted: boolean;
+    assemblerRecipe?: AssemblerRecipeId | null;
+    refinerRecipe?: RefinerRecipeId | null;
+  }>;
+  generators: Record<NodeId, { power: number; charcoal: number }>;
+  researchFoundries: Record<NodeId, {
+    progress: number;
+    cores: number;
+    /** Retained only so older version-1 saves can be migrated on load. */
+    coreLoaded?: boolean;
+  }>;
+  treePlanters: Record<NodeId, { progress: number }>;
+  miningDrills: Record<NodeId, {
+    progress: number;
+    iterations: number;
+    selectedType: MiningDrillTarget | null;
+    powerCommitted: boolean;
+  }>;
+  minedDeposits: Record<NodeId, {
+    type: MiningDrillTarget;
+    remaining: number;
+    capacity: number;
+  }>;
+  research: {
+    available: boolean;
+    activeProject: ResearchProjectId | null;
+    progress: Record<ResearchProjectId, number>;
+    extractor2Unlocked: boolean;
+    treePlanterUnlocked: boolean;
+    miningDrillUnlocked: boolean;
+    explorationUnlocked: boolean;
+  };
+  splitters: Record<NodeId, {
+    nextOutput: "a" | "b";
+  }>;
+  joints: Record<NodeId, {
+    bufferedType: ResourceType | null;
+  }>;
+  inventorySources: Record<NodeId, {
+    progress: number;
+    full: boolean;
+    itemType: InventoryItemType | null;
+    channels: Record<string, {
+      progress: number;
+      full: boolean;
+      itemType: InventoryItemType | null;
+    }>;
+  }>;
+  filters: Record<NodeId, {
+    selectedType: InventoryItemType | null;
+    bufferedType: InventoryItemType | null;
+  }>;
+  woodenChests: Record<NodeId, {
+    itemType: InventoryItemType | null;
+    stored: number;
+  }>;
+  storages: Record<NodeId, {
+    items: Record<InventoryItemType, number>;
+    capacityPerItem: number;
+  }>;
+  pausedOutputs: Record<NodeId, boolean>;
+  construction: Record<NodeId, { progress: number; complete: boolean }>;
+  /** Read only while migrating older saves that used a personal inventory. */
+  inventoryCapacity?: number;
+  /** Read only while migrating older saves that used a personal inventory. */
+  inventory?: Record<InventoryItemType, number>;
+  produced: Record<InventoryItemType, number>;
+};
+
+type InventoryItemType =
+  | ResourceType.IRON
+  | ResourceType.COPPER
+  | ResourceType.STONE
+  | ResourceType.WOOD
+  | ResourceType.CHARCOAL
+  | ResourceType.IRON_PLATE
+  | ResourceType.COPPER_PLATE
+  | ResourceType.IRON_GEAR
+  | ResourceType.COPPER_GEAR
+  | ResourceType.IRON_WIRE
+  | ResourceType.COPPER_WIRE
+  | ResourceType.MOTOR
+  | ResourceType.CIRCUIT_A
+  | ResourceType.AUTOMATA_CORE;
+
+type BuildSequence = Record<PurchasableKind, number>;
+type SerializedNode = Omit<NodeSpec, "icon">;
+type ShortcutBarId = "shortcutBar1" | "shortcutBar2";
+type ShortcutBarConfig = {
+  visible: boolean;
+  position: { x: number; y: number };
+  scale: number;
+  rotation: 0 | 90;
+  locked: boolean;
+  assignments: Array<PurchasableKind | null>;
+};
+type ShortcutBarsState = Record<ShortcutBarId, ShortcutBarConfig>;
+type PromptPreferences = {
+  skipConnectionDeleteConfirmation: boolean;
+  automaticallyDestroyInventoryOverflow: boolean;
+  skipNodeDestructionConfirmation: boolean;
+  skipHighlightedGroupDeleteConfirmation: boolean;
+  skipControlGroupTutorial: boolean;
+  skipAssemblerRecipeChangeConfirmation: boolean;
+};
+
+const normalizePromptPreferences = (
+  preferences?: Partial<PromptPreferences> | null,
+): PromptPreferences => ({
+  skipConnectionDeleteConfirmation:
+    preferences?.skipConnectionDeleteConfirmation === true,
+  automaticallyDestroyInventoryOverflow:
+    preferences?.automaticallyDestroyInventoryOverflow === true,
+  skipNodeDestructionConfirmation:
+    preferences?.skipNodeDestructionConfirmation === true ||
+    preferences?.skipHighlightedGroupDeleteConfirmation === true,
+  skipHighlightedGroupDeleteConfirmation:
+    preferences?.skipHighlightedGroupDeleteConfirmation === true,
+  skipControlGroupTutorial: preferences?.skipControlGroupTutorial === true,
+  skipAssemblerRecipeChangeConfirmation:
+    preferences?.skipAssemblerRecipeChangeConfirmation === true,
+});
+
+type SaveGamePayload = {
+  version: 1;
+  nodes: SerializedNode[];
+  positions: Positions;
+  connections: Connection[];
+  runtime: Runtime;
+  controlGroups: ControlGroup[];
+  revealedBuildKinds: PurchasableKind[];
+  builtBuildKinds: PurchasableKind[];
+  placedBuildKinds?: PurchasableKind[];
+  newBuildKinds: PurchasableKind[];
+  unlockTimes: UnlockTimes;
+  logisticsUnlocked: boolean;
+  selectedMapSector: string | null;
+  mapNodeProgress?: MapNodeProgressBySector;
+  gameElapsedMs: number;
+  zoom: number;
+  viewport: { scrollLeft: number; scrollTop: number };
+  buildSequence: BuildSequence;
+  controlGroupSequence: number;
+  isRunning: boolean;
+  buildAttention: boolean;
+  journalAttention: boolean;
+  promptPreferences?: PromptPreferences;
+  shortcutBars?: ShortcutBarsState;
+  removeBuildCosts?: boolean;
+};
+type SaveGameSlot = {
+  name: string;
+  savedAt: string;
+  data: SaveGamePayload;
+};
+
+type GraphUndoSnapshot = {
+  nodes: NodeSpec[];
+  positions: Positions;
+  connections: Connection[];
+  runtime: Runtime;
+  controlGroups: ControlGroup[];
+};
+
+type UndoEntry =
+  | { kind: "graph"; snapshot: GraphUndoSnapshot }
+  | { kind: "movement"; positions: Partial<Positions> };
+
+const MAX_UNDO_HISTORY = 50;
+
+const IRON_RESOURCE_COLOR = "#8296a6";
+
+const RESOURCE_COLORS: Record<ResourceType, string> = {
+  [ResourceType.RESOURCE]: "#8ea0a6",
+  [ResourceType.IRON_ORE]: IRON_RESOURCE_COLOR,
+  [ResourceType.COPPER_ORE]: "#d17b55",
+  [ResourceType.STONE_CHUNKS]: "#8c918f",
+  [ResourceType.FOREST]: "#72a873",
+  [ResourceType.METAL]: "#a89a91",
+  [ResourceType.IRON]: IRON_RESOURCE_COLOR,
+  [ResourceType.COPPER]: "#d98a62",
+  [ResourceType.STONE]: "#a6aaa7",
+  [ResourceType.WOOD]: "#d29a5a",
+  [ResourceType.CHARCOAL]: "#6f7782",
+  [ResourceType.PLATE]: "#b5a69d",
+  [ResourceType.IRON_PLATE]: IRON_RESOURCE_COLOR,
+  [ResourceType.COPPER_PLATE]: "#db8f69",
+  [ResourceType.GEAR]: "#91b6bb",
+  [ResourceType.IRON_GEAR]: IRON_RESOURCE_COLOR,
+  [ResourceType.COPPER_GEAR]: "#d69a72",
+  [ResourceType.WIRE]: "#b7a79a",
+  [ResourceType.IRON_WIRE]: IRON_RESOURCE_COLOR,
+  [ResourceType.COPPER_WIRE]: "#e79a70",
+  [ResourceType.MOTOR]: "#d9a54a",
+  [ResourceType.CIRCUIT_A]: "#6fcf9b",
+  [ResourceType.AUTOMATA_CORE]: "#c28cff",
+  [ResourceType.FOREST_GROWTH]: "#82d982",
+  [ResourceType.POWER]: "#f2d45c",
+  [ResourceType.ANY]: "#d5b666",
+};
+
+const formatResourceType = (type: ResourceType) =>
+  type
+    .toLowerCase()
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+
+const STORAGE_NODE_CAPACITY = 10;
+const WOODEN_CHEST_CAPACITY = 20;
+const BASE_PRODUCTION_STORAGE_CAPACITY = 5;
+const EXTRACTOR_CAPACITY = BASE_PRODUCTION_STORAGE_CAPACITY;
+const PROCESSOR_CAPACITY = BASE_PRODUCTION_STORAGE_CAPACITY;
+const INVENTORY_ITEMS: Array<{ type: InventoryItemType; label: string }> = [
+  { type: ResourceType.IRON, label: "Iron" },
+  { type: ResourceType.COPPER, label: "Copper" },
+  { type: ResourceType.STONE, label: "Stone" },
+  { type: ResourceType.WOOD, label: "Wood" },
+  { type: ResourceType.CHARCOAL, label: "Charcoal" },
+  { type: ResourceType.IRON_PLATE, label: "Iron Plate" },
+  { type: ResourceType.COPPER_PLATE, label: "Copper Plate" },
+  { type: ResourceType.IRON_GEAR, label: "Iron Gear" },
+  { type: ResourceType.COPPER_GEAR, label: "Copper Gear" },
+  { type: ResourceType.IRON_WIRE, label: "Iron Wire" },
+  { type: ResourceType.COPPER_WIRE, label: "Copper Wire" },
+  { type: ResourceType.MOTOR, label: "Motor" },
+  { type: ResourceType.CIRCUIT_A, label: "Circuit A" },
+  { type: ResourceType.AUTOMATA_CORE, label: "Automata Core" },
+];
+
+const STARTING_INVENTORY_ITEM_TYPES = new Set<InventoryItemType>([
+  ResourceType.IRON,
+  ResourceType.COPPER,
+  ResourceType.STONE,
+  ResourceType.WOOD,
+]);
+
+const PRODUCIBLE_INVENTORY_TYPES_BY_KIND: Partial<Record<NodeKind, readonly InventoryItemType[]>> = {
+  kiln: [ResourceType.CHARCOAL],
+  furnace: [ResourceType.IRON_PLATE, ResourceType.COPPER_PLATE],
+  gearPress: [ResourceType.IRON_GEAR, ResourceType.COPPER_GEAR],
+  wireMill: [ResourceType.IRON_WIRE, ResourceType.COPPER_WIRE],
+  assembler: [
+    ResourceType.MOTOR,
+    ResourceType.CIRCUIT_A,
+  ],
+  refiner: [
+    ResourceType.IRON_GEAR,
+    ResourceType.COPPER_GEAR,
+    ResourceType.IRON_WIRE,
+    ResourceType.COPPER_WIRE,
+  ],
+  motorFactory: [ResourceType.MOTOR],
+  circuitAConduit: [ResourceType.CIRCUIT_A],
+  automataCoreAssembler: [ResourceType.AUTOMATA_CORE],
+};
+
+const CONTROL_GROUP_COLORS = [
+  { name: "Blue", value: "#4E79A7" },
+  { name: "Orange", value: "#F28E2B" },
+  { name: "Red", value: "#E15759" },
+  { name: "Teal", value: "#76B7B2" },
+  { name: "Green", value: "#59A14F" },
+  { name: "Yellow", value: "#EDC948" },
+  { name: "Purple", value: "#B07AA1" },
+  { name: "Pink", value: "#FF9DA7" },
+  { name: "Brown", value: "#9C755F" },
+  { name: "Gray", value: "#BAB0AC" },
+] as const;
+
+const makeEmptyItemStore = () => Object.fromEntries(
+  INVENTORY_ITEMS.map((item) => [item.type, 0]),
+) as Record<InventoryItemType, number>;
+
+const normalizeItemStore = (
+  items: Partial<Record<InventoryItemType, number>> | undefined,
+  capacity = Number.POSITIVE_INFINITY,
+) => Object.fromEntries(
+  INVENTORY_ITEMS.map(({ type }) => [
+    type,
+    Math.min(capacity, Math.max(0, Math.floor(Number(items?.[type]) || 0))),
+  ]),
+) as Record<InventoryItemType, number>;
+
+const FOREST_GROWTH_INPUT: Port = {
+  id: "forest-growth-in",
+  label: "Reforestation",
+  type: ResourceType.FOREST_GROWTH,
+  direction: "input",
+};
+
+const INITIAL_NODES: NodeSpec[] = [
+  {
+    id: "ironOre",
+    kind: "ironOre",
+    title: "Iron Ore",
+    eyebrow: "ORE DEPOSIT 01",
+    color: RESOURCE_COLORS.IRON_ORE,
+    icon: Gem,
+    inputs: [],
+    outputs: [{ id: "ore-out", label: "Iron Ore", type: ResourceType.IRON_ORE, direction: "output" }],
+  },
+  {
+    id: "ironExtractor",
+    kind: "extractor",
+    title: "Extractor",
+    eyebrow: "EXTRACTOR 01",
+    color: RESOURCE_COLORS.RESOURCE,
+    icon: Pickaxe,
+    inputs: [{ id: "resource-in", label: "Resource", type: ResourceType.RESOURCE, direction: "input" }],
+    outputs: [{ id: "product-out", label: "Output", type: ResourceType.RESOURCE, direction: "output" }],
+  },
+  {
+    id: "starter-wooden-chest",
+    kind: "woodenChest",
+    title: "Wooden Chest",
+    eyebrow: "CHEST 01",
+    color: RESOURCE_COLORS.WOOD,
+    icon: Archive,
+    inputs: [{ id: "chest-in", label: PRODUCTION_PORT_LABEL, type: ResourceType.ANY, direction: "input" }],
+    outputs: [{ id: "chest-out", label: PRODUCTION_PORT_LABEL, type: ResourceType.ANY, direction: "output" }],
+  },
+  {
+    id: "extractor-2",
+    kind: "extractor",
+    title: "Extractor",
+    eyebrow: "EXTRACTOR 02",
+    color: RESOURCE_COLORS.RESOURCE,
+    icon: Pickaxe,
+    inputs: [{ id: "resource-in", label: "Resource", type: ResourceType.RESOURCE, direction: "input" }],
+    outputs: [{ id: "product-out", label: "Output", type: ResourceType.RESOURCE, direction: "output" }],
+  },
+  {
+    id: "copperOre",
+    kind: "copperOre",
+    title: "Copper Ore",
+    eyebrow: "ORE DEPOSIT 03",
+    color: RESOURCE_COLORS.COPPER_ORE,
+    icon: Gem,
+    inputs: [],
+    outputs: [{ id: "copper-ore-out", label: "Copper Ore", type: ResourceType.COPPER_ORE, direction: "output" }],
+  },
+  {
+    id: "stone",
+    kind: "stone",
+    title: "Stone Deposit",
+    eyebrow: "STONE DEPOSIT 04",
+    color: RESOURCE_COLORS.STONE_CHUNKS,
+    icon: Mountain,
+    inputs: [],
+    outputs: [{ id: "stone-out", label: "Stone Chunks", type: ResourceType.STONE_CHUNKS, direction: "output" }],
+  },
+  {
+    id: "forest",
+    kind: "forest",
+    title: "Forest",
+    eyebrow: "RESOURCE 02",
+    color: RESOURCE_COLORS.FOREST,
+    icon: TreePine,
+    inputs: [],
+    outputs: [{ id: "forest-out", label: "Log", type: ResourceType.FOREST, direction: "output" }],
+  },
+];
+
+const HOME_OFFSET = { x: 0, y: 0 };
+const WORLD_SIZE = { width: 3600, height: 2400 };
+const CONNECTION_AUTO_SCROLL_EDGE = 72;
+const CONNECTION_AUTO_SCROLL_MAX_SPEED = 880;
+const PORT_SNAP_PADDING = 14;
+const NODE_CLEARANCE = 12;
+const JOINT_NODE_SIZE = 54;
+const COMPACT_ROUTING_NODE_SIZE = JOINT_NODE_SIZE * 1.25;
+const WOODEN_CHEST_NODE_SIZE = { width: 129, height: 101 };
+const RESOURCE_NODE_SIZE = { width: 310, height: 242 };
+const STARTING_RESOURCE_X = 96 + RESOURCE_NODE_SIZE.width / 2;
+const STARTING_RESOURCE_STEP = RESOURCE_NODE_SIZE.height * 2;
+
+const isResourceNodeKind = (kind: NodeKind) =>
+  kind === "ironOre" ||
+  kind === "copperOre" ||
+  kind === "stone" ||
+  kind === "forest";
+
+const getEstimatedNodeSize = (node: NodeSpec): NodeSize => {
+  if (isResourceNodeKind(node.kind)) return RESOURCE_NODE_SIZE;
+  if (node.kind === "joint" || node.kind === "powerSplitter") {
+    return { width: JOINT_NODE_SIZE, height: JOINT_NODE_SIZE };
+  }
+  if (node.kind === "splitter" || node.kind === "merger" || node.kind === "filter") {
+    return { width: COMPACT_ROUTING_NODE_SIZE, height: COMPACT_ROUTING_NODE_SIZE };
+  }
+  if (node.kind === "woodenChest") return WOODEN_CHEST_NODE_SIZE;
+  const portRows = Math.max(node.inputs.length, node.outputs.length, 1);
+  return { width: 258, height: 171 + portRows * 30 };
+};
+
+const rectanglesOverlap = (
+  first: Position & NodeSize,
+  second: Position & NodeSize,
+  clearance = NODE_CLEARANCE,
+) =>
+  first.x < second.x + second.width + clearance &&
+  first.x + first.width + clearance > second.x &&
+  first.y < second.y + second.height + clearance &&
+  first.y + first.height + clearance > second.y;
+
+const INITIAL_POSITIONS: Positions = {
+  stone: { x: STARTING_RESOURCE_X, y: 120 },
+  forest: { x: STARTING_RESOURCE_X, y: 120 + STARTING_RESOURCE_STEP },
+  copperOre: { x: STARTING_RESOURCE_X, y: 120 + STARTING_RESOURCE_STEP * 2 },
+  ironOre: { x: STARTING_RESOURCE_X, y: 120 + STARTING_RESOURCE_STEP * 3 },
+  ironExtractor: { x: 700, y: 120 },
+  "starter-wooden-chest": { x: 1100, y: 170 },
+  "extractor-2": { x: 960, y: 120 + STARTING_RESOURCE_STEP - 60 },
+};
+
+const INITIAL_CONNECTIONS: Connection[] = [];
+
+const RESOURCE_CAPACITIES = {
+  ironOre: 1000,
+  copperOre: 1000,
+  stone: 1000,
+  forest: 1000,
+} as const;
+const FOREST_BASE_REGENERATION_DURATION = 30_000;
+const SIMULATION_TICK_INTERVAL = 100;
+const SIMULATION_UI_INTERVAL = 250;
+const MAX_SIMULATION_ELAPSED = 1000;
+
+const MINED_DEPOSIT_CAPACITY = 1000;
+const MINING_DRILL_ITERATIONS = 20;
+const MINING_DRILL_CYCLE_DURATION = 3000;
+const MINING_DRILL_POWER_COST = 10;
+
+const MINING_DRILL_TARGETS: Array<{
+  type: MiningDrillTarget;
+  kind: "ironOre" | "copperOre" | "stone";
+  title: string;
+  label: string;
+  portId: "ore-out" | "copper-ore-out" | "stone-out";
+  icon: NodeSpec["icon"];
+}> = [
+  {
+    type: ResourceType.IRON_ORE,
+    kind: "ironOre",
+    title: "Iron Ore",
+    label: "Iron Ore",
+    portId: "ore-out",
+    icon: Gem,
+  },
+  {
+    type: ResourceType.COPPER_ORE,
+    kind: "copperOre",
+    title: "Copper Ore",
+    label: "Copper Ore",
+    portId: "copper-ore-out",
+    icon: Gem,
+  },
+  {
+    type: ResourceType.STONE_CHUNKS,
+    kind: "stone",
+    title: "Stone Deposit",
+    label: "Stone Chunks",
+    portId: "stone-out",
+    icon: Mountain,
+  },
+];
+
+const getMiningTarget = (type: MiningDrillTarget | null) =>
+  MINING_DRILL_TARGETS.find((target) => target.type === type) ?? null;
+
+const createMinedDepositNode = (id: NodeId, type: MiningDrillTarget): NodeSpec => {
+  const target = getMiningTarget(type) ?? MINING_DRILL_TARGETS[0];
+  return {
+    id,
+    kind: target.kind,
+    title: target.title,
+    eyebrow: "DRILLED DEPOSIT",
+    color: RESOURCE_COLORS[target.type],
+    icon: target.icon,
+    inputs: [],
+    outputs: [{ id: target.portId, label: target.label, type: target.type, direction: "output" }],
+  };
+};
+
+const isDirectResourceSource = (
+  runtime: Runtime,
+  sourceNode: NodeId,
+  type: ResourceType,
+) =>
+  runtime.minedDeposits[sourceNode]?.type === type ||
+  (sourceNode === "ironOre" && type === ResourceType.IRON_ORE) ||
+  (sourceNode === "copperOre" && type === ResourceType.COPPER_ORE) ||
+  (sourceNode === "stone" && type === ResourceType.STONE_CHUNKS) ||
+  (sourceNode === "forest" && type === ResourceType.FOREST);
+
+const getDirectResourceRemaining = (
+  runtime: Runtime,
+  sourceNode: NodeId,
+  type: ResourceType,
+) => {
+  const minedDeposit = runtime.minedDeposits[sourceNode];
+  if (minedDeposit?.type === type) return minedDeposit.remaining;
+  if (sourceNode === "ironOre" && type === ResourceType.IRON_ORE) return runtime.ironOre.remaining;
+  if (sourceNode === "copperOre" && type === ResourceType.COPPER_ORE) return runtime.copperOre.remaining;
+  if (sourceNode === "stone" && type === ResourceType.STONE_CHUNKS) return runtime.stone.remaining;
+  if (sourceNode === "forest" && type === ResourceType.FOREST) return runtime.forest.remaining;
+  return 0;
+};
+
+const resolveResourceSourceNode = (
+  runtime: Runtime,
+  sourceNode: NodeId,
+  type: ResourceType,
+  edges: Connection[],
+  visited = new Set<NodeId>(),
+): NodeId | null => {
+  if (visited.has(sourceNode)) return null;
+  if (isDirectResourceSource(runtime, sourceNode, type)) return sourceNode;
+  const nextVisited = new Set(visited).add(sourceNode);
+  const incoming = edges.filter(
+    (edge) => edge.targetNode === sourceNode && edge.type === type,
+  );
+  let fallback: NodeId | null = null;
+  for (const edge of incoming) {
+    const resolved = resolveResourceSourceNode(
+      runtime,
+      edge.sourceNode,
+      type,
+      edges,
+      nextVisited,
+    );
+    if (!resolved) continue;
+    if (getDirectResourceRemaining(runtime, resolved, type) > 0) return resolved;
+    fallback ??= resolved;
+  }
+  return fallback;
+};
+
+const getResourceRemaining = (
+  runtime: Runtime,
+  sourceNode: NodeId,
+  type: ResourceType,
+  edges: Connection[] = [],
+) => {
+  const resolvedSource = resolveResourceSourceNode(runtime, sourceNode, type, edges) ?? sourceNode;
+  return getDirectResourceRemaining(runtime, resolvedSource, type);
+};
+
+const consumeResource = (
+  runtime: Runtime,
+  sourceNode: NodeId,
+  type: ResourceType,
+  edges: Connection[] = [],
+) => {
+  const resolvedSource = resolveResourceSourceNode(runtime, sourceNode, type, edges) ?? sourceNode;
+  const minedDeposit = runtime.minedDeposits[resolvedSource];
+  if (minedDeposit?.type === type) {
+    minedDeposit.remaining = Math.max(0, minedDeposit.remaining - 1);
+  } else if (resolvedSource === "ironOre" && type === ResourceType.IRON_ORE) {
+    runtime.ironOre.remaining = Math.max(0, runtime.ironOre.remaining - 1);
+  } else if (resolvedSource === "copperOre" && type === ResourceType.COPPER_ORE) {
+    runtime.copperOre.remaining = Math.max(0, runtime.copperOre.remaining - 1);
+  } else if (resolvedSource === "stone" && type === ResourceType.STONE_CHUNKS) {
+    runtime.stone.remaining = Math.max(0, runtime.stone.remaining - 1);
+  } else if (resolvedSource === "forest" && type === ResourceType.FOREST) {
+    runtime.forest.remaining = Math.max(0, runtime.forest.remaining - 1);
+  }
+};
+
+const makeResearchState = (): Runtime["research"] => ({
+  available: false,
+  activeProject: null,
+  progress: { extractor2: 0, treePlanter: 0, miningDrill: 0, exploration: 0 },
+  extractor2Unlocked: false,
+  treePlanterUnlocked: false,
+  miningDrillUnlocked: false,
+  explorationUnlocked: false,
+});
+
+const makeRuntime = (): Runtime => ({
+  ironOre: { remaining: RESOURCE_CAPACITIES.ironOre },
+  copperOre: { remaining: RESOURCE_CAPACITIES.copperOre },
+  stone: { remaining: RESOURCE_CAPACITIES.stone },
+  forest: { remaining: RESOURCE_CAPACITIES.forest, regenerationElapsed: 0 },
+  extractors: {
+    ironExtractor: { progress: 0, stored: 0, full: false, materialType: null },
+    "extractor-2": { progress: 0, stored: 0, full: false, materialType: null },
+  },
+  processors: {},
+  generators: {},
+  researchFoundries: {},
+  treePlanters: {},
+  miningDrills: {},
+  minedDeposits: {},
+  research: makeResearchState(),
+  splitters: {},
+  joints: {},
+  inventorySources: {},
+  filters: {},
+  woodenChests: {
+    "starter-wooden-chest": { itemType: null, stored: 0 },
+  },
+  storages: {},
+  pausedOutputs: {},
+  construction: {
+    ironExtractor: { progress: 100, complete: true },
+    "starter-wooden-chest": { progress: 100, complete: true },
+    "extractor-2": { progress: 100, complete: true },
+  },
+  produced: makeEmptyItemStore(),
+});
+
+type ExtractorNodeId = NodeId;
+type ExtractorProduct = ResourceType.IRON | ResourceType.COPPER | ResourceType.STONE | ResourceType.WOOD;
+
+const EXTRACTOR_BASE_CYCLE_DURATION = 5000;
+
+const EXTRACTOR_RECIPES: Partial<Record<ResourceType, { product: ExtractorProduct; label: string; duration: number }>> = {
+  [ResourceType.IRON_ORE]: { product: ResourceType.IRON, label: "Iron", duration: EXTRACTOR_BASE_CYCLE_DURATION },
+  [ResourceType.COPPER_ORE]: { product: ResourceType.COPPER, label: "Copper", duration: EXTRACTOR_BASE_CYCLE_DURATION },
+  [ResourceType.STONE_CHUNKS]: { product: ResourceType.STONE, label: "Stone", duration: EXTRACTOR_BASE_CYCLE_DURATION },
+  [ResourceType.FOREST]: { product: ResourceType.WOOD, label: "Wood", duration: EXTRACTOR_BASE_CYCLE_DURATION },
+};
+
+const formatCycleDuration = (duration: number) =>
+  `${Number((duration / 1000).toFixed(2))} s`;
+
+const isExtractorNode = (nodeId: NodeId): nodeId is ExtractorNodeId =>
+  nodeId === "ironExtractor" ||
+  nodeId === "woodExtractor" ||
+  nodeId.startsWith("extractor-");
+
+const isExtractorKind = (kind: NodeKind): kind is ExtractorKind =>
+  kind === "extractor";
+
+const PRODUCTION_BUILD_TIME = 5000;
+
+const BUILD_TIMES = {
+  extractor: PRODUCTION_BUILD_TIME,
+  generator: PRODUCTION_BUILD_TIME,
+  powerSplitter: 6000,
+  researchFoundry: PRODUCTION_BUILD_TIME,
+  treePlanter: PRODUCTION_BUILD_TIME,
+  miningDrill: PRODUCTION_BUILD_TIME,
+  furnace: PRODUCTION_BUILD_TIME,
+  gearPress: PRODUCTION_BUILD_TIME,
+  wireMill: PRODUCTION_BUILD_TIME,
+  motorFactory: PRODUCTION_BUILD_TIME,
+  circuitAConduit: PRODUCTION_BUILD_TIME,
+  automataCoreAssembler: PRODUCTION_BUILD_TIME,
+  refiner: PRODUCTION_BUILD_TIME,
+  assembler: PRODUCTION_BUILD_TIME,
+  kiln: PRODUCTION_BUILD_TIME,
+  splitter: 10000,
+  merger: 10000,
+  joint: 4000,
+  inventorySource: 12000,
+  filter: 10000,
+  storage: 12000,
+  woodenChest: 8000,
+} as const;
+
+const makeBuildSequence = (): BuildSequence => ({
+  extractor: 2,
+  generator: 0,
+  powerSplitter: 0,
+  researchFoundry: 0,
+  treePlanter: 0,
+  miningDrill: 0,
+  furnace: 0,
+  gearPress: 0,
+  kiln: 0,
+  wireMill: 0,
+  motorFactory: 0,
+  circuitAConduit: 0,
+  automataCoreAssembler: 0,
+  refiner: 0,
+  assembler: 0,
+  splitter: 0,
+  merger: 0,
+  joint: 0,
+  inventorySource: 0,
+  filter: 0,
+  storage: 0,
+  woodenChest: 0,
+});
+
+const SAVE_STORAGE_KEY = "factorinode.save-slots.v1";
+const WIRE_ANIMATION_STORAGE_KEY = "factorinode.wire-animations.v1";
+const SAVE_SLOT_COUNT = 3;
+const SHORTCUT_SLOT_COUNT = 5;
+const SHORTCUT_BAR_SCALE_MIN = 0.72;
+const SHORTCUT_BAR_SCALE_MAX = 1.55;
+const makeShortcutAssignments = (): Array<PurchasableKind | null> =>
+  Array.from({ length: SHORTCUT_SLOT_COUNT }, () => null);
+const makeDefaultShortcutBars = (): ShortcutBarsState => ({
+  shortcutBar1: {
+    visible: true,
+    position: { x: 50, y: 78 },
+    scale: 1,
+    rotation: 0,
+    locked: false,
+    assignments: makeShortcutAssignments(),
+  },
+  shortcutBar2: {
+    visible: false,
+    position: { x: 50, y: 162 },
+    scale: 1,
+    rotation: 0,
+    locked: false,
+    assignments: makeShortcutAssignments(),
+  },
+});
+const normalizeShortcutBarConfig = (
+  value: Partial<ShortcutBarConfig> | null | undefined,
+  fallback: ShortcutBarConfig,
+): ShortcutBarConfig => ({
+  visible: typeof value?.visible === "boolean" ? value.visible : fallback.visible,
+  position: {
+    x: Math.min(98, Math.max(2, Number(value?.position?.x) || fallback.position.x)),
+    y: Math.max(68, Number(value?.position?.y) || fallback.position.y),
+  },
+  scale: Math.min(
+    SHORTCUT_BAR_SCALE_MAX,
+    Math.max(SHORTCUT_BAR_SCALE_MIN, Number(value?.scale) || fallback.scale),
+  ),
+  rotation: value?.rotation === 90 ? 90 : 0,
+  locked: value?.locked === true,
+  assignments: Array.from({ length: SHORTCUT_SLOT_COUNT }, (_, index) => {
+    const assignment = value?.assignments?.[index];
+    return typeof assignment === "string" && isPurchasableKind(assignment as NodeKind)
+      ? assignment as PurchasableKind
+      : null;
+  }),
+});
+const normalizeShortcutBars = (
+  value?: Partial<ShortcutBarsState> | null,
+): ShortcutBarsState => {
+  const defaults = makeDefaultShortcutBars();
+  return {
+    shortcutBar1: normalizeShortcutBarConfig(value?.shortcutBar1, defaults.shortcutBar1),
+    shortcutBar2: normalizeShortcutBarConfig(value?.shortcutBar2, defaults.shortcutBar2),
+  };
+};
+const makeEmptySaveSlots = (): Array<SaveGameSlot | null> =>
+  Array.from({ length: SAVE_SLOT_COUNT }, () => null);
+const makeDefaultSaveNames = () =>
+  Array.from({ length: SAVE_SLOT_COUNT }, (_, index) => `Save ${index + 1}`);
+
+const GENERATOR_MAX_POWER = 100;
+const POWER_PER_CHARCOAL = 50;
+const PRODUCTION_INGREDIENT_CAPACITY = 5;
+const RESEARCH_CYCLE_DURATION = 20000;
+const RESEARCH_UNLOCK_COST = 5;
+const MAP_GRID_SIZE = 13;
+const MAP_HOME_INDEX = Math.floor(MAP_GRID_SIZE / 2);
+const MAP_HOME_SECTOR = `${MAP_HOME_INDEX},${MAP_HOME_INDEX}`;
+const MAP_ADJACENT_SECTORS = new Map([
+  [`${MAP_HOME_INDEX},${MAP_HOME_INDEX - 1}`, "North"],
+  [`${MAP_HOME_INDEX + 1},${MAP_HOME_INDEX}`, "East"],
+  [`${MAP_HOME_INDEX},${MAP_HOME_INDEX + 1}`, "South"],
+  [`${MAP_HOME_INDEX - 1},${MAP_HOME_INDEX}`, "West"],
+]);
+const makeInitialMapNodeProgress = (): MapNodeProgressBySector => ({
+  [MAP_HOME_SECTOR]: { explored: true, customName: "Home Factory" },
+});
+const normalizeMapNodeProgress = (value: unknown): MapNodeProgressBySector => {
+  const normalized = makeInitialMapNodeProgress();
+  if (!value || typeof value !== "object") return normalized;
+  Object.entries(value).forEach(([sectorKey, rawProgress]) => {
+    if (!rawProgress || typeof rawProgress !== "object") return;
+    const progress = rawProgress as Partial<MapNodeProgress>;
+    const customName = typeof progress.customName === "string"
+      ? progress.customName.trim().slice(0, 80)
+      : null;
+    normalized[sectorKey] = {
+      explored: Boolean(progress.explored),
+      customName: customName || null,
+    };
+  });
+  return normalized;
+};
+const TREE_PLANTER_CYCLE_DURATION = 1000;
+const TREE_PLANTER_POWER_COST = 5;
+const INVENTORY_SOURCE_CYCLE_DURATION = 4000;
+const EXTRACTOR_RESEARCH_CYCLE_MULTIPLIER = 0.9;
+const POWER_COSTS: Partial<Record<ProcessorKind, number>> = {
+  wireMill: 20,
+  circuitAConduit: 30,
+  motorFactory: 30,
+  automataCoreAssembler: 50,
+};
+
+type ProcessorRecipe = {
+  title: string;
+  eyebrow: string;
+  color: string;
+  icon: typeof Pickaxe;
+  inputs: Array<{ id: string; label: string; type: ResourceType; amount: number }>;
+  output: { id: string; label: string; type: ResourceType };
+  duration: number;
+  summary: string;
+  activeLabel: string;
+};
+
+const PROCESSOR_RECIPES: Record<ProcessorKind, ProcessorRecipe> = {
+  kiln: {
+    title: "Kiln",
+    eyebrow: "PROCESSOR",
+    color: RESOURCE_COLORS.CHARCOAL,
+    icon: FlameKindling,
+    inputs: [{ id: "wood-in", label: "Wood", type: ResourceType.WOOD, amount: 1 }],
+    output: { id: "charcoal-out", label: "Charcoal", type: ResourceType.CHARCOAL },
+    duration: 3500,
+    summary: "1 Wood → 1 Charcoal",
+    activeLabel: "Firing charcoal",
+  },
+  furnace: {
+    title: "Furnace",
+    eyebrow: "SMELTER",
+    color: RESOURCE_COLORS.IRON_PLATE,
+    icon: Anvil,
+    inputs: [
+      { id: "metal-in", label: "Metal", type: ResourceType.METAL, amount: 1 },
+      { id: "charcoal-in", label: "Charcoal", type: ResourceType.CHARCOAL, amount: 1 },
+    ],
+    output: { id: "plate-out", label: "Plate", type: ResourceType.PLATE },
+    duration: 6000,
+    summary: "1 Metal + 1 Charcoal",
+    activeLabel: "Smelting plate",
+  },
+  gearPress: {
+    title: "Gear Press",
+    eyebrow: "PRESS",
+    color: RESOURCE_COLORS.IRON_GEAR,
+    icon: Cog,
+    inputs: [
+      { id: "plate-a-in", label: "Plate A", type: ResourceType.PLATE, amount: 1 },
+      { id: "plate-b-in", label: "Plate B", type: ResourceType.PLATE, amount: 1 },
+    ],
+    output: { id: "gear-out", label: "Gear", type: ResourceType.GEAR },
+    duration: 4500,
+    summary: "2 matching Plates → 1 Gear",
+    activeLabel: "Pressing gear",
+  },
+  wireMill: {
+    title: "Wire Mill",
+    eyebrow: "MILL",
+    color: RESOURCE_COLORS.WIRE,
+    icon: Cable,
+    inputs: [
+      { id: "wire-plate-in", label: "Plate", type: ResourceType.PLATE, amount: 1 },
+    ],
+    output: { id: "wire-out", label: "Wire", type: ResourceType.WIRE },
+    duration: 3200,
+    summary: "1 Plate → 1 Wire",
+    activeLabel: "Drawing wire",
+  },
+  motorFactory: {
+    title: "Motor Factory",
+    eyebrow: "ASSEMBLER",
+    color: RESOURCE_COLORS.MOTOR,
+    icon: Factory,
+    inputs: [
+      { id: "motor-gear-in", label: "Iron Gears", type: ResourceType.IRON_GEAR, amount: 2 },
+      { id: "motor-wire-in", label: "Copper Wire", type: ResourceType.COPPER_WIRE, amount: 4 },
+    ],
+    output: { id: "motor-out", label: "Motor", type: ResourceType.MOTOR },
+    duration: 6500,
+    summary: "2 Iron Gears + 4 Copper Wire → 1 Motor",
+    activeLabel: "Assembling motor",
+  },
+  circuitAConduit: {
+    title: "Circuit A Conduit",
+    eyebrow: "ELECTRONICS",
+    color: RESOURCE_COLORS.CIRCUIT_A,
+    icon: CircuitBoard,
+    inputs: [
+      { id: "circuit-wire-in", label: "Copper Wire", type: ResourceType.COPPER_WIRE, amount: 2 },
+      { id: "circuit-plate-in", label: "Iron Plate", type: ResourceType.IRON_PLATE, amount: 1 },
+    ],
+    output: { id: "circuit-a-out", label: "Circuit A", type: ResourceType.CIRCUIT_A },
+    duration: 5000,
+    summary: "2 Copper Wire + 1 Iron Plate → 1 Circuit A",
+    activeLabel: "Etching Circuit A",
+  },
+  automataCoreAssembler: {
+    title: "Automata Core Assembler",
+    eyebrow: "CORE ASSEMBLY",
+    color: RESOURCE_COLORS.AUTOMATA_CORE,
+    icon: Atom,
+    inputs: [
+      { id: "core-motor-in", label: "Motor", type: ResourceType.MOTOR, amount: 1 },
+      { id: "core-circuit-in", label: "Circuit A", type: ResourceType.CIRCUIT_A, amount: 2 },
+    ],
+    output: { id: "automata-core-out", label: "Automata Core", type: ResourceType.AUTOMATA_CORE },
+    duration: 8500,
+    summary: "1 Motor + 2 Circuit A → 1 Automata Core",
+    activeLabel: "Synchronizing core",
+  },
+  refiner: {
+    title: "Refiner",
+    eyebrow: "CONFIGURABLE",
+    color: "#b99362",
+    icon: Cog,
+    inputs: [
+      { id: "refiner-in", label: "Choose recipe", type: ResourceType.ANY, amount: 1 },
+    ],
+    output: { id: "refiner-out", label: "Choose recipe", type: ResourceType.ANY },
+    duration: 0,
+    summary: "Choose a recipe from the node icon",
+    activeLabel: "Awaiting recipe",
+  },
+  assembler: {
+    title: "Assembler",
+    eyebrow: "CONFIGURABLE",
+    color: "#8fa3b8",
+    icon: Hammer,
+    inputs: [
+      { id: "assembler-a-in", label: "Choose recipe", type: ResourceType.ANY, amount: 1 },
+      { id: "assembler-b-in", label: "Choose recipe", type: ResourceType.ANY, amount: 1 },
+    ],
+    output: { id: "assembler-out", label: "Choose recipe", type: ResourceType.ANY },
+    duration: 0,
+    summary: "Choose a recipe from the node icon",
+    activeLabel: "Awaiting recipe",
+  },
+};
+
+const REFINER_RECIPES: Record<RefinerRecipeId, ProcessorRecipe> = {
+  gear: {
+    ...PROCESSOR_RECIPES.gearPress,
+    title: "Gear",
+    eyebrow: "REFINER RECIPE",
+    inputs: [
+      { id: "refiner-in", label: "Metal Plate", type: ResourceType.PLATE, amount: 1 },
+    ],
+    output: { id: "refiner-out", label: "Gear", type: ResourceType.GEAR },
+    summary: "1 Metal Plate → 1 Gear",
+  },
+  wire: {
+    ...PROCESSOR_RECIPES.wireMill,
+    title: "Wire",
+    eyebrow: "REFINER RECIPE",
+    inputs: [
+      { id: "refiner-in", label: "Metal Plate", type: ResourceType.PLATE, amount: 1 },
+    ],
+    output: { id: "refiner-out", label: "Wire", type: ResourceType.WIRE },
+    summary: "1 Metal Plate → 1 Wire",
+  },
+};
+
+const ASSEMBLER_RECIPES: Record<AssemblerRecipeId, ProcessorRecipe> = {
+  motor: {
+    ...PROCESSOR_RECIPES.motorFactory,
+    title: "Motor",
+    eyebrow: "ASSEMBLER RECIPE",
+    inputs: [
+      { id: "assembler-a-in", label: "Iron Plates", type: ResourceType.IRON_PLATE, amount: 2 },
+      { id: "assembler-b-in", label: "Iron Gear", type: ResourceType.IRON_GEAR, amount: 1 },
+    ],
+    output: { id: "assembler-out", label: "Motor", type: ResourceType.MOTOR },
+    summary: "2 Iron Plates + 1 Iron Gear → 1 Motor",
+  },
+  circuitA: {
+    ...PROCESSOR_RECIPES.circuitAConduit,
+    title: "Circuit A",
+    eyebrow: "ASSEMBLER RECIPE",
+    inputs: [
+      { id: "assembler-a-in", label: "Copper Wire", type: ResourceType.COPPER_WIRE, amount: 2 },
+      { id: "assembler-b-in", label: "Iron Plate", type: ResourceType.IRON_PLATE, amount: 1 },
+    ],
+    output: { id: "assembler-out", label: "Circuit A", type: ResourceType.CIRCUIT_A },
+  },
+};
+
+const ASSEMBLER_RECIPE_OPTIONS: Array<{ id: AssemblerRecipeId; label: string }> = [
+  { id: "motor", label: "Motor" },
+  { id: "circuitA", label: "Circuit A" },
+];
+
+const REFINER_RECIPE_OPTIONS: Array<{ id: RefinerRecipeId; label: string }> = [
+  { id: "gear", label: "Gear" },
+  { id: "wire", label: "Wire" },
+];
+
+const getRecipeIngredientTotals = (recipe: ProcessorRecipe) => Array.from(
+  recipe.inputs.reduce((ingredients, input) => {
+    const existing = ingredients.get(input.type);
+    ingredients.set(input.type, {
+      type: input.type,
+      label: formatResourceType(input.type),
+      amount: (existing?.amount ?? 0) + input.amount,
+    });
+    return ingredients;
+  }, new Map<ResourceType, { type: ResourceType; label: string; amount: number }>()).values(),
+);
+
+const isAssemblerRecipeId = (value: unknown): value is AssemblerRecipeId =>
+  value === "motor" || value === "circuitA";
+
+const isRefinerRecipeId = (value: unknown): value is RefinerRecipeId =>
+  value === "gear" || value === "wire";
+
+const getProcessorRecipe = (
+  kind: ProcessorKind,
+  processor?: Runtime["processors"][NodeId] | null,
+) => kind === "assembler"
+  ? processor?.assemblerRecipe
+    ? ASSEMBLER_RECIPES[processor.assemblerRecipe]
+    : null
+  : kind === "refiner"
+    ? processor?.refinerRecipe
+      ? REFINER_RECIPES[processor.refinerRecipe]
+      : null
+  : PROCESSOR_RECIPES[kind];
+
+const isProcessorKind = (kind: NodeKind): kind is ProcessorKind =>
+  kind === "furnace" ||
+  kind === "gearPress" ||
+  kind === "kiln" ||
+  kind === "wireMill" ||
+  kind === "motorFactory" ||
+  kind === "circuitAConduit" ||
+  kind === "automataCoreAssembler" ||
+  kind === "refiner" ||
+  kind === "assembler";
+
+const isPurchasableKind = (kind: NodeKind): kind is PurchasableKind =>
+  isExtractorKind(kind) ||
+  kind === "generator" ||
+  kind === "powerSplitter" ||
+  kind === "researchFoundry" ||
+  kind === "treePlanter" ||
+  kind === "miningDrill" ||
+  kind === "splitter" ||
+  kind === "merger" ||
+  kind === "joint" ||
+  kind === "inventorySource" ||
+  kind === "filter" ||
+  kind === "storage" ||
+  kind === "woodenChest" ||
+  isProcessorKind(kind);
+
+const isNodeKind = (value: unknown): value is NodeKind =>
+  typeof value === "string" && (
+    value === "ironOre" ||
+    value === "copperOre" ||
+    value === "stone" ||
+    value === "forest" ||
+    isPurchasableKind(value as NodeKind)
+  );
+
+const getNodeIcon = (kind: NodeKind): NodeSpec["icon"] => {
+  if (kind === "ironOre" || kind === "copperOre") return Gem;
+  if (kind === "stone") return Mountain;
+  if (kind === "forest") return TreePine;
+  if (kind === "extractor" || kind === "miningDrill") return Pickaxe;
+  if (kind === "generator" || kind === "powerSplitter") return Zap;
+  if (kind === "researchFoundry") return FlaskConical;
+  if (kind === "treePlanter") return Sprout;
+  if (kind === "splitter") return Split;
+  if (kind === "merger") return GitMerge;
+  if (kind === "joint") return Cable;
+  if (kind === "filter") return FilterIcon;
+  if (kind === "woodenChest") return Archive;
+  if (kind === "inventorySource" || kind === "storage") return PackageOpen;
+  if (kind === "assembler") return Hammer;
+  if (kind === "refiner") return Cog;
+  return PROCESSOR_RECIPES[kind].icon;
+};
+
+const serializeNode = ({ id, kind, title, eyebrow, color, inputs, outputs }: NodeSpec): SerializedNode => ({
+  id,
+  kind,
+  title,
+  eyebrow,
+  color,
+  inputs,
+  outputs,
+});
+const hydrateNode = (node: SerializedNode): NodeSpec => ({
+  ...node,
+  icon: getNodeIcon(node.kind),
+  outputs: node.kind === "woodenChest"
+    ? [{
+        id: "chest-out",
+        label: PRODUCTION_PORT_LABEL,
+        type: ResourceType.ANY,
+        direction: "output",
+      }]
+    : node.outputs,
+});
+
+const isSaveGameSlot = (value: unknown): value is SaveGameSlot => {
+  if (!value || typeof value !== "object") return false;
+  const slot = value as Partial<SaveGameSlot>;
+  const data = slot.data as Partial<SaveGamePayload> | undefined;
+  return (
+    typeof slot.name === "string" &&
+    typeof slot.savedAt === "string" &&
+    data?.version === 1 &&
+    Array.isArray(data.nodes) &&
+    data.nodes.every((node) =>
+      Boolean(node) &&
+      typeof node === "object" &&
+      typeof (node as SerializedNode).id === "string" &&
+      isNodeKind((node as SerializedNode).kind),
+    ) &&
+    Boolean(data.positions) &&
+    Array.isArray(data.connections) &&
+    Boolean(data.runtime)
+  );
+};
+
+const formatSaveDate = (savedAt: string) => {
+  const date = new Date(savedAt);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+};
+
+const isDestroyableNode = (node: NodeSpec) =>
+  isPurchasableKind(node.kind) && node.id !== "storage";
+
+const isSplitterNode = (nodeId: NodeId) => nodeId.startsWith("splitter-");
+const isMergerNode = (nodeId: NodeId) => nodeId.startsWith("merger-");
+const isJointNode = (nodeId: NodeId) => nodeId.startsWith("joint-");
+const isGeneratorNode = (nodeId: NodeId) => nodeId.startsWith("generator-");
+const isPowerSplitterNode = (nodeId: NodeId) => nodeId.startsWith("powerSplitter-");
+const findPowerGeneratorId = (
+  sourceNode: NodeId,
+  edges: Connection[],
+  generators: Runtime["generators"],
+  pausedOutputs: Runtime["pausedOutputs"] = {},
+) => {
+  let currentNode = sourceNode;
+  const visited = new Set<NodeId>();
+  while (!visited.has(currentNode)) {
+    visited.add(currentNode);
+    if (generators[currentNode]) return pausedOutputs[currentNode] ? null : currentNode;
+    if (!isJointNode(currentNode) && !isPowerSplitterNode(currentNode)) return null;
+    const incoming = edges.find(
+      (edge) =>
+        edge.targetNode === currentNode &&
+        edge.targetPort === (isPowerSplitterNode(currentNode) ? "power-split-in" : "joint-in") &&
+        edge.type === ResourceType.POWER,
+    );
+    if (!incoming) return null;
+    currentNode = incoming.sourceNode;
+  }
+  return null;
+};
+const isMultiOutputPort = (nodeId: NodeId, portId: string) =>
+  (isGeneratorNode(nodeId) && portId === "power-out") ||
+  (nodeId.startsWith("inventorySource-") && portId === "inventory-out") ||
+  (nodeId === "ironOre" && portId === "ore-out") ||
+  (nodeId === "copperOre" && portId === "copper-ore-out") ||
+  (nodeId === "stone" && portId === "stone-out") ||
+  (nodeId.startsWith("miningDrill-") && (
+    portId === "ore-out" || portId === "copper-ore-out" || portId === "stone-out"
+  )) ||
+  (nodeId === "forest" && portId === "forest-out");
+const isMultiInputPort = (nodeId: NodeId, portId: string) =>
+  (nodeId === "storage" || nodeId.startsWith("storage-")) && portId === "storage-in";
+const isFurnaceNode = (nodeId: NodeId) => nodeId.startsWith("furnace-");
+const isGearPressNode = (nodeId: NodeId) => nodeId.startsWith("gearPress-");
+const isWireMillNode = (nodeId: NodeId) => nodeId.startsWith("wireMill-");
+const isAssemblerNode = (nodeId: NodeId) => nodeId.startsWith("assembler-");
+const isRefinerNode = (nodeId: NodeId) => nodeId.startsWith("refiner-");
+const isSmartProcessorTypingPort = (
+  nodeId: NodeId,
+  portId: string,
+  processor?: Runtime["processors"][NodeId] | null,
+) =>
+  (isFurnaceNode(nodeId) && portId === "metal-in") ||
+  (isGearPressNode(nodeId) && (portId === "plate-a-in" || portId === "plate-b-in")) ||
+  (isWireMillNode(nodeId) && portId === "wire-plate-in") ||
+  (isRefinerNode(nodeId) &&
+    (processor?.refinerRecipe === "gear" || processor?.refinerRecipe === "wire") &&
+    portId === "refiner-in");
+
+const getSmartProcessorOutputPortId = (
+  nodeId: NodeId,
+  processor?: Runtime["processors"][NodeId] | null,
+) =>
+  isFurnaceNode(nodeId)
+    ? "plate-out"
+    : isGearPressNode(nodeId)
+      ? "gear-out"
+      : isWireMillNode(nodeId)
+        ? "wire-out"
+        : isRefinerNode(nodeId) && (
+          processor?.refinerRecipe === "gear" || processor?.refinerRecipe === "wire"
+        )
+          ? "refiner-out"
+        : null;
+
+const makeProcessorState = (
+  kind: ProcessorKind,
+  materialType: ResourceType | null = null,
+  assemblerRecipe: AssemblerRecipeId | null = null,
+  refinerRecipe: RefinerRecipeId | null = null,
+) => {
+  const recipe = kind === "assembler" && assemblerRecipe
+    ? ASSEMBLER_RECIPES[assemblerRecipe]
+    : kind === "refiner" && refinerRecipe
+      ? REFINER_RECIPES[refinerRecipe]
+      : PROCESSOR_RECIPES[kind];
+  return {
+    progress: 0,
+    stored: 0,
+    full: false,
+    inputs: Object.fromEntries(recipe.inputs.map((input) => [input.id, 0])),
+    materialType,
+    powerCommitted: false,
+    ...(kind === "assembler" ? { assemblerRecipe } : {}),
+    ...(kind === "refiner" ? { refinerRecipe } : {}),
+  };
+};
+
+const getProcessorStored = (processor: Runtime["processors"][NodeId] | undefined) =>
+  processor?.stored ?? (processor?.full ? 1 : 0);
+
+const getResearchFoundryCores = (
+  foundry: Runtime["researchFoundries"][NodeId] | undefined,
+) => Math.min(
+  PRODUCTION_INGREDIENT_CAPACITY,
+  Math.max(0, Math.floor(Number(foundry?.cores ?? (foundry?.coreLoaded ? 1 : 0)) || 0)),
+);
+
+const isInventoryItemType = (type: ResourceType): type is InventoryItemType =>
+  INVENTORY_ITEMS.some((item) => item.type === type);
+
+type ManualIngredientSlot = {
+  portId: string;
+  label: string;
+  capacity: number;
+  choices: InventoryItemType[];
+};
+
+const getManualIngredientChoices = (type: ResourceType): InventoryItemType[] => {
+  if (type === ResourceType.METAL) return [ResourceType.IRON, ResourceType.COPPER];
+  if (type === ResourceType.PLATE) return [ResourceType.IRON_PLATE, ResourceType.COPPER_PLATE];
+  return isInventoryItemType(type) ? [type] : [];
+};
+
+const getManualIngredientSlots = (
+  node: NodeSpec,
+  processor?: Runtime["processors"][NodeId] | null,
+): ManualIngredientSlot[] => {
+  if (isProcessorKind(node.kind)) {
+    return (getProcessorRecipe(node.kind, processor)?.inputs ?? []).map((input) => ({
+      portId: input.id,
+      label: input.label,
+      capacity: PRODUCTION_INGREDIENT_CAPACITY,
+      choices: getManualIngredientChoices(input.type),
+    }));
+  }
+  if (node.kind === "generator") {
+    return [{
+      portId: "generator-charcoal-in",
+      label: "Charcoal",
+      capacity: PRODUCTION_INGREDIENT_CAPACITY,
+      choices: [ResourceType.CHARCOAL],
+    }];
+  }
+  if (node.kind === "researchFoundry") {
+    return [{
+      portId: "research-core-in",
+      label: "Automata Core",
+      capacity: PRODUCTION_INGREDIENT_CAPACITY,
+      choices: [ResourceType.AUTOMATA_CORE],
+    }];
+  }
+  return [];
+};
+
+type BuildIngredient = { type: InventoryItemType; amount: number };
+
+const LOGISTICS_BUILD_KINDS = new Set<PurchasableKind>([
+  "splitter",
+  "merger",
+  "joint",
+]);
+
+const LOGISTICS_CATEGORY_KINDS = new Set<PurchasableKind>([
+  "splitter",
+  "merger",
+  "joint",
+  "powerSplitter",
+  "filter",
+  "inventorySource",
+]);
+
+const STORAGE_CATEGORY_KINDS = new Set<PurchasableKind>([
+  "storage",
+  "woodenChest",
+]);
+
+const getBuildCategory = (kind: PurchasableKind): Exclude<BuildCategory, "all"> =>
+  STORAGE_CATEGORY_KINDS.has(kind)
+    ? "storage"
+    : LOGISTICS_CATEGORY_KINDS.has(kind)
+      ? "logistics"
+      : "production";
+
+const isLogisticsNodeKind = (kind: NodeKind): kind is PurchasableKind =>
+  isPurchasableKind(kind) && getBuildCategory(kind) !== "production";
+
+const canPauseNodeOutput = (node: NodeSpec) =>
+  isPurchasableKind(node.kind) &&
+  getBuildCategory(node.kind) === "production" &&
+  node.outputs.length > 0;
+
+const getCompletedMachineOutputType = (
+  node: NodeSpec,
+  runtime: Runtime,
+  edges: Connection[],
+): InventoryItemType | null => {
+  const construction = runtime.construction[node.id];
+  if (construction && !construction.complete) return null;
+
+  if (isExtractorKind(node.kind)) {
+    const extractor = runtime.extractors[node.id];
+    if ((extractor?.stored ?? 0) <= 0) return null;
+    return extractor?.materialType ?? getExtractorRecipe(node.id, edges)?.product ?? null;
+  }
+
+  if (!isProcessorKind(node.kind) || getProcessorStored(runtime.processors[node.id]) <= 0) return null;
+  const processor = runtime.processors[node.id];
+  const dynamicOutput = getSmartProcessorOutput(
+    node.id,
+    processor.materialType ?? getSmartProcessorInputType(node.id, edges, processor),
+    processor,
+  );
+  const outputType = dynamicOutput?.type ?? getProcessorRecipe(node.kind, processor)?.output.type;
+  return outputType && isInventoryItemType(outputType) ? outputType : null;
+};
+
+const BUILD_CATALOG: Array<{
+  kind: PurchasableKind;
+  title: string;
+  description: string;
+  recipe: BuildIngredient[];
+  buildTime: number;
+  icon: NodeSpec["icon"];
+}> = [
+  {
+    kind: "extractor",
+    title: "Extractor",
+    description: "Turns any connected Resource into its usable material.",
+    recipe: [
+      { type: ResourceType.WOOD, amount: 2 },
+      { type: ResourceType.STONE, amount: 2 },
+    ],
+    buildTime: BUILD_TIMES.extractor,
+    icon: Pickaxe,
+  },
+  {
+    kind: "storage",
+    title: "Storage",
+    description: `Stores up to ${STORAGE_NODE_CAPACITY} of every material type. One Storage node can accept connections from multiple item-producing nodes at the same time.`,
+    recipe: [
+      { type: ResourceType.WOOD, amount: 4 },
+      { type: ResourceType.STONE, amount: 4 },
+    ],
+    buildTime: BUILD_TIMES.storage,
+    icon: PackageOpen,
+  },
+  {
+    kind: "woodenChest",
+    title: "Wooden Chest",
+    description: `Stores up to ${WOODEN_CHEST_CAPACITY} of one production material in its own container.`,
+    recipe: [
+      { type: ResourceType.WOOD, amount: 2 },
+    ],
+    buildTime: BUILD_TIMES.woodenChest,
+    icon: Archive,
+  },
+  {
+    kind: "splitter",
+    title: "Splitter",
+    description: "Alternates each incoming item between two smart outputs.",
+    recipe: [
+      { type: ResourceType.STONE, amount: 1 },
+    ],
+    buildTime: BUILD_TIMES.splitter,
+    icon: Split,
+  },
+  {
+    kind: "merger",
+    title: "Merger",
+    description: "Combines two matching item streams into one smart output.",
+    recipe: [
+      { type: ResourceType.STONE, amount: 1 },
+    ],
+    buildTime: BUILD_TIMES.merger,
+    icon: GitMerge,
+  },
+  {
+    kind: "joint",
+    title: "Joint",
+    description: "A compact pass-through for shaping and organizing cable routes.",
+    recipe: [
+      { type: ResourceType.WOOD, amount: 1 },
+    ],
+    buildTime: BUILD_TIMES.joint,
+    icon: Cable,
+  },
+  {
+    kind: "powerSplitter",
+    title: "Power Splitter",
+    description: "Branches one Power cable into three compact directional outputs.",
+    recipe: [
+      { type: ResourceType.STONE, amount: 1 },
+      { type: ResourceType.COPPER_WIRE, amount: 1 },
+    ],
+    buildTime: BUILD_TIMES.powerSplitter,
+    icon: Zap,
+  },
+  {
+    kind: "filter",
+    title: "Filter",
+    description: "Passes only the selected stored item type through its output.",
+    recipe: [
+      { type: ResourceType.WOOD, amount: 1 },
+      { type: ResourceType.IRON_PLATE, amount: 1 },
+    ],
+    buildTime: BUILD_TIMES.filter,
+    icon: FilterIcon,
+  },
+  {
+    kind: "inventorySource",
+    title: "Inventory",
+    description: "Retrieves stored materials for every connected Filter every four seconds.",
+    recipe: [
+      { type: ResourceType.STONE, amount: 3 },
+      { type: ResourceType.IRON_PLATE, amount: 2 },
+    ],
+    buildTime: BUILD_TIMES.inventorySource,
+    icon: PackageOpen,
+  },
+  {
+    kind: "kiln",
+    title: "Kiln",
+    description: "Fires Wood into Charcoal for metal processing.",
+    recipe: [
+      { type: ResourceType.WOOD, amount: 2 },
+      { type: ResourceType.STONE, amount: 3 },
+    ],
+    buildTime: BUILD_TIMES.kiln,
+    icon: FlameKindling,
+  },
+  {
+    kind: "generator",
+    title: "Charcoal Generator",
+    description: "Burns Charcoal into a shared 100W reserve for advanced machines.",
+    recipe: [
+      { type: ResourceType.STONE, amount: 3 },
+      { type: ResourceType.IRON_PLATE, amount: 2 },
+    ],
+    buildTime: BUILD_TIMES.generator,
+    icon: Zap,
+  },
+  {
+    kind: "furnace",
+    title: "Furnace",
+    description: "Smelts Iron or Copper with Charcoal into matching Plates.",
+    recipe: [
+      { type: ResourceType.STONE, amount: 4 },
+      { type: ResourceType.IRON, amount: 2 },
+    ],
+    buildTime: BUILD_TIMES.furnace,
+    icon: Anvil,
+  },
+  {
+    kind: "gearPress",
+    title: "Gear Press",
+    description: "Presses two matching Plates into an Iron or Copper Gear.",
+    recipe: [
+      { type: ResourceType.STONE, amount: 3 },
+      { type: ResourceType.IRON_PLATE, amount: 2 },
+    ],
+    buildTime: BUILD_TIMES.gearPress,
+    icon: Cog,
+  },
+  {
+    kind: "wireMill",
+    title: "Wire Mill",
+    description: "Draws an Iron or Copper Plate into matching Wire.",
+    recipe: [
+      { type: ResourceType.STONE, amount: 2 },
+      { type: ResourceType.IRON_PLATE, amount: 2 },
+    ],
+    buildTime: BUILD_TIMES.wireMill,
+    icon: Cable,
+  },
+  {
+    kind: "refiner",
+    title: "Refiner",
+    description: "A configurable production node that refines metal Plates into matching Gears or Wire.",
+    recipe: [
+      { type: ResourceType.IRON_PLATE, amount: 1 },
+      { type: ResourceType.STONE, amount: 1 },
+    ],
+    buildTime: BUILD_TIMES.refiner,
+    icon: Cog,
+  },
+  {
+    kind: "assembler",
+    title: "Assembler",
+    description: "A configurable production node that can make Motors or Circuit A.",
+    recipe: [
+      { type: ResourceType.WOOD, amount: 4 },
+      { type: ResourceType.STONE, amount: 5 },
+    ],
+    buildTime: BUILD_TIMES.assembler,
+    icon: Hammer,
+  },
+  {
+    kind: "motorFactory",
+    title: "Motor Factory",
+    description: "Combines two Iron Gears and four Copper Wire into a Motor.",
+    recipe: [
+      { type: ResourceType.STONE, amount: 4 },
+      { type: ResourceType.IRON_GEAR, amount: 2 },
+      { type: ResourceType.COPPER_WIRE, amount: 3 },
+    ],
+    buildTime: BUILD_TIMES.motorFactory,
+    icon: Factory,
+  },
+  {
+    kind: "circuitAConduit",
+    title: "Circuit A Conduit",
+    description: "Builds Circuit A from Copper Wire and an Iron Plate.",
+    recipe: [
+      { type: ResourceType.STONE, amount: 3 },
+      { type: ResourceType.IRON_PLATE, amount: 2 },
+      { type: ResourceType.COPPER_WIRE, amount: 3 },
+    ],
+    buildTime: BUILD_TIMES.circuitAConduit,
+    icon: CircuitBoard,
+  },
+  {
+    kind: "automataCoreAssembler",
+    title: "Automata Core Assembler",
+    description: "Combines a Motor and two Circuit A units into an Automata Core.",
+    recipe: [
+      { type: ResourceType.STONE, amount: 6 },
+      { type: ResourceType.MOTOR, amount: 1 },
+      { type: ResourceType.CIRCUIT_A, amount: 2 },
+    ],
+    buildTime: BUILD_TIMES.automataCoreAssembler,
+    icon: Atom,
+  },
+  {
+    kind: "researchFoundry",
+    title: "Research Foundry",
+    description: "Studies Automata Cores for the next generation of machinery.",
+    recipe: [
+      { type: ResourceType.STONE, amount: 10 },
+      { type: ResourceType.CIRCUIT_A, amount: 1 },
+      { type: ResourceType.MOTOR, amount: 1 },
+    ],
+    buildTime: BUILD_TIMES.researchFoundry,
+    icon: FlaskConical,
+  },
+  {
+    kind: "treePlanter",
+    title: "Tree Planter",
+    description: "Uses power to restore one depleted Forest unit every second.",
+    recipe: [
+      { type: ResourceType.MOTOR, amount: 1 },
+      { type: ResourceType.IRON_PLATE, amount: 4 },
+    ],
+    buildTime: BUILD_TIMES.treePlanter,
+    icon: Sprout,
+  },
+  {
+    kind: "miningDrill",
+    title: "Mining Drill",
+    description: "Surveys one ore type over twenty powered cycles, then becomes a 1,000-unit deposit.",
+    recipe: [
+      { type: ResourceType.MOTOR, amount: 2 },
+    ],
+    buildTime: BUILD_TIMES.miningDrill,
+    icon: Pickaxe,
+  },
+];
+
+// Retired blueprints stay in the full catalog so existing saves can still
+// hydrate, run, and refund them without exposing them to new games.
+const VISIBLE_BUILD_CATALOG = BUILD_CATALOG.filter((item) => item.kind !== "filter");
+
+type ShortcutNodeOption = {
+  kind: PurchasableKind;
+  title: string;
+  icon: NodeSpec["icon"];
+  canBuild: boolean;
+};
+
+type NodeShortcutBarProps = {
+  name: string;
+  config: ShortcutBarConfig;
+  options: ShortcutNodeOption[];
+  placementActive: boolean;
+  onBuild: (kind: PurchasableKind) => void;
+  onChange: (updater: (current: ShortcutBarConfig) => ShortcutBarConfig) => void;
+};
+
+const NodeShortcutBar = ({
+  name,
+  config,
+  options,
+  placementActive,
+  onBuild,
+  onChange,
+}: NodeShortcutBarProps) => {
+  const interactionRef = useRef<{
+    mode: "move" | "resize";
+    pointerId: number;
+    startX: number;
+    startY: number;
+    position: ShortcutBarConfig["position"];
+    scale: number;
+  } | null>(null);
+
+  const beginInteraction = (
+    event: React.PointerEvent<HTMLElement>,
+    mode: "move" | "resize",
+  ) => {
+    if (config.locked || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    interactionRef.current = {
+      mode,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      position: { ...config.position },
+      scale: config.scale,
+    };
+  };
+
+  const updateInteraction = (event: React.PointerEvent<HTMLElement>) => {
+    const interaction = interactionRef.current;
+    if (!interaction || interaction.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const deltaX = event.clientX - interaction.startX;
+    const deltaY = event.clientY - interaction.startY;
+    if (interaction.mode === "move") {
+      const nextX = interaction.position.x + (deltaX / Math.max(1, window.innerWidth)) * 100;
+      const nextY = interaction.position.y + deltaY;
+      onChange((current) => ({
+        ...current,
+        position: {
+          x: Math.min(98, Math.max(2, nextX)),
+          y: Math.min(Math.max(68, window.innerHeight - 58), Math.max(68, nextY)),
+        },
+      }));
+      return;
+    }
+    const resizeDelta = (deltaX + deltaY) / 260;
+    onChange((current) => ({
+      ...current,
+      scale: Math.min(
+        SHORTCUT_BAR_SCALE_MAX,
+        Math.max(SHORTCUT_BAR_SCALE_MIN, interaction.scale + resizeDelta),
+      ),
+    }));
+  };
+
+  const finishInteraction = (event: React.PointerEvent<HTMLElement>) => {
+    if (interactionRef.current?.pointerId !== event.pointerId) return;
+    interactionRef.current = null;
+  };
+
+  if (!config.visible) return null;
+
+  return (
+    <section
+      className={`node-shortcut-bar ${config.locked ? "locked" : ""} ${config.rotation === 90 ? "vertical" : "horizontal"}`}
+      aria-label={name}
+      style={{
+        left: `${config.position.x}%`,
+        top: config.position.y,
+        transform: `translateX(-50%) scale(${config.scale})`,
+      }}
+      onPointerMove={updateInteraction}
+      onPointerUp={finishInteraction}
+      onPointerCancel={finishInteraction}
+      onPointerDown={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.closest("button, input, select, textarea, a, [role='menuitem']")) return;
+        beginInteraction(event, "move");
+      }}
+    >
+      <div className="shortcut-bar-toolbar">
+        <div className="shortcut-bar-actions">
+          <button
+            type="button"
+            className="shortcut-bar-control rotate"
+            aria-label={`Rotate ${name}`}
+            title="Rotate 90°"
+            disabled={config.locked}
+            onClick={() => onChange((current) => ({
+              ...current,
+              rotation: current.rotation === 0 ? 90 : 0,
+            }))}
+          >
+            ↻
+          </button>
+          <button
+            type="button"
+            className={`shortcut-bar-control lock ${config.locked ? "active" : ""}`}
+            aria-label={`${config.locked ? "Unlock" : "Lock"} ${name}`}
+            aria-pressed={config.locked}
+            title={`${config.locked ? "Unlock" : "Lock"} ${name}`}
+            onClick={() => onChange((current) => ({ ...current, locked: !current.locked }))}
+          >
+            {config.locked ? <Lock aria-hidden="true" /> : <LockOpen aria-hidden="true" />}
+          </button>
+        </div>
+      </div>
+      <div className="shortcut-slot-row" role="toolbar" aria-label={`${name} node shortcuts`}>
+        {config.assignments.map((assignment, index) => {
+          const option = assignment
+            ? options.find((candidate) => candidate.kind === assignment) ?? null
+            : null;
+          const Icon = option?.icon ?? Plus;
+          const unavailable = Boolean(option && (!option.canBuild || placementActive));
+          const buttonTitle = option
+            ? placementActive
+              ? `Finish placing the current node before building ${option.title}`
+              : option.canBuild
+                ? `Build ${option.title}`
+                : `Missing materials for ${option.title}`
+            : `Right-click to assign shortcut ${index + 1}`;
+          return (
+            <ContextMenu key={`${name}-slot-${index}`}>
+              <ContextMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={`shortcut-slot ${assignment ? "assigned" : "empty"} ${unavailable ? "unavailable" : ""}`}
+                  aria-label={option ? `Build ${option.title}` : `Unassigned shortcut ${index + 1}`}
+                  title={buttonTitle}
+                  onClick={() => {
+                    if (!option || unavailable) return;
+                    onBuild(option.kind);
+                  }}
+                >
+                  <Icon aria-hidden="true" />
+                  <span>{index + 1}</span>
+                </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="shortcut-assignment-menu">
+                <ContextMenuLabel>{name} · Slot {index + 1}</ContextMenuLabel>
+                {options.map((candidate) => {
+                  const CandidateIcon = candidate.icon;
+                  return (
+                    <ContextMenuItem
+                      className={candidate.kind === assignment ? "selected" : ""}
+                      key={candidate.kind}
+                      onSelect={() => onChange((current) => ({
+                        ...current,
+                        assignments: current.assignments.map((value, assignmentIndex) =>
+                          assignmentIndex === index ? candidate.kind : value,
+                        ),
+                      }))}
+                    >
+                      <CandidateIcon aria-hidden="true" />
+                      <span>{candidate.title}</span>
+                      {candidate.kind === assignment ? <small>Assigned</small> : null}
+                    </ContextMenuItem>
+                  );
+                })}
+                {assignment ? (
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem
+                      variant="destructive"
+                      onSelect={() => onChange((current) => ({
+                        ...current,
+                        assignments: current.assignments.map((value, assignmentIndex) =>
+                          assignmentIndex === index ? null : value,
+                        ),
+                      }))}
+                    >
+                      <Trash2 aria-hidden="true" />
+                      Clear shortcut
+                    </ContextMenuItem>
+                  </>
+                ) : null}
+              </ContextMenuContent>
+            </ContextMenu>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        className="shortcut-bar-resize-handle"
+        aria-label={`Resize ${name}`}
+        title={config.locked ? `${name} is locked` : `Drag to resize ${name}`}
+        disabled={config.locked}
+        onPointerDown={(event) => beginInteraction(event, "resize")}
+      >
+        <span aria-hidden="true" />
+      </button>
+    </section>
+  );
+};
+
+type BuildOperationDetail = {
+  label: string;
+  amount?: string;
+  type?: ResourceType;
+};
+
+const getBuildRequiredInputs = (kind: PurchasableKind): BuildOperationDetail[] => {
+  if (kind === "refiner") {
+    return [{ label: "Configurable input", amount: "Recipe" }];
+  }
+  if (kind === "assembler") {
+    return [
+      { label: "Configurable input A", amount: "Recipe" },
+      { label: "Configurable input B", amount: "Recipe" },
+    ];
+  }
+  if (isProcessorKind(kind)) {
+    return PROCESSOR_RECIPES[kind].inputs.map((input) => ({
+      label: input.label,
+      amount: String(input.amount),
+      type: input.type,
+    }));
+  }
+  if (kind === "extractor") {
+    return [{ label: "Connected Resource", amount: "1", type: ResourceType.RESOURCE }];
+  }
+  if (kind === "generator") {
+    return [{ label: "Charcoal", amount: "1", type: ResourceType.CHARCOAL }];
+  }
+  if (kind === "researchFoundry") {
+    return [{ label: "Automata Core", amount: "1", type: ResourceType.AUTOMATA_CORE }];
+  }
+  if (kind === "treePlanter") {
+    return [{ label: "Power", amount: `${TREE_PLANTER_POWER_COST}W`, type: ResourceType.POWER }];
+  }
+  if (kind === "miningDrill") {
+    return [{ label: "Power per cycle", amount: `${MINING_DRILL_POWER_COST}W`, type: ResourceType.POWER }];
+  }
+  return [];
+};
+
+const getBuildProductionOutputs = (
+  kind: PurchasableKind,
+  previewNode: NodeSpec,
+): BuildOperationDetail[] => {
+  if (kind === "refiner") {
+    return [{ label: "Matching Gear or Wire", amount: "1" }];
+  }
+  if (kind === "assembler") {
+    return [{ label: "Motor or Circuit A", amount: "1" }];
+  }
+  if (isProcessorKind(kind)) {
+    const output = PROCESSOR_RECIPES[kind].output;
+    return [{ label: output.label, amount: "1", type: output.type }];
+  }
+  if (kind === "extractor") {
+    return [{ label: "Matching material", amount: "1", type: ResourceType.RESOURCE }];
+  }
+  if (kind === "generator") {
+    return [{ label: "Power", amount: `${POWER_PER_CHARCOAL}W`, type: ResourceType.POWER }];
+  }
+  if (kind === "researchFoundry") {
+    return [{ label: "Research", amount: "1" }];
+  }
+  if (kind === "treePlanter") {
+    return [{ label: "Forest capacity", amount: "+1", type: ResourceType.FOREST_GROWTH }];
+  }
+  if (kind === "miningDrill") {
+    return [{ label: "Selected ore deposit", amount: "1,000 units" }];
+  }
+  return previewNode.outputs.map((output) => ({
+    label: output.label,
+    type: output.type,
+  }));
+};
+
+const announceNodeUnlock = (kind: PurchasableKind) => {
+  const item = VISIBLE_BUILD_CATALOG.find((candidate) => candidate.kind === kind);
+  if (!item) return;
+  const category = getBuildCategory(kind);
+  const categoryLabel = category === "production"
+    ? "Production"
+    : category === "logistics"
+      ? "Logistics"
+      : "Storage";
+  toast(`${item.title} unlocked`, {
+    id: `node-unlocked-${kind}`,
+    description: `${categoryLabel} node now available in the Build menu.`,
+  });
+};
+
+const RESEARCH_PROJECTS: Array<{
+  id: ResearchProjectId;
+  title: string;
+  description: string;
+  unlock: string;
+  icon: NodeSpec["icon"];
+}> = [
+  {
+    id: "extractor2",
+    title: "Extractor 2",
+    description: "Retrofit every Extractor with a refined drive that shortens its cycle to 90% of base time.",
+    unlock: "All existing and future Extractors run at 90% cycle time",
+    icon: Pickaxe,
+  },
+  {
+    id: "treePlanter",
+    title: "Tree Planter",
+    description: "Automate reforestation by converting power into renewable Forest capacity.",
+    unlock: "Unlocks the Tree Planter blueprint",
+    icon: Sprout,
+  },
+  {
+    id: "miningDrill",
+    title: "Mining Drill",
+    description: "Develop powered deep-bore surveying that creates a fresh ore deposit.",
+    unlock: "Unlocks the Mining Drill blueprint",
+    icon: Pickaxe,
+  },
+  {
+    id: "exploration",
+    title: "Exploration",
+    description: "Chart the territory around the Home factory and establish a navigable sector map.",
+    unlock: "Unlocks the Map and neighboring sector selection",
+    icon: MapIcon,
+  },
+];
+
+const isResearchProjectUnlocked = (
+  research: Runtime["research"],
+  projectId: ResearchProjectId,
+) => projectId === "extractor2"
+  ? research.extractor2Unlocked
+  : projectId === "treePlanter"
+    ? research.treePlanterUnlocked
+    : projectId === "miningDrill"
+      ? research.miningDrillUnlocked
+      : research.explorationUnlocked;
+
+const getResearchProject = (projectId: ResearchProjectId | null) =>
+  RESEARCH_PROJECTS.find((project) => project.id === projectId) ?? null;
+
+const announceResearchCompletion = (projectId: ResearchProjectId) => {
+  const project = getResearchProject(projectId);
+  if (!project) return;
+  toast(`${project.title} research complete`, {
+    id: `research-complete-${projectId}`,
+    description: project.unlock,
+    className: "research-completion-toast",
+  });
+};
+
+const RESEARCH_GATED_BUILD_KINDS = new Set<PurchasableKind>([
+  "treePlanter",
+  "miningDrill",
+]);
+
+const isAllResearchComplete = (research: Runtime["research"]) =>
+  RESEARCH_PROJECTS.every((project) => isResearchProjectUnlocked(research, project.id));
+
+type BuildUnlockContext = {
+  runtime: Runtime;
+  builtKinds: ReadonlySet<PurchasableKind>;
+  logisticsUnlocked: boolean;
+};
+
+type BuildUnlockRule = {
+  requirement: string;
+  isSatisfied: (context: BuildUnlockContext) => boolean;
+};
+
+const hasProducedItem = (runtime: Runtime, type: InventoryItemType) =>
+  (runtime.produced?.[type] ?? 0) > 0;
+
+const hasProducedAny = (runtime: Runtime, types: InventoryItemType[]) =>
+  types.some((type) => hasProducedItem(runtime, type));
+
+const hasProducedCharcoal = (runtime: Runtime) =>
+  hasProducedItem(runtime, ResourceType.CHARCOAL);
+
+const hasProducedPlate = (runtime: Runtime) =>
+  hasProducedAny(runtime, [ResourceType.IRON_PLATE, ResourceType.COPPER_PLATE]);
+
+const BUILD_UNLOCK_RULES: Record<PurchasableKind, BuildUnlockRule> = {
+  extractor: {
+    requirement: "Available at the start of the game.",
+    isSatisfied: () => true,
+  },
+  storage: {
+    requirement: "No unlock trigger assigned yet.",
+    isSatisfied: () => false,
+  },
+  woodenChest: {
+    requirement: "Available at the start of the game.",
+    isSatisfied: () => true,
+  },
+  splitter: {
+    requirement: "Place the first player-built Extractor.",
+    isSatisfied: ({ logisticsUnlocked }) => logisticsUnlocked,
+  },
+  merger: {
+    requirement: "Place the first player-built Extractor.",
+    isSatisfied: ({ logisticsUnlocked }) => logisticsUnlocked,
+  },
+  filter: {
+    requirement: "No unlock trigger assigned yet.",
+    isSatisfied: () => false,
+  },
+  inventorySource: {
+    requirement: "No unlock trigger assigned yet.",
+    isSatisfied: () => false,
+  },
+  joint: {
+    requirement: "Place the first player-built Extractor.",
+    isSatisfied: ({ logisticsUnlocked }) => logisticsUnlocked,
+  },
+  powerSplitter: {
+    requirement: "Build a Charcoal Generator.",
+    isSatisfied: ({ builtKinds }) => builtKinds.has("generator"),
+  },
+  kiln: {
+    requirement: "Produce at least 1 Wood.",
+    isSatisfied: ({ runtime }) => hasProducedItem(runtime, ResourceType.WOOD),
+  },
+  furnace: {
+    requirement: "Produce at least 1 Iron or Copper.",
+    isSatisfied: ({ runtime }) =>
+      hasProducedAny(runtime, [ResourceType.IRON, ResourceType.COPPER]),
+  },
+  generator: {
+    requirement: "Produce at least 1 Charcoal.",
+    isSatisfied: ({ runtime }) => hasProducedCharcoal(runtime),
+  },
+  gearPress: {
+    requirement: "Produce at least 1 Iron Plate or Copper Plate.",
+    isSatisfied: ({ runtime }) => hasProducedPlate(runtime),
+  },
+  wireMill: {
+    requirement: "Produce at least 1 Iron Plate or Copper Plate.",
+    isSatisfied: ({ runtime }) => hasProducedPlate(runtime),
+  },
+  refiner: {
+    requirement: "Produce at least 1 Iron Plate or Copper Plate.",
+    isSatisfied: ({ runtime }) => hasProducedPlate(runtime),
+  },
+  assembler: {
+    requirement: "Build your first Refiner.",
+    isSatisfied: ({ builtKinds }) => builtKinds.has("refiner"),
+  },
+  motorFactory: {
+    requirement: "Build a Charcoal Generator.",
+    isSatisfied: ({ builtKinds }) => builtKinds.has("generator"),
+  },
+  circuitAConduit: {
+    requirement: "Build a Charcoal Generator.",
+    isSatisfied: ({ builtKinds }) => builtKinds.has("generator"),
+  },
+  automataCoreAssembler: {
+    requirement: "Build a Charcoal Generator.",
+    isSatisfied: ({ builtKinds }) => builtKinds.has("generator"),
+  },
+  researchFoundry: {
+    requirement: "Build a Charcoal Generator.",
+    isSatisfied: ({ builtKinds }) => builtKinds.has("generator"),
+  },
+  treePlanter: {
+    requirement: `Complete the ${RESEARCH_UNLOCK_COST}-core Tree Planter research project.`,
+    isSatisfied: ({ runtime }) => runtime.research.treePlanterUnlocked,
+  },
+  miningDrill: {
+    requirement: `Complete the ${RESEARCH_UNLOCK_COST}-core Mining Drill research project.`,
+    isSatisfied: ({ runtime }) => runtime.research.miningDrillUnlocked,
+  },
+};
+
+const isBuildUnlockSatisfied = (
+  kind: PurchasableKind,
+  context: BuildUnlockContext,
+) => BUILD_UNLOCK_RULES[kind].isSatisfied(context);
+
+const getBuildUnlockRequirement = (kind: PurchasableKind) =>
+  BUILD_UNLOCK_RULES[kind].requirement;
+
+const formatUnlockTime = (elapsedMs: number) => {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+};
+
+const createBuildableNode = (kind: PurchasableKind, id: NodeId, sequence: number): NodeSpec => {
+  if (isExtractorKind(kind)) {
+    return {
+      id,
+      kind,
+      title: "Extractor",
+      eyebrow: `EXTRACTOR ${String(sequence).padStart(2, "0")}`,
+      color: RESOURCE_COLORS.RESOURCE,
+      icon: Pickaxe,
+      inputs: [{ id: "resource-in", label: "Resource", type: ResourceType.RESOURCE, direction: "input" }],
+      outputs: [{ id: "product-out", label: "Output", type: ResourceType.RESOURCE, direction: "output" }],
+    };
+  }
+  if (kind === "splitter") {
+    return {
+      id,
+      kind,
+      title: "Splitter",
+      eyebrow: `ROUTER ${String(sequence).padStart(2, "0")}`,
+      color: "#9c8ed4",
+      icon: Split,
+      inputs: [{ id: "split-in", label: PRODUCTION_PORT_LABEL, type: ResourceType.ANY, direction: "input" }],
+      outputs: [
+        { id: "split-a-out", label: "A", type: ResourceType.ANY, direction: "output" },
+        { id: "split-b-out", label: "B", type: ResourceType.ANY, direction: "output" },
+      ],
+    };
+  }
+  if (kind === "filter") {
+    return {
+      id,
+      kind,
+      title: "Filter",
+      eyebrow: `FILTER ${String(sequence).padStart(2, "0")}`,
+      color: "#d39c62",
+      icon: FilterIcon,
+      inputs: [{ id: "filter-in", label: PRODUCTION_PORT_LABEL, type: ResourceType.ANY, direction: "input" }],
+      outputs: [{ id: "filter-out", label: "Choose", type: ResourceType.ANY, direction: "output" }],
+    };
+  }
+  if (kind === "inventorySource") {
+    return {
+      id,
+      kind,
+      title: "Inventory",
+      eyebrow: `INVENTORY LINK ${String(sequence).padStart(2, "0")}`,
+      color: "#ad8bd5",
+      icon: PackageOpen,
+      inputs: [],
+      outputs: [{ id: "inventory-out", label: PRODUCTION_PORT_LABEL, type: ResourceType.ANY, direction: "output" }],
+    };
+  }
+  if (kind === "storage") {
+    return {
+      id,
+      kind,
+      title: "Storage",
+      eyebrow: `STORAGE ${String(sequence).padStart(2, "0")}`,
+      color: "#9c86cf",
+      icon: PackageOpen,
+      inputs: [{ id: "storage-in", label: PRODUCTION_PORT_LABEL, type: ResourceType.ANY, direction: "input" }],
+      outputs: [],
+    };
+  }
+  if (kind === "woodenChest") {
+    return {
+      id,
+      kind,
+      title: "Wooden Chest",
+      eyebrow: `CHEST ${String(sequence).padStart(2, "0")}`,
+      color: RESOURCE_COLORS.WOOD,
+      icon: Archive,
+      inputs: [{ id: "chest-in", label: PRODUCTION_PORT_LABEL, type: ResourceType.ANY, direction: "input" }],
+      outputs: [{ id: "chest-out", label: PRODUCTION_PORT_LABEL, type: ResourceType.ANY, direction: "output" }],
+    };
+  }
+  if (kind === "generator") {
+    return {
+      id,
+      kind,
+      title: "Charcoal Generator",
+      eyebrow: `CHARCOAL POWER ${String(sequence).padStart(2, "0")}`,
+      color: RESOURCE_COLORS.POWER,
+      icon: Zap,
+      inputs: [{ id: "generator-charcoal-in", label: "Charcoal", type: ResourceType.CHARCOAL, direction: "input" }],
+      outputs: [{ id: "power-out", label: "Power", type: ResourceType.POWER, direction: "output" }],
+    };
+  }
+  if (kind === "researchFoundry") {
+    return {
+      id,
+      kind,
+      title: "Research Foundry",
+      eyebrow: `RESEARCH ${String(sequence).padStart(2, "0")}`,
+      color: "#74a9e8",
+      icon: FlaskConical,
+      inputs: [{ id: "research-core-in", label: "Automata Core", type: ResourceType.AUTOMATA_CORE, direction: "input" }],
+      outputs: [],
+    };
+  }
+  if (kind === "treePlanter") {
+    return {
+      id,
+      kind,
+      title: "Tree Planter",
+      eyebrow: `REFORESTER ${String(sequence).padStart(2, "0")}`,
+      color: RESOURCE_COLORS.FOREST_GROWTH,
+      icon: Sprout,
+      inputs: [{ id: "power-in", label: `Power · ${TREE_PLANTER_POWER_COST}W`, type: ResourceType.POWER, direction: "input" }],
+      outputs: [{ id: "forest-growth-out", label: "+1 Forest / sec", type: ResourceType.FOREST_GROWTH, direction: "output" }],
+    };
+  }
+  if (kind === "miningDrill") {
+    return {
+      id,
+      kind,
+      title: "Mining Drill",
+      eyebrow: `DEEP BORE ${String(sequence).padStart(2, "0")}`,
+      color: "#d6a44f",
+      icon: Pickaxe,
+      inputs: [{ id: "power-in", label: `Power · ${MINING_DRILL_POWER_COST}W`, type: ResourceType.POWER, direction: "input" }],
+      outputs: [],
+    };
+  }
+  if (kind === "merger") {
+    return {
+      id,
+      kind,
+      title: "Merger",
+      eyebrow: `COMBINER ${String(sequence).padStart(2, "0")}`,
+      color: "#72a9c9",
+      icon: GitMerge,
+      inputs: [
+        { id: "merge-a-in", label: "A", type: ResourceType.ANY, direction: "input" },
+        { id: "merge-b-in", label: "B", type: ResourceType.ANY, direction: "input" },
+      ],
+      outputs: [
+        { id: "merge-out", label: PRODUCTION_PORT_LABEL, type: ResourceType.ANY, direction: "output" },
+      ],
+    };
+  }
+  if (kind === "joint") {
+    return {
+      id,
+      kind,
+      title: "Joint",
+      eyebrow: `LINK ${String(sequence).padStart(2, "0")}`,
+      color: "#b8a878",
+      icon: Cable,
+      inputs: [{ id: "joint-in", label: "In", type: ResourceType.ANY, direction: "input" }],
+      outputs: [{ id: "joint-out", label: "Out", type: ResourceType.ANY, direction: "output" }],
+    };
+  }
+  if (kind === "powerSplitter") {
+    return {
+      id,
+      kind,
+      title: "Power Splitter",
+      eyebrow: `POWER JUNCTION ${String(sequence).padStart(2, "0")}`,
+      color: RESOURCE_COLORS.POWER,
+      icon: Zap,
+      inputs: [{ id: "power-split-in", label: "Power In", type: ResourceType.POWER, direction: "input" }],
+      outputs: [
+        { id: "power-split-top", label: "Power Top", type: ResourceType.POWER, direction: "output" },
+        { id: "power-split-out", label: "Power Out", type: ResourceType.POWER, direction: "output" },
+        { id: "power-split-bottom", label: "Power Bottom", type: ResourceType.POWER, direction: "output" },
+      ],
+    };
+  }
+  const recipe = PROCESSOR_RECIPES[kind];
+  const powerCost = POWER_COSTS[kind];
+  return {
+    id,
+    kind,
+    title: recipe.title,
+    eyebrow: `${recipe.eyebrow} ${String(sequence).padStart(2, "0")}`,
+    color: recipe.color,
+    icon: recipe.icon,
+    inputs: [
+      ...recipe.inputs.map((input) => ({ ...input, direction: "input" as const })),
+      ...(powerCost
+        ? [{ id: "power-in", label: `Power · ${powerCost}W`, type: ResourceType.POWER, direction: "input" as const }]
+        : []),
+    ],
+    outputs: [{ ...recipe.output, direction: "output" }],
+  };
+};
+
+const getExtractorRecipe = (nodeId: NodeId, edges: Connection[]) => {
+  if (!isExtractorNode(nodeId)) return null;
+  const resourceEdge = edges.find(
+    (connection) => connection.targetNode === nodeId && connection.targetPort === "resource-in",
+  );
+  return resourceEdge ? EXTRACTOR_RECIPES[resourceEdge.type] ?? null : null;
+};
+
+const getSplitterInputType = (nodeId: NodeId, edges: Connection[]) => {
+  if (!isSplitterNode(nodeId)) return null;
+  return edges.find(
+    (connection) => connection.targetNode === nodeId && connection.targetPort === "split-in",
+  )?.type ?? null;
+};
+
+const getMergerInputType = (nodeId: NodeId, edges: Connection[]) => {
+  if (!isMergerNode(nodeId)) return null;
+  return edges.find(
+    (connection) =>
+      connection.targetNode === nodeId &&
+      (connection.targetPort === "merge-a-in" || connection.targetPort === "merge-b-in"),
+  )?.type ?? null;
+};
+
+const getJointInputType = (nodeId: NodeId, edges: Connection[]) => {
+  if (!isJointNode(nodeId)) return null;
+  return edges.find(
+    (connection) => connection.targetNode === nodeId && connection.targetPort === "joint-in",
+  )?.type ?? null;
+};
+
+const getSmartProcessorInputType = (
+  nodeId: NodeId,
+  edges: Connection[],
+  processor?: Runtime["processors"][NodeId] | null,
+) => {
+  if (isFurnaceNode(nodeId)) {
+    return edges.find(
+      (connection) => connection.targetNode === nodeId && connection.targetPort === "metal-in",
+    )?.type ?? null;
+  }
+  if (isGearPressNode(nodeId)) {
+    return edges.find(
+      (connection) =>
+        connection.targetNode === nodeId &&
+        (connection.targetPort === "plate-a-in" || connection.targetPort === "plate-b-in"),
+    )?.type ?? null;
+  }
+  if (isWireMillNode(nodeId)) {
+    return edges.find(
+      (connection) => connection.targetNode === nodeId && connection.targetPort === "wire-plate-in",
+    )?.type ?? null;
+  }
+  if (
+    isRefinerNode(nodeId) &&
+    (processor?.refinerRecipe === "gear" || processor?.refinerRecipe === "wire")
+  ) {
+    return edges.find(
+      (connection) =>
+        connection.targetNode === nodeId &&
+        connection.targetPort === "refiner-in",
+    )?.type ?? null;
+  }
+  return null;
+};
+
+const getSmartProcessorOutput = (
+  nodeId: NodeId,
+  inputType: ResourceType | null,
+  processor?: Runtime["processors"][NodeId] | null,
+): { type: InventoryItemType; label: string } | null => {
+  if (isFurnaceNode(nodeId)) {
+    if (inputType === ResourceType.IRON) return { type: ResourceType.IRON_PLATE, label: "Iron Plate" };
+    if (inputType === ResourceType.COPPER) return { type: ResourceType.COPPER_PLATE, label: "Copper Plate" };
+  }
+  if (isGearPressNode(nodeId)) {
+    if (inputType === ResourceType.IRON_PLATE) return { type: ResourceType.IRON_GEAR, label: "Iron Gear" };
+    if (inputType === ResourceType.COPPER_PLATE) return { type: ResourceType.COPPER_GEAR, label: "Copper Gear" };
+  }
+  if (isWireMillNode(nodeId)) {
+    if (inputType === ResourceType.IRON_PLATE) return { type: ResourceType.IRON_WIRE, label: "Iron Wire" };
+    if (inputType === ResourceType.COPPER_PLATE) return { type: ResourceType.COPPER_WIRE, label: "Copper Wire" };
+  }
+  if (isRefinerNode(nodeId) && processor?.refinerRecipe === "gear") {
+    if (inputType === ResourceType.IRON_PLATE) return { type: ResourceType.IRON_GEAR, label: "Iron Gear" };
+    if (inputType === ResourceType.COPPER_PLATE) return { type: ResourceType.COPPER_GEAR, label: "Copper Gear" };
+  }
+  if (isRefinerNode(nodeId) && processor?.refinerRecipe === "wire") {
+    if (inputType === ResourceType.IRON_PLATE) return { type: ResourceType.IRON_WIRE, label: "Iron Wire" };
+    if (inputType === ResourceType.COPPER_PLATE) return { type: ResourceType.COPPER_WIRE, label: "Copper Wire" };
+  }
+  return null;
+};
+
+const getConcreteSmartProcessorMaterialType = (
+  nodeId: NodeId,
+  materialType: ResourceType | null | undefined,
+  processor?: Runtime["processors"][NodeId] | null,
+) => materialType && getSmartProcessorOutput(nodeId, materialType, processor)
+  ? materialType
+  : null;
+
+const getConnectedSmartProcessorMaterialType = (
+  nodeId: NodeId,
+  edges: Connection[],
+  processor?: Runtime["processors"][NodeId] | null,
+) => {
+  const typingPortIds = isFurnaceNode(nodeId)
+    ? new Set(["metal-in"])
+    : isGearPressNode(nodeId)
+      ? new Set(["plate-a-in", "plate-b-in"])
+      : isWireMillNode(nodeId)
+        ? new Set(["wire-plate-in"])
+        : isRefinerNode(nodeId) && (
+          processor?.refinerRecipe === "gear" || processor?.refinerRecipe === "wire"
+        )
+          ? new Set(["refiner-in"])
+        : null;
+  if (!typingPortIds) return null;
+
+  return edges
+    .filter(
+      (connection) =>
+        connection.targetNode === nodeId && typingPortIds.has(connection.targetPort),
+    )
+    .map((connection) => connection.type)
+    .find((materialType) => getSmartProcessorOutput(nodeId, materialType, processor)) ?? null;
+};
+
+const getEffectiveSmartProcessorMaterialType = (
+  nodeId: NodeId,
+  processor: Runtime["processors"][NodeId] | undefined,
+  edges: Connection[],
+) => {
+  const connectedMaterialType = getConnectedSmartProcessorMaterialType(nodeId, edges, processor);
+  const processorMaterialType = getConcreteSmartProcessorMaterialType(
+    nodeId,
+    processor?.materialType,
+    processor,
+  );
+  const processorHasActiveWork = Boolean(
+    processor && (
+      getProcessorStored(processor) > 0 ||
+      processor.progress > 0 ||
+      Object.values(processor.inputs).some((amount) => amount > 0)
+    ),
+  );
+  return processorHasActiveWork
+    ? processorMaterialType ?? connectedMaterialType
+    : connectedMaterialType ?? processorMaterialType;
+};
+
+const hasSmartProcessorMaterialLock = (
+  nodeId: NodeId,
+  processor: Runtime["processors"][NodeId] | undefined,
+  recipe: (typeof PROCESSOR_RECIPES)[ProcessorKind],
+) => Boolean(
+  processor && (
+    getProcessorStored(processor) > 0 ||
+    processor.progress > 0 ||
+    recipe.inputs.some(
+      (input) =>
+        isSmartProcessorTypingPort(nodeId, input.id, processor) &&
+        (processor.inputs[input.id] ?? 0) > 0,
+    )
+  )
+);
+
+type StoredItemBucket = "storage" | "chest" | "production" | "buffer";
+type StoredItemLocation = {
+  nodeId: NodeId;
+  nodeTitle: string;
+  detail: string;
+  bucket: StoredItemBucket;
+  amount: number;
+};
+type InventoryStorageBreakdown = {
+  nodeCount: number;
+  nodeTypes: Array<{ nodeType: string; amount: number }>;
+};
+
+type BuildMaterialAvailability = Record<InventoryItemType, {
+  storage: number;
+  chests: number;
+  production: number;
+  buffers: number;
+  total: number;
+}>;
+
+type CompletedProductionBuffer = {
+  node: NodeSpec;
+  type: InventoryItemType;
+  amount: number;
+};
+
+const getCompletedProductionBuffers = (
+  runtime: Runtime,
+  nodes: NodeSpec[],
+  edges: Connection[],
+): CompletedProductionBuffer[] =>
+  nodes.flatMap((node) => {
+    if (!isExtractorKind(node.kind) && !isProcessorKind(node.kind)) return [];
+    const type = getCompletedMachineOutputType(node, runtime, edges);
+    if (!type) return [];
+    const amount = isExtractorKind(node.kind)
+      ? runtime.extractors[node.id]?.stored ?? 0
+      : getProcessorStored(runtime.processors[node.id]);
+    return amount > 0 ? [{ node, type, amount }] : [];
+  });
+
+const getProcessorInputItemType = (
+  node: NodeSpec,
+  portId: string,
+  processor: Runtime["processors"][NodeId],
+): InventoryItemType | null => {
+  if (!isProcessorKind(node.kind)) return null;
+  const input = getProcessorRecipe(node.kind, processor)?.inputs.find(
+    (candidate) => candidate.id === portId,
+  );
+  if (!input) return null;
+  if (isInventoryItemType(input.type)) return input.type;
+  const selectedType = processor.materialType;
+  return selectedType && isInventoryItemType(selectedType) ? selectedType : null;
+};
+
+const getStoredItemLocations = (
+  runtime: Runtime,
+  nodes: NodeSpec[],
+  edges: Connection[],
+  type: InventoryItemType,
+): StoredItemLocation[] => {
+  const nodeById = new Map(nodes.map((node) => [node.id, node] as const));
+  const locations: StoredItemLocation[] = [];
+  const add = (
+    nodeId: NodeId,
+    amount: number,
+    bucket: StoredItemBucket,
+    detail: string,
+  ) => {
+    if (amount <= 0) return;
+    const node = nodeById.get(nodeId);
+    if (!node) return;
+    locations.push({
+      nodeId,
+      nodeTitle: `${node.title} · ${node.eyebrow}`,
+      detail,
+      bucket,
+      amount,
+    });
+  };
+
+  Object.entries(runtime.storages ?? {}).forEach(([nodeId, storage]) => {
+    add(nodeId, storage.items?.[type] ?? 0, "storage", "Dedicated storage");
+  });
+  Object.entries(runtime.woodenChests ?? {}).forEach(([nodeId, chest]) => {
+    if (chest.itemType === type) add(nodeId, chest.stored, "chest", "Wooden Chest");
+  });
+  getCompletedProductionBuffers(runtime, nodes, edges).forEach(({ node, type: outputType, amount }) => {
+    if (outputType === type) add(node.id, amount, "production", "Completed output");
+  });
+
+  nodes.forEach((node) => {
+    if (isProcessorKind(node.kind)) {
+      const processorKind = node.kind;
+      const processor = runtime.processors[node.id];
+      if (!processor) return;
+      Object.entries(processor.inputs ?? {}).forEach(([portId, amount]) => {
+        if (getProcessorInputItemType(node, portId, processor) === type) {
+          const label = getProcessorRecipe(processorKind, processor)?.inputs.find(
+            (input) => input.id === portId,
+          )?.label;
+          add(node.id, amount, "buffer", label ? `${label} input` : "Ingredient input");
+        }
+      });
+      return;
+    }
+    if (node.kind === "generator" && type === ResourceType.CHARCOAL) {
+      add(node.id, runtime.generators[node.id]?.charcoal ?? 0, "buffer", "Fuel input");
+      return;
+    }
+    if (node.kind === "researchFoundry" && type === ResourceType.AUTOMATA_CORE) {
+      add(node.id, getResearchFoundryCores(runtime.researchFoundries[node.id]), "buffer", "Research input");
+      return;
+    }
+    if (node.kind === "joint" && runtime.joints[node.id]?.bufferedType === type) {
+      add(node.id, 1, "buffer", "Routing buffer");
+      return;
+    }
+    if (node.kind === "filter" && runtime.filters[node.id]?.bufferedType === type) {
+      add(node.id, 1, "buffer", "Filter buffer");
+    }
+  });
+
+  return locations;
+};
+
+const getStoredItemAmount = (
+  runtime: Runtime,
+  nodes: NodeSpec[],
+  edges: Connection[],
+  type: InventoryItemType,
+  excludedNodeIds: ReadonlySet<NodeId> = new Set(),
+) => getStoredItemLocations(runtime, nodes, edges, type)
+  .filter((location) => !excludedNodeIds.has(location.nodeId))
+  .reduce((total, location) => total + location.amount, 0);
+
+const cloneStoredMaterialRuntime = (runtime: Runtime): Runtime => ({
+  ...runtime,
+  storages: Object.fromEntries(
+    Object.entries(runtime.storages ?? {}).map(([nodeId, storage]) => [
+      nodeId,
+      { ...storage, items: { ...makeEmptyItemStore(), ...(storage.items ?? {}) } },
+    ]),
+  ),
+  woodenChests: Object.fromEntries(
+    Object.entries(runtime.woodenChests ?? {}).map(([nodeId, chest]) => [nodeId, { ...chest }]),
+  ),
+  extractors: Object.fromEntries(
+    Object.entries(runtime.extractors).map(([nodeId, extractor]) => [nodeId, { ...extractor }]),
+  ),
+  processors: Object.fromEntries(
+    Object.entries(runtime.processors).map(([nodeId, processor]) => [
+      nodeId,
+      { ...processor, inputs: { ...processor.inputs } },
+    ]),
+  ),
+  generators: Object.fromEntries(
+    Object.entries(runtime.generators ?? {}).map(([nodeId, generator]) => [nodeId, { ...generator }]),
+  ),
+  researchFoundries: Object.fromEntries(
+    Object.entries(runtime.researchFoundries ?? {}).map(([nodeId, foundry]) => [nodeId, { ...foundry }]),
+  ),
+  splitters: Object.fromEntries(
+    Object.entries(runtime.splitters ?? {}).map(([nodeId, splitter]) => [
+      nodeId,
+      { nextOutput: splitter.nextOutput === "b" ? "b" as const : "a" as const },
+    ]),
+  ),
+  joints: Object.fromEntries(
+    Object.entries(runtime.joints ?? {}).map(([nodeId, joint]) => [nodeId, { ...joint }]),
+  ),
+  filters: Object.fromEntries(
+    Object.entries(runtime.filters ?? {}).map(([nodeId, filter]) => [nodeId, { ...filter }]),
+  ),
+});
+
+const consumeStoredMaterialInPlace = (
+  runtime: Runtime,
+  nodes: NodeSpec[],
+  edges: Connection[],
+  type: InventoryItemType,
+  requestedAmount: number,
+  excludedNodeIds: ReadonlySet<NodeId> = new Set(),
+) => {
+  let remaining = Math.max(0, requestedAmount);
+  const take = (available: number, apply: (amount: number) => void) => {
+    if (remaining <= 0 || available <= 0) return;
+    const amount = Math.min(available, remaining);
+    apply(amount);
+    remaining -= amount;
+  };
+
+  Object.entries(runtime.storages ?? {}).forEach(([nodeId, storage]) => {
+    if (excludedNodeIds.has(nodeId)) return;
+    take(storage.items[type] ?? 0, (amount) => { storage.items[type] -= amount; });
+  });
+  Object.entries(runtime.woodenChests ?? {}).forEach(([nodeId, chest]) => {
+    if (excludedNodeIds.has(nodeId) || chest.itemType !== type) return;
+    take(chest.stored, (amount) => { chest.stored -= amount; });
+  });
+
+  nodes.forEach((node) => {
+    if (remaining <= 0 || excludedNodeIds.has(node.id)) return;
+    if (isExtractorKind(node.kind)) {
+      const extractor = runtime.extractors[node.id];
+      const outputType = extractor?.materialType ?? getExtractorRecipe(node.id, edges)?.product ?? null;
+      if (extractor && outputType === type) {
+        take(extractor.stored, (amount) => {
+          extractor.stored -= amount;
+          extractor.full = extractor.stored >= EXTRACTOR_CAPACITY;
+        });
+      }
+      return;
+    }
+    if (isProcessorKind(node.kind)) {
+      const processor = runtime.processors[node.id];
+      if (!processor) return;
+      const outputType = getCompletedMachineOutputType(node, runtime, edges);
+      if (outputType === type) {
+        take(getProcessorStored(processor), (amount) => {
+          processor.stored = getProcessorStored(processor) - amount;
+          processor.full = processor.stored >= PROCESSOR_CAPACITY;
+        });
+      }
+      Object.entries(processor.inputs ?? {}).forEach(([portId, amount]) => {
+        if (getProcessorInputItemType(node, portId, processor) !== type) return;
+        take(amount, (consumed) => { processor.inputs[portId] -= consumed; });
+      });
+      return;
+    }
+    if (node.kind === "generator" && type === ResourceType.CHARCOAL) {
+      const generator = runtime.generators[node.id];
+      if (generator) take(generator.charcoal, (amount) => { generator.charcoal -= amount; });
+      return;
+    }
+    if (node.kind === "researchFoundry" && type === ResourceType.AUTOMATA_CORE) {
+      const foundry = runtime.researchFoundries[node.id];
+      if (foundry) take(getResearchFoundryCores(foundry), (amount) => { foundry.cores -= amount; });
+      return;
+    }
+    if (node.kind === "joint") {
+      const joint = runtime.joints[node.id];
+      if (joint?.bufferedType === type) take(1, () => { joint.bufferedType = null; });
+      return;
+    }
+    if (node.kind === "filter") {
+      const filter = runtime.filters[node.id];
+      if (filter?.bufferedType === type) take(1, () => { filter.bufferedType = null; });
+    }
+  });
+
+  return requestedAmount - remaining;
+};
+
+const depositMaterialIntoStorageInPlace = (
+  runtime: Runtime,
+  nodes: NodeSpec[],
+  type: InventoryItemType,
+  requestedAmount: number,
+  excludedNodeIds: ReadonlySet<NodeId> = new Set(),
+) => {
+  let remaining = Math.max(0, requestedAmount);
+  const deposit = (space: number, apply: (amount: number) => void) => {
+    if (remaining <= 0 || space <= 0) return;
+    const amount = Math.min(space, remaining);
+    apply(amount);
+    remaining -= amount;
+  };
+
+  nodes.forEach((node) => {
+    if (remaining <= 0 || excludedNodeIds.has(node.id) || node.kind !== "storage") return;
+    const construction = runtime.construction[node.id];
+    if (construction && !construction.complete) return;
+    const storage = runtime.storages[node.id];
+    if (!storage) return;
+    deposit(storage.capacityPerItem - (storage.items[type] ?? 0), (amount) => {
+      storage.items[type] = (storage.items[type] ?? 0) + amount;
+    });
+  });
+  nodes.forEach((node) => {
+    if (remaining <= 0 || excludedNodeIds.has(node.id) || node.kind !== "woodenChest") return;
+    const construction = runtime.construction[node.id];
+    if (construction && !construction.complete) return;
+    const chest = runtime.woodenChests[node.id];
+    if (!chest || (chest.itemType && chest.itemType !== type)) return;
+    deposit(WOODEN_CHEST_CAPACITY - chest.stored, (amount) => {
+      chest.itemType = type;
+      chest.stored += amount;
+    });
+  });
+  return requestedAmount - remaining;
+};
+
+const getBuildMaterialAvailability = (
+  runtime: Runtime,
+  nodes: NodeSpec[],
+  edges: Connection[],
+): BuildMaterialAvailability => {
+  const availability = Object.fromEntries(
+    INVENTORY_ITEMS.map(({ type }) => [
+      type,
+      { storage: 0, chests: 0, production: 0, buffers: 0, total: 0 },
+    ]),
+  ) as BuildMaterialAvailability;
+
+  INVENTORY_ITEMS.forEach(({ type }) => {
+    getStoredItemLocations(runtime, nodes, edges, type).forEach(({ bucket, amount }) => {
+      if (bucket === "storage") availability[type].storage += amount;
+      else if (bucket === "chest") availability[type].chests += amount;
+      else if (bucket === "production") availability[type].production += amount;
+      else availability[type].buffers += amount;
+      availability[type].total += amount;
+    });
+  });
+
+  return availability;
+};
+
+const consumeBuildIngredients = (
+  runtime: Runtime,
+  recipe: BuildIngredient[],
+  nodes: NodeSpec[],
+  edges: Connection[],
+): Runtime | null => {
+  const availability = getBuildMaterialAvailability(runtime, nodes, edges);
+  if (recipe.some((ingredient) => availability[ingredient.type].total < ingredient.amount)) {
+    return null;
+  }
+
+  const next = cloneStoredMaterialRuntime(runtime);
+
+  recipe.forEach((ingredient) => {
+    consumeStoredMaterialInPlace(next, nodes, edges, ingredient.type, ingredient.amount);
+  });
+
+  return next;
+};
+
+const getEffectivePort = (nodeId: NodeId, port: Port, edges: Connection[]): Port => {
+  if (isExtractorNode(nodeId) && port.id === "product-out") {
+    const recipe = getExtractorRecipe(nodeId, edges);
+    const retainedOutputType = edges.find(
+      (connection) =>
+        connection.sourceNode === nodeId && connection.sourcePort === port.id,
+    )?.type ?? null;
+    const outputType = recipe?.product ?? (
+      retainedOutputType && isInventoryItemType(retainedOutputType)
+        ? retainedOutputType
+        : null
+    );
+    return outputType
+      ? { ...port, label: formatResourceType(outputType), type: outputType }
+      : port;
+  }
+  if (isSplitterNode(nodeId) && (port.id === "split-a-out" || port.id === "split-b-out")) {
+    const inputType = getSplitterInputType(nodeId, edges);
+    const retainedOutputType = edges.find(
+      (connection) =>
+        connection.sourceNode === nodeId && connection.sourcePort === port.id,
+    )?.type ?? null;
+    const effectiveType = inputType ?? retainedOutputType;
+    const channel = port.id === "split-a-out" ? "A" : "B";
+    return effectiveType
+      ? { ...port, label: channel, type: effectiveType }
+      : { ...port, label: channel };
+  }
+  if (
+    isMergerNode(nodeId) &&
+    (port.id === "merge-a-in" || port.id === "merge-b-in" || port.id === "merge-out")
+  ) {
+    const inputType = getMergerInputType(nodeId, edges);
+    const retainedOutputType = port.id === "merge-out"
+      ? edges.find(
+          (connection) =>
+            connection.sourceNode === nodeId && connection.sourcePort === port.id,
+        )?.type ?? null
+      : null;
+    const effectiveType = inputType ?? retainedOutputType;
+    if (!effectiveType) return port;
+    const label = port.id === "merge-out"
+      ? PRODUCTION_PORT_LABEL
+      : port.id === "merge-a-in" ? "A" : "B";
+    return { ...port, label, type: effectiveType };
+  }
+  if (isJointNode(nodeId) && (port.id === "joint-in" || port.id === "joint-out")) {
+    const inputType = getJointInputType(nodeId, edges);
+    const retainedOutputType = port.id === "joint-out"
+      ? edges.find(
+          (connection) =>
+            connection.sourceNode === nodeId && connection.sourcePort === port.id,
+        )?.type ?? null
+      : null;
+    const effectiveType = inputType ?? retainedOutputType;
+    if (!effectiveType) return port;
+    return {
+      ...port,
+      label: port.id === "joint-in" ? "In" : "Out",
+      type: effectiveType,
+    };
+  }
+  if (isFurnaceNode(nodeId)) {
+    const inputType = getSmartProcessorInputType(nodeId, edges);
+    if (port.id === "metal-in" && inputType) {
+      return { ...port, label: formatResourceType(inputType), type: inputType };
+    }
+    if (port.id === "plate-out") {
+      const output = getSmartProcessorOutput(nodeId, inputType);
+      const retainedOutputType = edges.find(
+        (connection) =>
+          connection.sourceNode === nodeId && connection.sourcePort === port.id,
+      )?.type ?? null;
+      return output
+        ? { ...port, ...output }
+        : retainedOutputType && isInventoryItemType(retainedOutputType)
+          ? { ...port, label: formatResourceType(retainedOutputType), type: retainedOutputType }
+          : port;
+    }
+  }
+  if (isGearPressNode(nodeId)) {
+    const inputType = getSmartProcessorInputType(nodeId, edges);
+    if ((port.id === "plate-a-in" || port.id === "plate-b-in") && inputType) {
+      const channel = port.id === "plate-a-in" ? "A" : "B";
+      return { ...port, label: `${channel} · ${formatResourceType(inputType)}`, type: inputType };
+    }
+    if (port.id === "gear-out") {
+      const output = getSmartProcessorOutput(nodeId, inputType);
+      const retainedOutputType = edges.find(
+        (connection) =>
+          connection.sourceNode === nodeId && connection.sourcePort === port.id,
+      )?.type ?? null;
+      return output
+        ? { ...port, ...output }
+        : retainedOutputType && isInventoryItemType(retainedOutputType)
+          ? { ...port, label: formatResourceType(retainedOutputType), type: retainedOutputType }
+          : port;
+    }
+  }
+  if (isWireMillNode(nodeId)) {
+    const inputType = getSmartProcessorInputType(nodeId, edges);
+    if (port.id === "wire-plate-in" && inputType) {
+      return { ...port, label: formatResourceType(inputType), type: inputType };
+    }
+    if (port.id === "wire-out") {
+      const output = getSmartProcessorOutput(nodeId, inputType);
+      const retainedOutputType = edges.find(
+        (connection) =>
+          connection.sourceNode === nodeId && connection.sourcePort === port.id,
+      )?.type ?? null;
+      return output
+        ? { ...port, ...output }
+        : retainedOutputType && isInventoryItemType(retainedOutputType)
+          ? { ...port, label: formatResourceType(retainedOutputType), type: retainedOutputType }
+          : port;
+    }
+  }
+  return port;
+};
+
+type DynamicPortRuntime = Pick<Runtime, "woodenChests" | "extractors" | "processors">;
+
+const isAssemblerPortDisabled = (
+  nodeId: NodeId,
+  portId: string,
+  runtime: DynamicPortRuntime,
+) => {
+  const kind = isAssemblerNode(nodeId)
+    ? "assembler"
+    : isRefinerNode(nodeId)
+      ? "refiner"
+      : null;
+  if (!kind) return false;
+  const recipe = getProcessorRecipe(kind, runtime.processors[nodeId]);
+  if (!recipe) return true;
+  if (portId === recipe.output.id) return false;
+  return !recipe.inputs.some((input) => input.id === portId);
+};
+
+const getRuntimeAwarePort = (
+  nodeId: NodeId,
+  port: Port,
+  edges: Connection[],
+  runtime: DynamicPortRuntime,
+) => {
+  if (port.id === "chest-in" || port.id === "chest-out") {
+    const itemType = runtime.woodenChests?.[nodeId]?.itemType ?? null;
+    if (itemType) {
+      return port.id === "chest-in"
+        ? { ...port, label: formatResourceType(itemType), type: itemType }
+        : { ...port, type: itemType };
+    }
+  }
+  if (isExtractorNode(nodeId) && port.id === "product-out") {
+    const recipe = getExtractorRecipe(nodeId, edges);
+    const extractor = runtime.extractors[nodeId];
+    const outputType = extractor?.stored > 0
+      ? extractor.materialType ?? recipe?.product ?? null
+      : recipe?.product ?? extractor?.materialType ?? null;
+    if (outputType) {
+      return { ...port, label: formatResourceType(outputType), type: outputType };
+    }
+  }
+  let runtimePort = port;
+  const processor = runtime.processors[nodeId];
+  const configurableKind = isAssemblerNode(nodeId)
+    ? "assembler"
+    : isRefinerNode(nodeId)
+      ? "refiner"
+      : null;
+  if (configurableKind) {
+    const recipe = getProcessorRecipe(configurableKind, processor);
+    if (!recipe) {
+      runtimePort = { ...port, label: "Choose recipe", type: ResourceType.ANY };
+    } else if (port.direction === "input") {
+      const input = recipe.inputs.find((candidate) => candidate.id === port.id);
+      runtimePort = input
+        ? { ...port, label: input.label, type: input.type }
+        : { ...port, label: "Unused", type: ResourceType.ANY };
+    } else if (port.id === recipe.output.id) {
+      runtimePort = { ...port, label: recipe.output.label, type: recipe.output.type };
+    }
+  }
+  const smartMaterialType = getEffectiveSmartProcessorMaterialType(
+    nodeId,
+    processor,
+    edges,
+  );
+  if (
+    runtimePort.direction === "input" &&
+    smartMaterialType &&
+    isSmartProcessorTypingPort(nodeId, runtimePort.id, processor)
+  ) {
+    runtimePort = {
+      ...runtimePort,
+      label: formatResourceType(smartMaterialType),
+      type: smartMaterialType,
+    };
+  }
+  const smartOutputPortId = getSmartProcessorOutputPortId(nodeId, processor);
+  if (smartOutputPortId === runtimePort.id) {
+    const output = getSmartProcessorOutput(nodeId, smartMaterialType, processor);
+    if (output) return { ...runtimePort, ...output };
+  }
+  return getEffectivePort(nodeId, runtimePort, edges);
+};
+
+const removeConnectionsWithDependents = (
+  connections: Connection[],
+  shouldRemove: (connection: Connection) => boolean,
+  nodes: NodeSpec[],
+  runtime?: DynamicPortRuntime,
+) => {
+  const remaining = connections.filter((connection) => !shouldRemove(connection));
+  // Removing an input can change a smart node's effective output type, but it
+  // does not automatically invalidate every cable leaving that node. Re-run
+  // the graph's type resolution and let each surviving route stand or fall on
+  // its own compatibility (for example, a Merger may still have another typed
+  // input and generic outputs can remain attached to Storage).
+  return normalizeDynamicConnections(remaining, nodes, runtime);
+};
+
+const getDisconnectedMachineIds = (
+  before: Connection[],
+  after: Connection[],
+) => {
+  const remainingIds = new Set(after.map((connection) => connection.id));
+  const disconnected = new Set<NodeId>();
+  const nodesWithDisconnectedInputs = new Set<NodeId>();
+
+  before.forEach((connection) => {
+    if (!remainingIds.has(connection.id)) {
+      nodesWithDisconnectedInputs.add(connection.targetNode);
+    }
+  });
+
+  before.forEach((connection) => {
+    if (remainingIds.has(connection.id)) return;
+
+    // Rewiring an output directly to a new input keeps the producer connected,
+    // so only treat the producer as disconnected when that output is now unused.
+    // If this producer also lost an input during the same graph update, retain
+    // its completed output in the machine instead of auto-collecting it.
+    const outputStillConnected = after.some(
+      (item) =>
+        item.sourceNode === connection.sourceNode &&
+        item.sourcePort === connection.sourcePort,
+    );
+    if (
+      !outputStillConnected &&
+      !nodesWithDisconnectedInputs.has(connection.sourceNode)
+    ) {
+      disconnected.add(connection.sourceNode);
+    }
+  });
+
+  return disconnected;
+};
+
+const isStorageAcceptableOutputType = (type: ResourceType) =>
+  isInventoryItemType(type) ||
+  type === ResourceType.RESOURCE ||
+  type === ResourceType.PLATE ||
+  type === ResourceType.GEAR ||
+  type === ResourceType.WIRE ||
+  type === ResourceType.ANY;
+
+const isCompatible = (a: Port, b: Port) => {
+  if (a.direction === b.direction) return false;
+  const output = a.direction === "output" ? a : b;
+  const input = a.direction === "input" ? a : b;
+  if (output.id === "inventory-out" && input.id !== "filter-in") return false;
+  if (input.id === "storage-in") return isStorageAcceptableOutputType(output.type);
+  if (input.id === "chest-in") {
+    if (!isStorageAcceptableOutputType(output.type)) return false;
+    return input.type === ResourceType.ANY ||
+      output.type === input.type ||
+      output.type === ResourceType.RESOURCE ||
+      output.type === ResourceType.PLATE ||
+      output.type === ResourceType.GEAR ||
+      output.type === ResourceType.WIRE ||
+      output.type === ResourceType.ANY;
+  }
+  if (output.type === ResourceType.POWER || input.type === ResourceType.POWER) {
+    return (
+      (output.type === ResourceType.POWER && input.type === ResourceType.POWER) ||
+      (output.type === ResourceType.POWER && input.id === "joint-in")
+    );
+  }
+  return (
+    input.type === ResourceType.ANY ||
+    output.type === input.type ||
+    (input.type === ResourceType.RESOURCE &&
+      (output.type === ResourceType.IRON_ORE ||
+        output.type === ResourceType.COPPER_ORE ||
+        output.type === ResourceType.STONE_CHUNKS ||
+        output.type === ResourceType.FOREST)) ||
+    (input.type === ResourceType.METAL &&
+      (output.type === ResourceType.IRON || output.type === ResourceType.COPPER)) ||
+    (input.type === ResourceType.PLATE &&
+      (output.type === ResourceType.IRON_PLATE || output.type === ResourceType.COPPER_PLATE)) ||
+    (input.type === ResourceType.GEAR &&
+      (output.type === ResourceType.IRON_GEAR || output.type === ResourceType.COPPER_GEAR))
+  );
+};
+
+const getDynamicLogisticsOutputPortIds = (nodeId: NodeId, inputPortId: string) => {
+  if (isSplitterNode(nodeId) && inputPortId === "split-in") {
+    return ["split-a-out", "split-b-out"];
+  }
+  if (
+    isMergerNode(nodeId) &&
+    (inputPortId === "merge-a-in" || inputPortId === "merge-b-in")
+  ) {
+    return ["merge-out"];
+  }
+  if (isJointNode(nodeId) && inputPortId === "joint-in") {
+    return ["joint-out"];
+  }
+  return [];
+};
+
+const getIncompatibleLogisticsOutputConnections = (
+  nodeId: NodeId,
+  inputPortId: string,
+  prospectiveType: ResourceType,
+  connections: Connection[],
+  nodes: NodeSpec[],
+  runtime?: DynamicPortRuntime,
+) => {
+  const nodeMap = Object.fromEntries(nodes.map((node) => [node.id, node]));
+  const incompatible = new Map<string, Connection>();
+  const visited = new Set<string>();
+
+  const inspectOutputs = (currentNodeId: NodeId, currentInputPortId: string) => {
+    const visitKey = `${currentNodeId}:${currentInputPortId}:${prospectiveType}`;
+    if (visited.has(visitKey)) return;
+    visited.add(visitKey);
+    const outputPortIds = new Set(
+      getDynamicLogisticsOutputPortIds(currentNodeId, currentInputPortId),
+    );
+    if (!outputPortIds.size) return;
+
+    connections.forEach((connection) => {
+      if (
+        connection.sourceNode !== currentNodeId ||
+        !outputPortIds.has(connection.sourcePort)
+      ) return;
+      const sourceSpec = nodeMap[currentNodeId]?.outputs.find(
+        (port) => port.id === connection.sourcePort,
+      );
+      const targetSpec = nodeMap[connection.targetNode]?.inputs.find(
+        (port) => port.id === connection.targetPort,
+      );
+      if (!sourceSpec || !targetSpec) {
+        incompatible.set(connection.id, connection);
+        return;
+      }
+      const targetEdges = connections.filter((item) => item.id !== connection.id);
+      const target = runtime
+        ? getRuntimeAwarePort(connection.targetNode, targetSpec, targetEdges, runtime)
+        : getEffectivePort(connection.targetNode, targetSpec, targetEdges);
+      if (!isCompatible({ ...sourceSpec, type: prospectiveType }, target)) {
+        incompatible.set(connection.id, connection);
+        return;
+      }
+
+      // A smart logistics chain carries the proposed type through each idle
+      // router. Validate the full chain so accepting one inlet can never prune
+      // a retained cable farther downstream.
+      inspectOutputs(connection.targetNode, connection.targetPort);
+    });
+  };
+
+  inspectOutputs(nodeId, inputPortId);
+  return Array.from(incompatible.values());
+};
+
+const MultiConnectionSocketTooltip = ({
+  children,
+}: {
+  enabled: boolean;
+  direction: PortDirection;
+  options: NodeConnectionOption[];
+  children: React.ReactElement;
+}) => children;
+
+const getInsertionPlan = (
+  nodeId: NodeId,
+  connection: Connection,
+  nodeMap: Record<NodeId, NodeSpec>,
+  edges: Connection[],
+  runtime?: DynamicPortRuntime,
+): InsertionPlan | null => {
+  if (connection.sourceNode === nodeId || connection.targetNode === nodeId) return null;
+  const node = nodeMap[nodeId];
+  const sourceSpec = nodeMap[connection.sourceNode]?.outputs.find((port) => port.id === connection.sourcePort);
+  const targetSpec = nodeMap[connection.targetNode]?.inputs.find((port) => port.id === connection.targetPort);
+  if (!node) return null;
+  if (!sourceSpec || !targetSpec) return null;
+  const target = runtime
+    ? getRuntimeAwarePort(connection.targetNode, targetSpec, edges, runtime)
+    : getEffectivePort(connection.targetNode, targetSpec, edges);
+  const source = { ...sourceSpec, type: connection.type };
+  const compatibleInputs = node.inputs
+    .filter((port) => !runtime || !isAssemblerPortDisabled(nodeId, port.id, runtime))
+    .map((port) => runtime
+      ? getRuntimeAwarePort(nodeId, port, edges, runtime)
+      : getEffectivePort(nodeId, port, edges))
+    .filter((port) => isCompatible(source, port));
+  const input = compatibleInputs.find(
+    (port) => !edges.some(
+      (edge) => edge.targetNode === nodeId && edge.targetPort === port.id,
+    ),
+  ) ?? compatibleInputs[0];
+  const recipe = EXTRACTOR_RECIPES[connection.type];
+  const mergerType = getMergerInputType(nodeId, edges);
+  const processor = runtime?.processors[nodeId];
+  const smartProcessorInputType = getSmartProcessorInputType(nodeId, edges, processor) ?? connection.type;
+  const smartProcessorOutput = getSmartProcessorOutput(nodeId, smartProcessorInputType, processor);
+  const output = node.outputs
+    .map((port) =>
+      runtime && (isAssemblerNode(nodeId) || isRefinerNode(nodeId))
+        ? getRuntimeAwarePort(nodeId, port, edges, runtime)
+      : isExtractorNode(nodeId) && port.id === "product-out" && recipe
+        ? { ...port, label: recipe.label, type: recipe.product }
+        : isSplitterNode(nodeId) &&
+            (port.id === "split-a-out" || port.id === "split-b-out")
+          ? { ...port, type: connection.type }
+        : isMergerNode(nodeId) && port.id === "merge-out"
+          ? { ...port, type: mergerType ?? connection.type }
+        : isJointNode(nodeId) && port.id === "joint-out"
+          ? { ...port, type: connection.type }
+        : smartProcessorOutput &&
+            ((isFurnaceNode(nodeId) && port.id === "plate-out") ||
+              (isGearPressNode(nodeId) && port.id === "gear-out") ||
+              (isWireMillNode(nodeId) && port.id === "wire-out") ||
+              (isRefinerNode(nodeId) && port.id === "refiner-out"))
+          ? { ...port, ...smartProcessorOutput }
+        : port,
+    )
+    .find((port) => isCompatible(port, target));
+  return input && output ? { connection, input, output } : null;
+};
+
+const normalizeDynamicConnections = (
+  connections: Connection[],
+  nodes: NodeSpec[],
+  runtime?: DynamicPortRuntime,
+) => {
+  const nodeMap = Object.fromEntries(nodes.map((node) => [node.id, node]));
+  let current = connections;
+
+  for (let pass = 0; pass < nodes.length + 2; pass += 1) {
+    let changed = false;
+    const desired = current.map((connection) => {
+      const sourceSpec = nodeMap[connection.sourceNode]?.outputs.find(
+        (port) => port.id === connection.sourcePort,
+      );
+      if (!sourceSpec) return connection;
+      const source = runtime
+        ? getRuntimeAwarePort(connection.sourceNode, sourceSpec, current, runtime)
+        : getEffectivePort(connection.sourceNode, sourceSpec, current);
+      return source.type === connection.type
+        ? connection
+        : { ...connection, type: source.type };
+    });
+
+    for (const connection of desired) {
+      if (
+        runtime &&
+        (
+          isAssemblerPortDisabled(connection.sourceNode, connection.sourcePort, runtime) ||
+          isAssemblerPortDisabled(connection.targetNode, connection.targetPort, runtime)
+        )
+      ) {
+        current = desired.filter((item) => item.id !== connection.id);
+        changed = true;
+        break;
+      }
+      const sourceSpec = nodeMap[connection.sourceNode]?.outputs.find(
+        (port) => port.id === connection.sourcePort,
+      );
+      const targetSpec = nodeMap[connection.targetNode]?.inputs.find(
+        (port) => port.id === connection.targetPort,
+      );
+      if (!sourceSpec || !targetSpec) {
+        current = desired.filter((item) => item.id !== connection.id);
+        changed = true;
+        break;
+      }
+      const source = { ...sourceSpec, type: connection.type };
+      const targetEdges = desired.filter((item) => item.id !== connection.id);
+      const target = runtime
+        ? getRuntimeAwarePort(connection.targetNode, targetSpec, targetEdges, runtime)
+        : getEffectivePort(connection.targetNode, targetSpec, targetEdges);
+      const unresolvedSmartOutput =
+        getSmartProcessorOutputPortId(
+          connection.sourceNode,
+          runtime?.processors[connection.sourceNode],
+        ) === connection.sourcePort &&
+        !getConcreteSmartProcessorMaterialType(
+          connection.sourceNode,
+          source.type,
+          runtime?.processors[connection.sourceNode],
+        );
+      const targetFitsUnresolvedOutputFamily = unresolvedSmartOutput && isCompatible(
+        {
+          id: "prospective-smart-output",
+          label: target.label,
+          type: target.type,
+          direction: "output",
+        },
+        { ...sourceSpec, direction: "input" },
+      );
+      if (!isCompatible(source, target) && !targetFitsUnresolvedOutputFamily) {
+        current = desired.filter((item) => item.id !== connection.id);
+        changed = true;
+        break;
+      }
+    }
+
+    if (changed) continue;
+    changed = desired.some(
+      (connection, index) => connection.type !== current[index]?.type,
+    );
+    current = desired;
+    if (!changed) break;
+  }
+
+  return current;
+};
+
+const connectionsAreEqual = (first: Connection[], second: Connection[]) =>
+  first.length === second.length && first.every((connection, index) => {
+    const candidate = second[index];
+    return Boolean(
+      candidate &&
+      connection.id === candidate.id &&
+      connection.type === candidate.type &&
+      connection.sourceNode === candidate.sourceNode &&
+      connection.sourcePort === candidate.sourcePort &&
+      connection.targetNode === candidate.targetNode &&
+      connection.targetPort === candidate.targetPort,
+    );
+  });
+
+const getCurveControlPoints = (start: Position, end: Position, sourcePortId?: string) => {
+  const deltaX = end.x - start.x;
+  const horizontalDistance = deltaX >= 0
+    ? deltaX * 0.45
+    : Math.max(82, Math.abs(deltaX) * 0.52);
+  if (sourcePortId === "power-split-top" || sourcePortId === "power-split-bottom") {
+    const direction = sourcePortId === "power-split-top" ? -1 : 1;
+    const verticalDistance = Math.max(72, Math.abs(end.y - start.y) * 0.38);
+    return {
+      first: { x: start.x, y: start.y + direction * verticalDistance },
+      second: { x: end.x - horizontalDistance, y: end.y },
+    };
+  }
+  return {
+    first: { x: start.x + horizontalDistance, y: start.y },
+    second: { x: end.x - horizontalDistance, y: end.y },
+  };
+};
+
+const getCurve = (start: Position, end: Position, sourcePortId?: string) => {
+  const controls = getCurveControlPoints(start, end, sourcePortId);
+  return `M ${start.x} ${start.y} C ${controls.first.x} ${controls.first.y}, ${controls.second.x} ${controls.second.y}, ${end.x} ${end.y}`;
+};
+
+const getCurveMidpoint = (start: Position, end: Position, sourcePortId?: string) => {
+  const controls = getCurveControlPoints(start, end, sourcePortId);
+  return {
+    x: (start.x + 3 * controls.first.x + 3 * controls.second.x + end.x) / 8,
+    y: (start.y + 3 * controls.first.y + 3 * controls.second.y + end.y) / 8,
+  };
+};
+
+const MIN_ZOOM = 0.45;
+const MAX_ZOOM = 1.8;
+const clampZoom = (value: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+const getPortZoomScale = (value: number) => 1 + Math.max(0, 1 - value) * 0.65;
+const hasPlatformInsertModifier = (event: { metaKey: boolean; ctrlKey: boolean }) => {
+  const platform = typeof navigator === "undefined" ? "" : navigator.platform || navigator.userAgent;
+  return /Mac|iPhone|iPad|iPod/i.test(platform) ? event.metaKey : event.ctrlKey;
+};
+
+export default function Home() {
+  const [nodes, setNodes] = useState<NodeSpec[]>(INITIAL_NODES);
+  const [positions, setPositions] = useState<Positions>(INITIAL_POSITIONS);
+  const [connections, setConnections] = useState<Connection[]>(INITIAL_CONNECTIONS);
+  const [runtime, setRuntime] = useState<Runtime>(makeRuntime);
+  const [isRunning, setIsRunning] = useState(true);
+  const [connecting, setConnecting] = useState<PortHandle | null>(null);
+  const [hoveredPort, setHoveredPort] = useState<PortHandle | null>(null);
+  const [snappedPort, setSnappedPort] = useState<PortHandle | null>(null);
+  const [wirePointer, setWirePointer] = useState<Position | null>(null);
+  const [rewiringConnectionId, setRewiringConnectionId] = useState<string | null>(null);
+  const [anchors, setAnchors] = useState<Record<string, Position>>({});
+  const [activeFlows, setActiveFlows] = useState<Record<string, number>>({});
+  const [selectedConnection, setSelectedConnection] = useState<string | null>(null);
+  const [selectedNodes, setSelectedNodes] = useState<NodeId[]>([]);
+  const [controlGroups, setControlGroups] = useState<ControlGroup[]>([]);
+  const [activeControlGroupId, setActiveControlGroupId] = useState<string | null>(null);
+  const [individualControlNodeId, setIndividualControlNodeId] = useState<NodeId | null>(null);
+  const [pendingControlGroupNodeIds, setPendingControlGroupNodeIds] = useState<NodeId[]>([]);
+  const [controlGroupOnboardingOpen, setControlGroupOnboardingOpen] = useState(false);
+  const [suppressControlGroupTutorial, setSuppressControlGroupTutorial] = useState(false);
+  const [controlGroupColorOpen, setControlGroupColorOpen] = useState(false);
+  const [pendingDisbandControlGroupId, setPendingDisbandControlGroupId] = useState<string | null>(null);
+  const [disbandControlGroupOpen, setDisbandControlGroupOpen] = useState(false);
+  const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
+  const [draggingNode, setDraggingNode] = useState<NodeId | null>(null);
+  const [zoom, setZoom] = useState(MIN_ZOOM);
+  const [viewportSize, setViewportSize] = useState({ width: 1160, height: 690 });
+  const [insertionTarget, setInsertionTarget] = useState<string | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
+  const [buildOpen, setBuildOpen] = useState(false);
+  const [researchOpen, setResearchOpen] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
+  const [selectedMapSector, setSelectedMapSector] = useState<string | null>(null);
+  const [mapNodeProgress, setMapNodeProgress] = useState<MapNodeProgressBySector>(
+    makeInitialMapNodeProgress,
+  );
+  const [journalOpen, setJournalOpen] = useState(false);
+  const [journalCategory, setJournalCategory] = useState<BuildCategory>("all");
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [wireAnimationsEnabled, setWireAnimationsEnabled] = useState(true);
+  const [shortcutBars, setShortcutBars] = useState<ShortcutBarsState>(makeDefaultShortcutBars);
+  const [removeBuildCosts, setRemoveBuildCosts] = useState(false);
+  const [devOpen, setDevOpen] = useState(false);
+  const [saveSlots, setSaveSlots] = useState<Array<SaveGameSlot | null>>(makeEmptySaveSlots);
+  const [saveNames, setSaveNames] = useState<string[]>(makeDefaultSaveNames);
+  const [pendingLoadSlot, setPendingLoadSlot] = useState<number | null>(null);
+  const [loadConfirmOpen, setLoadConfirmOpen] = useState(false);
+  const [showBuildableOnly, setShowBuildableOnly] = useState(false);
+  const [showNeverBuiltOnly, setShowNeverBuiltOnly] = useState(false);
+  const [compactBuildView, setCompactBuildView] = useState(false);
+  const [buildCategory, setBuildCategory] = useState<BuildCategory>("all");
+  const [showAllBuildNodes, setShowAllBuildNodes] = useState(false);
+  const [revealedBuildKinds, setRevealedBuildKinds] = useState<Set<PurchasableKind>>(
+    () => new Set(["extractor", "woodenChest"]),
+  );
+  const [builtBuildKinds, setBuiltBuildKinds] = useState<Set<PurchasableKind>>(
+    () => new Set(["extractor"]),
+  );
+  const [placedBuildKinds, setPlacedBuildKinds] = useState<Set<PurchasableKind>>(
+    () => new Set(),
+  );
+  const [newBuildKinds, setNewBuildKinds] = useState<Set<PurchasableKind>>(() => new Set());
+  const [unlockTimes, setUnlockTimes] = useState<UnlockTimes>(() => ({
+    extractor: 0,
+    woodenChest: 0,
+  }));
+  const [buildAttention, setBuildAttention] = useState(false);
+  const [journalAttention, setJournalAttention] = useState(false);
+  const [logisticsUnlocked, setLogisticsUnlocked] = useState(false);
+  const [configuringFilterId, setConfiguringFilterId] = useState<NodeId | null>(null);
+  const [configuringMiningDrillId, setConfiguringMiningDrillId] = useState<NodeId | null>(null);
+  const [configuringAssemblerId, setConfiguringAssemblerId] = useState<NodeId | null>(null);
+  const [pendingAssemblerRecipeChange, setPendingAssemblerRecipeChange] = useState<{
+    nodeId: NodeId;
+    kind: "assembler" | "refiner";
+    recipeId: AssemblerRecipeId | RefinerRecipeId;
+  } | null>(null);
+  const [assemblerRecipeChangeDialogOpen, setAssemblerRecipeChangeDialogOpen] = useState(false);
+  const [suppressFutureAssemblerRecipeWarnings, setSuppressFutureAssemblerRecipeWarnings] = useState(false);
+  const [alwaysApproveAssemblerRecipeChanges, setAlwaysApproveAssemblerRecipeChanges] = useState(false);
+  const [placingNodeId, setPlacingNodeId] = useState<NodeId | null>(null);
+  const [placementBlocked, setPlacementBlocked] = useState(false);
+  const [dragCollisionBlocked, setDragCollisionBlocked] = useState(false);
+  const [pendingDeletionNodeIds, setPendingDeletionNodeIds] = useState<NodeId[]>([]);
+  const [destroyDialogOpen, setDestroyDialogOpen] = useState(false);
+  const [pendingDeletionIsHighlightedGroup, setPendingDeletionIsHighlightedGroup] = useState(false);
+  const [suppressFutureNodeDestructionWarnings, setSuppressFutureNodeDestructionWarnings] = useState(false);
+  const [pendingDeletionConnectionId, setPendingDeletionConnectionId] = useState<string | null>(null);
+  const [connectionDeleteDialogOpen, setConnectionDeleteDialogOpen] = useState(false);
+  const [suppressFutureConnectionDeleteWarnings, setSuppressFutureConnectionDeleteWarnings] = useState(false);
+  const [alwaysDeleteConnections, setAlwaysDeleteConnections] = useState(false);
+  const [alwaysApproveNodeDestruction, setAlwaysApproveNodeDestruction] = useState(false);
+  const [inventoryOverflowPrompt, setInventoryOverflowPrompt] = useState<InventoryOverflowPrompt | null>(null);
+  const [inventoryOverflowDialogOpen, setInventoryOverflowDialogOpen] = useState(false);
+  const [suppressFutureInventoryOverflowWarnings, setSuppressFutureInventoryOverflowWarnings] = useState(false);
+  const [managedMultiPort, setManagedMultiPort] = useState<{
+    nodeId: NodeId;
+    portId: string;
+    direction: PortDirection;
+  } | null>(null);
+  const [multiConnectionManagerOpen, setMultiConnectionManagerOpen] = useState(false);
+  const [pendingDeletionDetails, setPendingDeletionDetails] = useState<{
+    count: number;
+    title: string;
+  } | null>(null);
+
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const destroyConfirmButtonRef = useRef<HTMLButtonElement>(null);
+  const mapViewportRef = useRef<HTMLDivElement>(null);
+  const buildOpenRef = useRef(false);
+  const gameElapsedMsRef = useRef(0);
+  const portRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const snappedPortRef = useRef<PortHandle | null>(null);
+  const nodeRefs = useRef<Record<NodeId, HTMLElement | null>>({});
+  const pathRefs = useRef<Record<string, SVGPathElement | null>>({});
+  const nodesRef = useRef(nodes);
+  const selectedNodesRef = useRef(selectedNodes);
+  const controlGroupsRef = useRef(controlGroups);
+  const individualControlNodeRef = useRef<NodeId | null>(null);
+  const controlGroupTutorialSuppressedRef = useRef(false);
+  const inventoryOverflowActionRef = useRef<(() => void) | null>(null);
+  const inventoryOverflowWarningSuppressedRef = useRef(false);
+  const controlGroupSequenceRef = useRef(0);
+  const runtimeRef = useRef(runtime);
+  const logisticsUnlockedRef = useRef(false);
+  const connectionsRef = useRef(connections);
+  const positionsRef = useRef(positions);
+  const isRunningRef = useRef(isRunning);
+  const zoomRef = useRef(zoom);
+  const lastSimulationTickRef = useRef(0);
+  const lastSimulationUiUpdateRef = useRef(0);
+  const lastPublishedRuntimeSignatureRef = useRef<string | null>(null);
+  const pendingActiveFlowIdsRef = useRef(new Set<string>());
+  const wireAnimationsEnabledRef = useRef(true);
+  const trackpadGestureUntilRef = useRef(0);
+  const pinchFrameRef = useRef<number | null>(null);
+  const pinchTargetZoomRef = useRef(zoom);
+  const pinchAnchorRef = useRef({ clientX: 0, clientY: 0, activeUntil: 0 });
+  const connectionDragRef = useRef<{
+    startX: number;
+    startY: number;
+    clientX: number;
+    clientY: number;
+    moved: boolean;
+    connectionStart: PortHandle;
+    replaceConnectionId?: string;
+    originNodeId: NodeId;
+    originPortId: string;
+    originPortDirection: PortDirection;
+  } | null>(null);
+  const insertionTargetRef = useRef<string | null>(null);
+  const spacePressedRef = useRef(false);
+  const didInitialFocusRef = useRef(false);
+  const placingNodeRef = useRef<NodeId | null>(null);
+  const repeatPlacementPreviewRef = useRef<{
+    nodeId: NodeId;
+    lastPlacedNodeId: NodeId;
+  } | null>(null);
+  const placementBlockedRef = useRef(false);
+  const lastCanvasPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const buildSequenceRef = useRef<BuildSequence>(makeBuildSequence());
+  const panRef = useRef<{
+    startX: number;
+    startY: number;
+    scrollLeft: number;
+    scrollTop: number;
+    moved: boolean;
+    nodeId?: NodeId;
+    contextMenuHandled: boolean;
+  } | null>(null);
+  const suppressedNodeContextMenuRef = useRef<{
+    nodeId: NodeId;
+    until: number;
+  } | null>(null);
+  const selectionBoxRef = useRef<(SelectionBox & {
+    baseSelection: NodeId[];
+    currentSelection: NodeId[];
+    moved: boolean;
+  }) | null>(null);
+  const dragRef = useRef<{
+    primaryNodeId: NodeId;
+    nodeIds: NodeId[];
+    startX: number;
+    startY: number;
+    origins: Partial<Positions>;
+    lastValidPositions: Partial<Positions>;
+    overlapping: boolean;
+    moved: boolean;
+  } | null>(null);
+  const undoHistoryRef = useRef<UndoEntry[]>([]);
+  const pendingPlacementUndoRef = useRef<{
+    nodeId: NodeId;
+    snapshot: GraphUndoSnapshot;
+  } | null>(null);
+
+  useEffect(() => {
+    const now = performance.now();
+    lastSimulationTickRef.current = now;
+    lastSimulationUiUpdateRef.current = now;
+  }, []);
+
+  useEffect(() => {
+    try {
+      const storedPreference = window.localStorage.getItem(WIRE_ANIMATION_STORAGE_KEY);
+      if (storedPreference === null) return;
+      const enabled = storedPreference !== "false";
+      wireAnimationsEnabledRef.current = enabled;
+      setWireAnimationsEnabled(enabled);
+    } catch {
+      // Visual preferences can safely fall back to their default when storage is unavailable.
+    }
+  }, []);
+
+  const toggleWireAnimations = useCallback(() => {
+    const enabled = !wireAnimationsEnabledRef.current;
+    wireAnimationsEnabledRef.current = enabled;
+    setWireAnimationsEnabled(enabled);
+    if (!enabled) {
+      pendingActiveFlowIdsRef.current.clear();
+      setActiveFlows({});
+    }
+    try {
+      window.localStorage.setItem(WIRE_ANIMATION_STORAGE_KEY, String(enabled));
+    } catch {
+      // The toggle still applies for this session when browser storage is unavailable.
+    }
+  }, []);
+
+  const updateShortcutBar = useCallback((
+    barId: ShortcutBarId,
+    updater: (current: ShortcutBarConfig) => ShortcutBarConfig,
+  ) => {
+    setShortcutBars((current) => ({
+      ...current,
+      [barId]: updater(current[barId]),
+    }));
+  }, []);
+
+  const toggleShortcutBarVisibility = useCallback((barId: ShortcutBarId) => {
+    updateShortcutBar(barId, (current) => ({ ...current, visible: !current.visible }));
+  }, [updateShortcutBar]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SAVE_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) throw new Error("Save data is not a slot list.");
+      const nextSlots = makeEmptySaveSlots();
+      for (let index = 0; index < SAVE_SLOT_COUNT; index += 1) {
+        const candidate = parsed[index];
+        if (candidate == null) continue;
+        if (!isSaveGameSlot(candidate)) throw new Error(`Save slot ${index + 1} is invalid.`);
+        nextSlots[index] = candidate;
+      }
+      setSaveSlots(nextSlots);
+      setSaveNames(nextSlots.map((slot, index) => slot?.name ?? `Save ${index + 1}`));
+    } catch {
+      toast.error("Local saves could not be read", {
+        description: "The existing save data is incompatible or damaged. New saves can still overwrite it.",
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  useEffect(() => {
+    selectedNodesRef.current = selectedNodes;
+  }, [selectedNodes]);
+
+  useEffect(() => {
+    controlGroupsRef.current = controlGroups;
+  }, [controlGroups]);
+
+  useEffect(() => {
+    individualControlNodeRef.current = individualControlNodeId;
+  }, [individualControlNodeId]);
+
+  useEffect(() => {
+    if (!mapOpen) return;
+    const frame = window.requestAnimationFrame(() => {
+      const viewport = mapViewportRef.current;
+      if (!viewport) return;
+      viewport.scrollLeft = (viewport.scrollWidth - viewport.clientWidth) / 2;
+      viewport.scrollTop = (viewport.scrollHeight - viewport.clientHeight) / 2;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [mapOpen]);
+
+  useEffect(() => {
+    runtimeRef.current = runtime;
+  }, [runtime]);
+
+  useEffect(() => {
+    connectionsRef.current = connections;
+  }, [connections]);
+
+  useEffect(() => {
+    positionsRef.current = positions;
+  }, [positions]);
+
+  useEffect(() => {
+    isRunningRef.current = isRunning;
+  }, [isRunning]);
+
+  const controlGroupByNodeId = useMemo(() => {
+    const groups = new Map<NodeId, ControlGroup>();
+    controlGroups.forEach((group) => {
+      group.nodeIds.forEach((nodeId) => groups.set(nodeId, group));
+    });
+    return groups;
+  }, [controlGroups]);
+
+  const announceMultiNodeSelection = useCallback((nodeIds: Iterable<NodeId>) => {
+    const availableNodeIds = new Set(nodesRef.current.map((node) => node.id));
+    const selectedCount = Array.from(new Set(nodeIds)).filter(
+      (nodeId) => availableNodeIds.has(nodeId),
+    ).length;
+    if (selectedCount < 2 || controlGroupTutorialSuppressedRef.current) return;
+
+    setSuppressControlGroupTutorial(false);
+    setControlGroupOnboardingOpen(true);
+  }, []);
+
+  const requestControlGroupCreation = useCallback((nodeIds: Iterable<NodeId>) => {
+    const availableNodeIds = new Set(nodesRef.current.map((node) => node.id));
+    const nextNodeIds = Array.from(new Set(nodeIds)).filter((nodeId) => availableNodeIds.has(nodeId));
+    if (nextNodeIds.length < 2) return;
+    selectedNodesRef.current = nextNodeIds;
+    setSelectedNodes(nextNodeIds);
+    setActiveControlGroupId(null);
+    individualControlNodeRef.current = null;
+    setIndividualControlNodeId(null);
+    setPendingControlGroupNodeIds(nextNodeIds);
+    setControlGroupColorOpen(true);
+  }, []);
+
+  const createControlGroup = useCallback((color: typeof CONTROL_GROUP_COLORS[number]) => {
+    const availableNodeIds = new Set(nodesRef.current.map((node) => node.id));
+    const nodeIds = Array.from(new Set(pendingControlGroupNodeIds))
+      .filter((nodeId) => availableNodeIds.has(nodeId));
+    if (nodeIds.length < 2) {
+      setControlGroupColorOpen(false);
+      setPendingControlGroupNodeIds([]);
+      return;
+    }
+
+    const groupedNodeIds = new Set(nodeIds);
+    const group: ControlGroup = {
+      id: `control-group-${Date.now()}-${++controlGroupSequenceRef.current}`,
+      nodeIds,
+      color: color.value,
+      colorName: color.name,
+    };
+    const nextGroups = controlGroupsRef.current
+      .map((current) => ({
+        ...current,
+        nodeIds: current.nodeIds.filter((nodeId) => !groupedNodeIds.has(nodeId)),
+      }))
+      .filter((current) => current.nodeIds.length >= 2)
+      .concat(group);
+    controlGroupsRef.current = nextGroups;
+    setControlGroups(nextGroups);
+    selectedNodesRef.current = nodeIds;
+    setSelectedNodes(nodeIds);
+    setActiveControlGroupId(group.id);
+    individualControlNodeRef.current = null;
+    setIndividualControlNodeId(null);
+    setPendingControlGroupNodeIds([]);
+    setControlGroupColorOpen(false);
+    toast.success(`${color.name} control group created`, {
+      description: `${nodeIds.length} nodes will select and move together.`,
+    });
+  }, [pendingControlGroupNodeIds]);
+
+  const disbandControlGroup = useCallback((groupId: string) => {
+    const group = controlGroupsRef.current.find((candidate) => candidate.id === groupId);
+    if (!group) return;
+    const nextGroups = controlGroupsRef.current.filter((candidate) => candidate.id !== groupId);
+    controlGroupsRef.current = nextGroups;
+    setControlGroups(nextGroups);
+    setActiveControlGroupId((current) => current === groupId ? null : current);
+    if (individualControlNodeRef.current && group.nodeIds.includes(individualControlNodeRef.current)) {
+      individualControlNodeRef.current = null;
+    }
+    setIndividualControlNodeId((current) => current && group.nodeIds.includes(current) ? null : current);
+    setPendingDisbandControlGroupId(null);
+    setDisbandControlGroupOpen(false);
+    inventoryOverflowActionRef.current = null;
+    setInventoryOverflowPrompt(null);
+    setInventoryOverflowDialogOpen(false);
+    toast.success("Control group disbanded", {
+      description: `${group.nodeIds.length} nodes remain in place and can be controlled separately.`,
+    });
+  }, []);
+
+  const requestInventoryOverflowConfirmation = useCallback((
+    prompt: InventoryOverflowPrompt,
+    onConfirm: () => void,
+  ) => {
+    inventoryOverflowActionRef.current = onConfirm;
+    setInventoryOverflowPrompt(prompt);
+    setSuppressFutureInventoryOverflowWarnings(false);
+    setConnectionDeleteDialogOpen(false);
+    setPendingDeletionConnectionId(null);
+    setMultiConnectionManagerOpen(false);
+    setManagedMultiPort(null);
+    setInventoryOverflowDialogOpen(true);
+  }, []);
+
+  const rememberInventoryOverflowSuppression = useCallback(() => {
+    inventoryOverflowWarningSuppressedRef.current = true;
+  }, []);
+
+  const confirmInventoryOverflow = useCallback(() => {
+    const action = inventoryOverflowActionRef.current;
+    const discardedCount = inventoryOverflowPrompt?.loss.reduce(
+      (total, [, amount]) => total + amount,
+      0,
+    ) ?? 0;
+    if (suppressFutureInventoryOverflowWarnings) {
+      rememberInventoryOverflowSuppression();
+    }
+    inventoryOverflowActionRef.current = null;
+    setInventoryOverflowDialogOpen(false);
+    setInventoryOverflowPrompt(null);
+    setSuppressFutureInventoryOverflowWarnings(false);
+    action?.();
+    if (action && discardedCount > 0) {
+      toast.warning("Action completed with material loss", {
+        description: `${discardedCount} overflow ${discardedCount === 1 ? "item was" : "items were"} permanently destroyed.`,
+      });
+    }
+  }, [
+    inventoryOverflowPrompt,
+    rememberInventoryOverflowSuppression,
+    suppressFutureInventoryOverflowWarnings,
+  ]);
+
+  useLayoutEffect(() => {
+    const viewport = workspaceRef.current;
+    if (!viewport) return;
+    const updateSize = () => {
+      const next = { width: viewport.clientWidth, height: viewport.clientHeight };
+      setViewportSize((current) =>
+        current.width === next.width && current.height === next.height ? current : next,
+      );
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
+
+  const measureAnchors = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const canvasRect = canvas.getBoundingClientRect();
+    const next: Record<string, Position> = {};
+    Object.entries(portRefs.current).forEach(([key, element]) => {
+      if (!element) return;
+      const rect = element.getBoundingClientRect();
+      next[key] = {
+        x: (rect.left - canvasRect.left + rect.width / 2) / zoomRef.current,
+        y: (rect.top - canvasRect.top + rect.height / 2) / zoomRef.current,
+      };
+    });
+    setAnchors(next);
+  }, []);
+
+  useEffect(() => {
+    const shouldEnable = runtime.research.treePlanterUnlocked;
+    const forest = nodesRef.current.find((node) => node.kind === "forest");
+    const isEnabled = Boolean(
+      forest?.inputs.some((port) => port.id === FOREST_GROWTH_INPUT.id),
+    );
+    if (!forest || shouldEnable === isEnabled) return;
+
+    const nextNodes = nodesRef.current.map((node) =>
+      node.kind === "forest"
+        ? {
+            ...node,
+            inputs: shouldEnable
+              ? [...node.inputs, FOREST_GROWTH_INPUT]
+              : node.inputs.filter((port) => port.id !== FOREST_GROWTH_INPUT.id),
+          }
+        : node,
+    );
+    nodesRef.current = nextNodes;
+    setNodes(nextNodes);
+
+    if (!shouldEnable) {
+      const nextConnections = connectionsRef.current.filter(
+        (connection) =>
+          connection.targetNode !== forest.id ||
+          connection.targetPort !== FOREST_GROWTH_INPUT.id,
+      );
+      connectionsRef.current = nextConnections;
+      setConnections(nextConnections);
+    }
+
+    window.requestAnimationFrame(measureAnchors);
+  }, [measureAnchors, runtime.research.treePlanterUnlocked]);
+
+  const updateGridPosition = useCallback(() => {
+    const viewport = workspaceRef.current;
+    if (!viewport) return;
+    const minor = 24 * zoomRef.current;
+    const major = 120 * zoomRef.current;
+    viewport.style.setProperty("--minor-grid-x", `${-(viewport.scrollLeft % minor)}px`);
+    viewport.style.setProperty("--minor-grid-y", `${-(viewport.scrollTop % minor)}px`);
+    viewport.style.setProperty("--major-grid-x", `${-(viewport.scrollLeft % major)}px`);
+    viewport.style.setProperty("--major-grid-y", `${-(viewport.scrollTop % major)}px`);
+  }, []);
+
+  const handleWorkspaceScroll = useCallback(() => {
+    updateGridPosition();
+  }, [updateGridPosition]);
+
+  useLayoutEffect(() => {
+    measureAnchors();
+  }, [measureAnchors, positions, viewportSize]);
+
+  useEffect(() => {
+    window.addEventListener("resize", measureAnchors);
+    return () => window.removeEventListener("resize", measureAnchors);
+  }, [measureAnchors]);
+
+  const focusHome = useCallback(() => {
+    const viewport = workspaceRef.current;
+    if (!viewport) return;
+    window.requestAnimationFrame(() => {
+      viewport.scrollLeft = HOME_OFFSET.x * zoomRef.current;
+      viewport.scrollTop = HOME_OFFSET.y * zoomRef.current;
+      updateGridPosition();
+      measureAnchors();
+    });
+  }, [measureAnchors, updateGridPosition]);
+
+  useLayoutEffect(() => {
+    if (didInitialFocusRef.current || viewportSize.width <= 0 || viewportSize.height <= 0) return;
+    didInitialFocusRef.current = true;
+    focusHome();
+  }, [focusHome, viewportSize]);
+
+  const pointFromEvent = useCallback((clientX: number, clientY: number): Position => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (clientX - rect.left) / zoomRef.current,
+      y: (clientY - rect.top) / zoomRef.current,
+    };
+  }, []);
+
+  const updateSnappedPort = useCallback((next: PortHandle | null) => {
+    snappedPortRef.current = next;
+    setSnappedPort((current) => {
+      if (
+        current?.nodeId === next?.nodeId &&
+        current?.port.id === next?.port.id
+      ) return current;
+      return next;
+    });
+  }, []);
+
+  const updatePlacementBlocked = useCallback((blocked: boolean) => {
+    placementBlockedRef.current = blocked;
+    setPlacementBlocked((current) => current === blocked ? current : blocked);
+  }, []);
+
+  const captureGraphUndoSnapshot = useCallback((): GraphUndoSnapshot => ({
+    nodes: nodesRef.current.map((node) => ({
+      ...node,
+      inputs: node.inputs.map((port) => ({ ...port })),
+      outputs: node.outputs.map((port) => ({ ...port })),
+    })),
+    positions: Object.fromEntries(
+      Object.entries(positionsRef.current).map(([nodeId, position]) => [
+        nodeId,
+        { ...position },
+      ]),
+    ),
+    connections: connectionsRef.current.map((connection) => ({ ...connection })),
+    runtime: structuredClone(runtimeRef.current),
+    controlGroups: controlGroupsRef.current.map((group) => ({
+      ...group,
+      nodeIds: [...group.nodeIds],
+    })),
+  }), []);
+
+  const pushUndoEntry = useCallback((entry: UndoEntry) => {
+    const history = undoHistoryRef.current;
+    undoHistoryRef.current = [
+      ...history.slice(Math.max(0, history.length - MAX_UNDO_HISTORY + 1)),
+      entry,
+    ];
+  }, []);
+
+  const restoreGraphUndoSnapshot = useCallback((snapshot: GraphUndoSnapshot) => {
+    if (!snapshot.nodes.some((node) => isExtractorKind(node.kind))) {
+      toast.error("At least one extractor must remain on the field.");
+      return false;
+    }
+
+    const restoredNodes = snapshot.nodes.map((node) => ({
+      ...node,
+      inputs: node.inputs.map((port) => ({ ...port })),
+      outputs: node.outputs.map((port) => ({ ...port })),
+    }));
+    const restoredPositions = Object.fromEntries(
+      Object.entries(snapshot.positions).map(([nodeId, position]) => [
+        nodeId,
+        { ...position },
+      ]),
+    );
+    const restoredConnections = snapshot.connections.map((connection) => ({ ...connection }));
+    const restoredRuntime = structuredClone(snapshot.runtime);
+    const restoredControlGroups = snapshot.controlGroups.map((group) => ({
+      ...group,
+      nodeIds: [...group.nodeIds],
+    }));
+
+    nodesRef.current = restoredNodes;
+    positionsRef.current = restoredPositions;
+    connectionsRef.current = restoredConnections;
+    runtimeRef.current = restoredRuntime;
+    controlGroupsRef.current = restoredControlGroups;
+    setNodes(restoredNodes);
+    setPositions(restoredPositions);
+    setConnections(restoredConnections);
+    setRuntime(restoredRuntime);
+    setControlGroups(restoredControlGroups);
+    setActiveFlows({});
+    setSelectedConnection(null);
+    selectedNodesRef.current = [];
+    setSelectedNodes([]);
+    setActiveControlGroupId(null);
+    individualControlNodeRef.current = null;
+    setIndividualControlNodeId(null);
+    setPendingControlGroupNodeIds([]);
+    setPendingDeletionNodeIds([]);
+    setPendingDeletionDetails(null);
+    setPendingDeletionIsHighlightedGroup(false);
+    setSuppressFutureNodeDestructionWarnings(false);
+    setDestroyDialogOpen(false);
+    setPendingDeletionConnectionId(null);
+    setConnectionDeleteDialogOpen(false);
+    inventoryOverflowActionRef.current = null;
+    setInventoryOverflowPrompt(null);
+    setInventoryOverflowDialogOpen(false);
+    connectionDragRef.current = null;
+    updateSnappedPort(null);
+    setConnecting(null);
+    setHoveredPort(null);
+    setWirePointer(null);
+    setRewiringConnectionId(null);
+    placingNodeRef.current = null;
+    repeatPlacementPreviewRef.current = null;
+    pendingPlacementUndoRef.current = null;
+    setPlacingNodeId(null);
+    updatePlacementBlocked(false);
+    insertionTargetRef.current = null;
+    setInsertionTarget(null);
+    dragRef.current = null;
+    setDraggingNode(null);
+    setDragCollisionBlocked(false);
+    lastSimulationTickRef.current = performance.now();
+    lastPublishedRuntimeSignatureRef.current = null;
+    window.requestAnimationFrame(measureAnchors);
+    return true;
+  }, [measureAnchors, updatePlacementBlocked, updateSnappedPort]);
+
+  const undoLastAction = useCallback(() => {
+    const pendingPlacement = pendingPlacementUndoRef.current;
+    if (placingNodeRef.current && pendingPlacement) {
+      return restoreGraphUndoSnapshot(pendingPlacement.snapshot);
+    }
+
+    const entry = undoHistoryRef.current.pop();
+    if (!entry) return false;
+    if (entry.kind === "graph") {
+      if (!restoreGraphUndoSnapshot(entry.snapshot)) {
+        undoHistoryRef.current.push(entry);
+        return false;
+      }
+      return true;
+    }
+
+    const availableNodeIds = new Set(nodesRef.current.map((node) => node.id));
+    const restoredNodeIds = Object.keys(entry.positions).filter((nodeId) =>
+      availableNodeIds.has(nodeId),
+    );
+    if (!restoredNodeIds.length) return true;
+    const restoredPositions = { ...positionsRef.current };
+    restoredNodeIds.forEach((nodeId) => {
+      const position = entry.positions[nodeId];
+      if (position) restoredPositions[nodeId] = { ...position };
+    });
+    positionsRef.current = restoredPositions;
+    setPositions(restoredPositions);
+    selectedNodesRef.current = restoredNodeIds;
+    setSelectedNodes(restoredNodeIds);
+    setSelectedConnection(null);
+    window.requestAnimationFrame(measureAnchors);
+    return true;
+  }, [measureAnchors, restoreGraphUndoSnapshot]);
+
+  const getNodeSize = useCallback((nodeId: NodeId, fallbackNode?: NodeSpec): NodeSize => {
+    const element = nodeRefs.current[nodeId];
+    if (element?.offsetWidth && element.offsetHeight) {
+      return { width: element.offsetWidth, height: element.offsetHeight };
+    }
+    const node = fallbackNode ?? nodesRef.current.find((candidate) => candidate.id === nodeId);
+    return node ? getEstimatedNodeSize(node) : { width: 258, height: 201 };
+  }, []);
+
+  const overlapsAnotherNode = useCallback((
+    node: NodeSpec,
+    position: Position,
+    ignoredNodeIds: ReadonlySet<NodeId> = new Set([node.id]),
+  ) => {
+    const size = getNodeSize(node.id, node);
+    const candidateRect = { ...position, ...size };
+    return nodesRef.current.some((otherNode) => {
+      if (ignoredNodeIds.has(otherNode.id)) return false;
+      const otherPosition = positionsRef.current[otherNode.id];
+      if (!otherPosition) return false;
+      return rectanglesOverlap(
+        candidateRect,
+        { ...otherPosition, ...getNodeSize(otherNode.id, otherNode) },
+      );
+    });
+  }, [getNodeSize]);
+
+  const buildNode = useCallback((
+    kind: PurchasableKind,
+    recipe: BuildIngredient[],
+    repeatOriginNodeId?: NodeId,
+  ) => {
+    const unlockContext: BuildUnlockContext = {
+      runtime: runtimeRef.current,
+      builtKinds: builtBuildKinds,
+      logisticsUnlocked: logisticsUnlockedRef.current,
+    };
+    if (
+      !revealedBuildKinds.has(kind) &&
+      !isBuildUnlockSatisfied(kind, unlockContext)
+    ) return;
+    const paymentDeferred = Boolean(repeatOriginNodeId) && !removeBuildCosts;
+    const availability = paymentDeferred
+      ? getBuildMaterialAvailability(
+          runtimeRef.current,
+          nodesRef.current,
+          connectionsRef.current,
+        )
+      : null;
+    const buildRuntime = removeBuildCosts
+      ? runtimeRef.current
+      : paymentDeferred
+        ? recipe.every((ingredient) =>
+            (availability?.[ingredient.type].total ?? 0) >= ingredient.amount,
+          )
+          ? runtimeRef.current
+          : null
+        : consumeBuildIngredients(
+            runtimeRef.current,
+            recipe,
+            nodesRef.current,
+            connectionsRef.current,
+          );
+    if (!buildRuntime) return;
+    const placementUndoSnapshot = captureGraphUndoSnapshot();
+    setBuiltBuildKinds((current) => new Set(current).add(kind));
+    setRevealedBuildKinds((current) => new Set(current).add(kind));
+    setNewBuildKinds((current) => {
+      if (!current.has(kind)) return current;
+      const next = new Set(current);
+      next.delete(kind);
+      return next;
+    });
+    const currentSequence = buildSequenceRef.current[kind];
+    const sequence = (Number.isFinite(currentSequence) ? currentSequence : 0) + 1;
+    buildSequenceRef.current[kind] = sequence;
+    const id = `${kind}-${Date.now()}-${sequence}`;
+    const node = createBuildableNode(kind, id, sequence);
+    const viewport = workspaceRef.current;
+    const bounds = viewport?.getBoundingClientRect();
+    const pointer = lastCanvasPointerRef.current ?? {
+      x: bounds ? bounds.left + bounds.width / 2 : window.innerWidth / 2,
+      y: bounds ? bounds.top + bounds.height / 2 : window.innerHeight / 2,
+    };
+    const worldPoint = pointFromEvent(pointer.x, pointer.y);
+    const { width: placementWidth, height: placementHeight } = getEstimatedNodeSize(node);
+    const placementOffsetY = kind === "joint" || kind === "powerSplitter" || kind === "woodenChest"
+      ? placementHeight / 2
+      : 42;
+    const position = {
+      x: Math.max(12, Math.min(WORLD_SIZE.width - placementWidth - 12, worldPoint.x - placementWidth / 2)),
+      y: Math.max(52, Math.min(WORLD_SIZE.height - placementHeight - 12, worldPoint.y - placementOffsetY)),
+    };
+    updatePlacementBlocked(overlapsAnotherNode(node, position));
+
+    const nextNodes = [...nodesRef.current, node];
+    nodesRef.current = nextNodes;
+    setNodes(nextNodes);
+    const nextPositions = { ...positionsRef.current, [id]: position };
+    positionsRef.current = nextPositions;
+    setPositions(nextPositions);
+    setRuntime(() => {
+      const current = buildRuntime;
+      const machineRuntime = isExtractorKind(kind)
+        ? {
+            ...current,
+            extractors: {
+              ...current.extractors,
+              [id]: { progress: 0, stored: 0, full: false, materialType: null },
+            },
+          }
+        : kind === "generator"
+          ? {
+              ...current,
+              generators: { ...current.generators, [id]: { power: 0, charcoal: 0 } },
+            }
+        : kind === "researchFoundry"
+          ? {
+              ...current,
+              researchFoundries: {
+                ...current.researchFoundries,
+                [id]: { progress: 0, cores: 0 },
+              },
+            }
+        : kind === "treePlanter"
+          ? {
+              ...current,
+              treePlanters: {
+                ...current.treePlanters,
+                [id]: { progress: 0 },
+              },
+            }
+        : kind === "miningDrill"
+          ? {
+              ...current,
+              miningDrills: {
+                ...current.miningDrills,
+                [id]: {
+                  progress: 0,
+                  iterations: 0,
+                  selectedType: null,
+                  powerCommitted: false,
+                },
+              },
+            }
+        : kind === "splitter"
+            ? {
+                ...current,
+                splitters: {
+                  ...current.splitters,
+                  [id]: { nextOutput: "a" as const },
+                },
+              }
+            : kind === "merger"
+              ? current
+            : kind === "joint"
+              ? {
+                  ...current,
+                  joints: {
+                    ...current.joints,
+                    [id]: { bufferedType: null },
+                  },
+                }
+            : kind === "powerSplitter"
+              ? current
+            : kind === "inventorySource"
+              ? {
+                  ...current,
+                  inventorySources: {
+                    ...current.inventorySources,
+                    [id]: { progress: 0, full: false, itemType: null, channels: {} },
+                  },
+                }
+            : kind === "filter"
+              ? {
+                  ...current,
+                  filters: {
+                    ...current.filters,
+                    [id]: { selectedType: null, bufferedType: null },
+                  },
+                }
+            : kind === "storage"
+              ? {
+                  ...current,
+                  storages: {
+                    ...current.storages,
+                    [id]: {
+                      items: makeEmptyItemStore(),
+                      capacityPerItem: STORAGE_NODE_CAPACITY,
+                    },
+                  },
+                }
+            : kind === "woodenChest"
+              ? {
+                  ...current,
+                  woodenChests: {
+                    ...current.woodenChests,
+                    [id]: { itemType: null, stored: 0 },
+                  },
+                }
+            : {
+                ...current,
+                processors: {
+                  ...current.processors,
+                  [id]: makeProcessorState(kind),
+                },
+              };
+      const next = {
+        ...machineRuntime,
+        construction: {
+          ...machineRuntime.construction,
+          [id]: { progress: 0, complete: false },
+        },
+      };
+      runtimeRef.current = next;
+      return next;
+    });
+    placingNodeRef.current = id;
+    pendingPlacementUndoRef.current = {
+      nodeId: id,
+      snapshot: placementUndoSnapshot,
+    };
+    repeatPlacementPreviewRef.current = repeatOriginNodeId
+      ? { nodeId: id, lastPlacedNodeId: repeatOriginNodeId }
+      : null;
+    setPlacingNodeId(id);
+    setSelectedNodes([id]);
+    setSelectedConnection(null);
+    setBuildOpen(false);
+    setJournalOpen(false);
+    buildOpenRef.current = false;
+    window.requestAnimationFrame(() => {
+      updatePlacementBlocked(overlapsAnotherNode(node, positionsRef.current[id] ?? position));
+      measureAnchors();
+    });
+  }, [
+    builtBuildKinds,
+    captureGraphUndoSnapshot,
+    measureAnchors,
+    overlapsAnotherNode,
+    pointFromEvent,
+    removeBuildCosts,
+    revealedBuildKinds,
+    updatePlacementBlocked,
+  ]);
+
+  const cancelRepeatPlacementPreview = useCallback(() => {
+    const preview = repeatPlacementPreviewRef.current;
+    const nodeId = placingNodeRef.current;
+    if (!preview || preview.nodeId !== nodeId) return false;
+
+    const nextNodes = nodesRef.current.filter((node) => node.id !== nodeId);
+    nodesRef.current = nextNodes;
+    setNodes(nextNodes);
+
+    const nextPositions = { ...positionsRef.current };
+    delete nextPositions[nodeId];
+    positionsRef.current = nextPositions;
+    setPositions(nextPositions);
+
+    setRuntime((current) => {
+      const next: Runtime = {
+        ...current,
+        extractors: { ...current.extractors },
+        processors: { ...current.processors },
+        generators: { ...current.generators },
+        researchFoundries: { ...current.researchFoundries },
+        treePlanters: { ...current.treePlanters },
+        miningDrills: { ...current.miningDrills },
+        minedDeposits: { ...current.minedDeposits },
+        splitters: { ...current.splitters },
+        joints: { ...current.joints },
+        inventorySources: { ...current.inventorySources },
+        filters: { ...current.filters },
+        woodenChests: { ...current.woodenChests },
+        storages: { ...current.storages },
+        pausedOutputs: { ...(current.pausedOutputs ?? {}) },
+        construction: { ...current.construction },
+      };
+      delete next.extractors[nodeId];
+      delete next.processors[nodeId];
+      delete next.generators[nodeId];
+      delete next.researchFoundries[nodeId];
+      delete next.treePlanters[nodeId];
+      delete next.miningDrills[nodeId];
+      delete next.minedDeposits[nodeId];
+      delete next.splitters[nodeId];
+      delete next.joints[nodeId];
+      delete next.inventorySources[nodeId];
+      delete next.filters[nodeId];
+      delete next.woodenChests[nodeId];
+      delete next.storages[nodeId];
+      delete next.pausedOutputs[nodeId];
+      delete next.construction[nodeId];
+      runtimeRef.current = next;
+      return next;
+    });
+
+    repeatPlacementPreviewRef.current = null;
+    if (pendingPlacementUndoRef.current?.nodeId === nodeId) {
+      pendingPlacementUndoRef.current = null;
+    }
+    placingNodeRef.current = null;
+    setPlacingNodeId(null);
+    insertionTargetRef.current = null;
+    setInsertionTarget(null);
+    updatePlacementBlocked(false);
+    const nextSelection = nodesRef.current.some((node) => node.id === preview.lastPlacedNodeId)
+      ? [preview.lastPlacedNodeId]
+      : [];
+    selectedNodesRef.current = nextSelection;
+    setSelectedNodes(nextSelection);
+    setSelectedConnection(null);
+    window.requestAnimationFrame(measureAnchors);
+    return true;
+  }, [measureAnchors, updatePlacementBlocked]);
+
+  const acknowledgeBuildKind = useCallback((kind: PurchasableKind) => {
+    setNewBuildKinds((current) => {
+      if (!current.has(kind)) return current;
+      const next = new Set(current);
+      next.delete(kind);
+      return next;
+    });
+  }, []);
+
+  const manuallyFillIngredient = useCallback((
+    nodeId: NodeId,
+    portId: string,
+    itemType: InventoryItemType,
+  ) => {
+    const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+    if (!node) return;
+    const current = runtimeRef.current;
+    const construction = current.construction[nodeId];
+    if (construction && !construction.complete) return;
+    const excludedNodeIds = new Set([nodeId]);
+    const available = getStoredItemAmount(
+      current,
+      nodesRef.current,
+      connectionsRef.current,
+      itemType,
+      excludedNodeIds,
+    );
+    if (available <= 0) return;
+
+    if (isProcessorKind(node.kind)) {
+      const processor = current.processors[nodeId] ?? makeProcessorState(node.kind);
+      const recipe = getProcessorRecipe(node.kind, processor);
+      const requirement = recipe?.inputs.find(
+        (input) => input.id === portId,
+      );
+      if (!requirement || !getManualIngredientChoices(requirement.type).includes(itemType)) return;
+
+      const stored = processor.inputs[portId] ?? 0;
+      const remainingCapacity = Math.max(0, PRODUCTION_INGREDIENT_CAPACITY - stored);
+      if (remainingCapacity <= 0) return;
+
+      if (isSmartProcessorTypingPort(nodeId, portId, processor)) {
+        const connectedType = getConnectedSmartProcessorMaterialType(
+          nodeId,
+          connectionsRef.current,
+          processor,
+        );
+        const bufferedSmartIngredient = (recipe?.inputs ?? []).some(
+          (input) =>
+            isSmartProcessorTypingPort(nodeId, input.id, processor) &&
+            (processor.inputs[input.id] ?? 0) > 0,
+        );
+        const materialLocked =
+          bufferedSmartIngredient ||
+          processor.progress > 0 ||
+          getProcessorStored(processor) > 0;
+        const lockedType = connectedType ?? (materialLocked ? processor.materialType : null);
+        if (lockedType && lockedType !== itemType) return;
+      }
+
+      const transferred = Math.min(remainingCapacity, available);
+      if (transferred <= 0) return;
+      const next = cloneStoredMaterialRuntime(current);
+      consumeStoredMaterialInPlace(
+        next,
+        nodesRef.current,
+        connectionsRef.current,
+        itemType,
+        transferred,
+        excludedNodeIds,
+      );
+      next.processors = {
+          ...next.processors,
+          [nodeId]: {
+            ...processor,
+            inputs: {
+              ...processor.inputs,
+              [portId]: stored + transferred,
+            },
+            materialType: isSmartProcessorTypingPort(nodeId, portId, processor)
+              ? itemType
+              : processor.materialType,
+          },
+      };
+      const normalizedConnections = normalizeDynamicConnections(
+        connectionsRef.current,
+        nodesRef.current,
+        next,
+      );
+      if (!connectionsAreEqual(connectionsRef.current, normalizedConnections)) {
+        connectionsRef.current = normalizedConnections;
+        setConnections(normalizedConnections);
+      }
+      runtimeRef.current = next;
+      setRuntime(next);
+      return;
+    }
+
+    if (node.kind === "generator" && itemType === ResourceType.CHARCOAL) {
+      const generator = current.generators[nodeId] ?? { power: 0, charcoal: 0 };
+      const remainingCapacity = Math.max(
+        0,
+        PRODUCTION_INGREDIENT_CAPACITY - (generator.charcoal ?? 0),
+      );
+      const transferred = Math.min(remainingCapacity, available);
+      if (transferred <= 0) return;
+      const next = cloneStoredMaterialRuntime(current);
+      consumeStoredMaterialInPlace(
+        next,
+        nodesRef.current,
+        connectionsRef.current,
+        itemType,
+        transferred,
+        excludedNodeIds,
+      );
+      next.generators = {
+          ...next.generators,
+          [nodeId]: {
+            ...generator,
+            charcoal: (generator.charcoal ?? 0) + transferred,
+          },
+      };
+      runtimeRef.current = next;
+      setRuntime(next);
+      return;
+    }
+
+    if (node.kind === "researchFoundry" && itemType === ResourceType.AUTOMATA_CORE) {
+      const foundry = current.researchFoundries[nodeId] ?? {
+        progress: 0,
+        cores: 0,
+      };
+      const stored = getResearchFoundryCores(foundry);
+      const remainingCapacity = Math.max(0, PRODUCTION_INGREDIENT_CAPACITY - stored);
+      const transferred = Math.min(remainingCapacity, available);
+      if (transferred <= 0) return;
+      const next = cloneStoredMaterialRuntime(current);
+      consumeStoredMaterialInPlace(
+        next,
+        nodesRef.current,
+        connectionsRef.current,
+        itemType,
+        transferred,
+        excludedNodeIds,
+      );
+      next.researchFoundries = {
+          ...next.researchFoundries,
+          [nodeId]: { ...foundry, cores: stored + transferred, coreLoaded: undefined },
+      };
+      next.research = { ...current.research, available: true };
+      runtimeRef.current = next;
+      setRuntime(next);
+    }
+  }, []);
+
+  const configureFilter = useCallback((nodeId: NodeId, itemType: InventoryItemType) => {
+    const updatedNodes = nodesRef.current.map((node) =>
+      node.id === nodeId && node.kind === "filter"
+        ? {
+            ...node,
+            color: RESOURCE_COLORS[itemType],
+            outputs: node.outputs.map((port) =>
+              port.id === "filter-out"
+                ? { ...port, label: formatResourceType(itemType), type: itemType }
+                : port,
+            ),
+          }
+        : node,
+    );
+    nodesRef.current = updatedNodes;
+    setNodes(updatedNodes);
+    const normalizedConnections = normalizeDynamicConnections(
+      connectionsRef.current,
+      updatedNodes,
+      runtimeRef.current,
+    );
+    connectionsRef.current = normalizedConnections;
+    setConnections(normalizedConnections);
+    setRuntime((current) => {
+      const previousFilter = current.filters[nodeId] ?? {
+        selectedType: null,
+        bufferedType: null,
+      };
+      const next = {
+        ...current,
+        filters: {
+          ...current.filters,
+          [nodeId]: {
+            selectedType: itemType,
+            bufferedType:
+              previousFilter.selectedType === itemType
+                ? previousFilter.bufferedType
+                : null,
+          },
+        },
+      };
+      runtimeRef.current = next;
+      return next;
+    });
+    setConfiguringFilterId(null);
+    window.requestAnimationFrame(measureAnchors);
+  }, [measureAnchors]);
+
+  const configureMiningDrill = useCallback((nodeId: NodeId, targetType: MiningDrillTarget) => {
+    const target = getMiningTarget(targetType);
+    if (!target) return;
+    const updatedNodes = nodesRef.current.map((node) =>
+      node.id === nodeId && node.kind === "miningDrill"
+        ? { ...node, color: RESOURCE_COLORS[targetType] }
+        : node,
+    );
+    nodesRef.current = updatedNodes;
+    setNodes(updatedNodes);
+    setRuntime((current) => {
+      const drill = current.miningDrills[nodeId] ?? {
+        progress: 0,
+        iterations: 0,
+        selectedType: null,
+        powerCommitted: false,
+      };
+      const unchanged = drill.selectedType === targetType;
+      const next = {
+        ...current,
+        miningDrills: {
+          ...current.miningDrills,
+          [nodeId]: unchanged
+            ? drill
+            : {
+                progress: 0,
+                iterations: 0,
+                selectedType: targetType,
+                powerCommitted: false,
+              },
+        },
+      };
+      runtimeRef.current = next;
+      return next;
+    });
+    setConfiguringMiningDrillId(null);
+    window.requestAnimationFrame(measureAnchors);
+  }, [measureAnchors]);
+
+  const applyAssemblerRecipe = useCallback((
+    nodeId: NodeId,
+    recipeId: AssemblerRecipeId | RefinerRecipeId,
+  ) => {
+    const node = nodesRef.current.find(
+      (candidate) =>
+        candidate.id === nodeId &&
+        (candidate.kind === "assembler" || candidate.kind === "refiner"),
+    );
+    if (!node) return;
+    const current = runtimeRef.current;
+    const previous = current.processors[nodeId] ?? makeProcessorState(node.kind);
+    const previousRecipe = node.kind === "assembler"
+      ? previous.assemblerRecipe
+      : previous.refinerRecipe;
+    if (previousRecipe === recipeId) {
+      setConfiguringAssemblerId(null);
+      return;
+    }
+
+    const nextProcessor = node.kind === "assembler" && isAssemblerRecipeId(recipeId)
+      ? makeProcessorState("assembler", null, recipeId)
+      : node.kind === "refiner" && isRefinerRecipeId(recipeId)
+        ? makeProcessorState("refiner", null, null, recipeId)
+        : null;
+    if (!nextProcessor) return;
+
+    const next: Runtime = {
+      ...current,
+      processors: {
+        ...current.processors,
+        [nodeId]: nextProcessor,
+      },
+    };
+    const normalizedConnections = normalizeDynamicConnections(
+      connectionsRef.current,
+      nodesRef.current,
+      next,
+    );
+    runtimeRef.current = next;
+    setRuntime(next);
+    connectionsRef.current = normalizedConnections;
+    setConnections(normalizedConnections);
+    setConfiguringAssemblerId(null);
+    window.requestAnimationFrame(measureAnchors);
+  }, [measureAnchors]);
+
+  const requestAssemblerRecipeChange = useCallback((
+    nodeId: NodeId,
+    recipeId: AssemblerRecipeId | RefinerRecipeId,
+  ) => {
+    const node = nodesRef.current.find(
+      (candidate) =>
+        candidate.id === nodeId &&
+        (candidate.kind === "assembler" || candidate.kind === "refiner"),
+    );
+    if (!node) return;
+    const processor = runtimeRef.current.processors[nodeId] ?? makeProcessorState(node.kind);
+    const currentRecipe = node.kind === "assembler"
+      ? processor.assemblerRecipe
+      : processor.refinerRecipe;
+    if (currentRecipe === recipeId) {
+      setConfiguringAssemblerId(null);
+      return;
+    }
+    if (!currentRecipe || alwaysApproveAssemblerRecipeChanges) {
+      applyAssemblerRecipe(nodeId, recipeId);
+      return;
+    }
+    setConfiguringAssemblerId(null);
+    setPendingAssemblerRecipeChange({ nodeId, kind: node.kind, recipeId });
+    setSuppressFutureAssemblerRecipeWarnings(false);
+    setAssemblerRecipeChangeDialogOpen(true);
+  }, [alwaysApproveAssemblerRecipeChanges, applyAssemblerRecipe]);
+
+  const zoomAtPoint = useCallback((requestedZoom: number, clientX?: number, clientY?: number) => {
+    const viewport = workspaceRef.current;
+    if (!viewport) return;
+    const currentZoom = zoomRef.current;
+    const nextZoom = clampZoom(requestedZoom);
+    if (Math.abs(nextZoom - currentZoom) < 0.001) return;
+
+    const bounds = viewport.getBoundingClientRect();
+    const pointerX = (clientX ?? bounds.left + bounds.width / 2) - bounds.left;
+    const pointerY = (clientY ?? bounds.top + bounds.height / 2) - bounds.top;
+    const worldX = (viewport.scrollLeft + pointerX) / currentZoom;
+    const worldY = (viewport.scrollTop + pointerY) / currentZoom;
+
+    zoomRef.current = nextZoom;
+    pinchTargetZoomRef.current = nextZoom;
+    flushSync(() => setZoom(nextZoom));
+    viewport.scrollLeft = worldX * nextZoom - pointerX;
+    viewport.scrollTop = worldY * nextZoom - pointerY;
+    updateGridPosition();
+  }, [updateGridPosition]);
+
+  useEffect(() => {
+    const viewport = workspaceRef.current;
+    if (!viewport) return;
+    const handleWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) < 0.01) return;
+
+      const now = performance.now();
+      const isPreciseTrackpadEvent =
+        !event.ctrlKey &&
+        event.deltaMode === WheelEvent.DOM_DELTA_PIXEL &&
+        (Math.abs(event.deltaY) < 50 ||
+          Math.abs(event.deltaX) > 0 ||
+          !Number.isInteger(event.deltaX) ||
+          !Number.isInteger(event.deltaY));
+
+      if (isPreciseTrackpadEvent) {
+        trackpadGestureUntilRef.current = now + 220;
+      }
+
+      const isTrackpadGesture =
+        !event.ctrlKey &&
+        (isPreciseTrackpadEvent || now < trackpadGestureUntilRef.current);
+
+      // Native scrolling gives trackpads Blender-style two-finger panning.
+      // Chromium reports a pinch separately with ctrlKey, so it still zooms.
+      if (
+        isTrackpadGesture ||
+        (!event.ctrlKey && Math.abs(event.deltaX) > Math.abs(event.deltaY))
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      const delta = event.deltaY * (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1);
+      const sensitivity = event.ctrlKey ? 0.0045 : 0.0018;
+      const rawFactor = Math.exp(-delta * sensitivity);
+      const factor = Math.min(
+        event.ctrlKey ? 1.16 : 1.18,
+        Math.max(event.ctrlKey ? 0.86 : 0.84, rawFactor),
+      );
+
+      if (event.ctrlKey) {
+        if (now > pinchAnchorRef.current.activeUntil) {
+          pinchAnchorRef.current = {
+            clientX: event.clientX,
+            clientY: event.clientY,
+            activeUntil: now + 180,
+          };
+        } else {
+          pinchAnchorRef.current.activeUntil = now + 180;
+        }
+        const baseZoom = pinchFrameRef.current === null
+          ? zoomRef.current
+          : pinchTargetZoomRef.current;
+        pinchTargetZoomRef.current = clampZoom(baseZoom * factor);
+
+        if (pinchFrameRef.current === null) {
+          pinchFrameRef.current = window.requestAnimationFrame(() => {
+            pinchFrameRef.current = null;
+            zoomAtPoint(
+              pinchTargetZoomRef.current,
+              pinchAnchorRef.current.clientX,
+              pinchAnchorRef.current.clientY,
+            );
+          });
+        }
+        return;
+      }
+
+      zoomAtPoint(zoomRef.current * factor, event.clientX, event.clientY);
+    };
+    viewport.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      viewport.removeEventListener("wheel", handleWheel);
+      if (pinchFrameRef.current !== null) {
+        window.cancelAnimationFrame(pinchFrameRef.current);
+        pinchFrameRef.current = null;
+      }
+    };
+  }, [zoomAtPoint]);
+
+  const unlockLogisticsBuildings = useCallback(() => {
+    if (logisticsUnlockedRef.current) return;
+    logisticsUnlockedRef.current = true;
+    setLogisticsUnlocked(true);
+    setRevealedBuildKinds((current) => {
+      const next = new Set(current);
+      LOGISTICS_BUILD_KINDS.forEach((kind) => next.add(kind));
+      return next;
+    });
+    setNewBuildKinds((current) => {
+      const next = new Set(current);
+      LOGISTICS_BUILD_KINDS.forEach((kind) => next.add(kind));
+      return next;
+    });
+    LOGISTICS_BUILD_KINDS.forEach(announceNodeUnlock);
+    if (!buildOpenRef.current) setBuildAttention(true);
+  }, []);
+
+  const getDisconnectedCompletedOutputs = useCallback((
+    before: Connection[],
+    after: Connection[],
+    additionalNodeIds: Iterable<NodeId> = [],
+  ) => {
+    const current = runtimeRef.current;
+    const disconnectedNodeIds = getDisconnectedMachineIds(before, after);
+    Array.from(additionalNodeIds).forEach((nodeId) => {
+      disconnectedNodeIds.add(nodeId);
+    });
+    return Array.from(disconnectedNodeIds).flatMap((nodeId) => {
+      const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+      if (!node) return [];
+      const type = getCompletedMachineOutputType(node, current, before);
+      if (!type) return [];
+      const amount = isExtractorKind(node.kind)
+        ? current.extractors[node.id]?.stored ?? 0
+        : getProcessorStored(current.processors[node.id]);
+      return amount > 0 ? [{ node, type, amount }] : [];
+    });
+  }, []);
+
+  const storeDisconnectedCompletedOutputs = useCallback((
+    before: Connection[],
+    after: Connection[],
+    options: {
+      additionalItems?: ReadonlyMap<InventoryItemType, number>;
+      additionalNodeIds?: Iterable<NodeId>;
+      ignoredCompletedNodeIds?: Iterable<NodeId>;
+      blockedAction?: string;
+      allowOverflowLoss?: boolean;
+      overflowTitle?: string;
+      overflowDescription?: string;
+      overflowConfirmLabel?: string;
+      overflowCancelLabel?: string;
+      onConfirmOverflow?: () => void;
+    } = {},
+  ) => {
+    const current = runtimeRef.current;
+    const ignoredCompletedNodeIds = new Set(options.ignoredCompletedNodeIds ?? []);
+    const completed = getDisconnectedCompletedOutputs(
+      before,
+      after,
+      options.additionalNodeIds,
+    ).filter(({ node }) => !ignoredCompletedNodeIds.has(node.id));
+
+    if (!completed.length && !options.additionalItems?.size) return true;
+    const excludedNodeIds = new Set(options.additionalNodeIds ?? []);
+    const projected = cloneStoredMaterialRuntime(current);
+    const loss = new Map<InventoryItemType, number>();
+    const projectDeposit = (type: InventoryItemType, amount: number) => {
+      const accepted = depositMaterialIntoStorageInPlace(
+        projected,
+        nodesRef.current,
+        type,
+        amount,
+        excludedNodeIds,
+      );
+      const overflow = amount - accepted;
+      if (overflow > 0) loss.set(type, (loss.get(type) ?? 0) + overflow);
+    };
+    completed.forEach(({ type, amount }) => projectDeposit(type, amount));
+    options.additionalItems?.forEach((amount, type) => projectDeposit(type, amount));
+    const allowOverflowLoss =
+      options.allowOverflowLoss || inventoryOverflowWarningSuppressedRef.current;
+    if (loss.size > 0 && !allowOverflowLoss) {
+      if (options.onConfirmOverflow) {
+        requestInventoryOverflowConfirmation({
+          title: options.overflowTitle ?? "Storage capacity exceeded",
+          description: options.overflowDescription ??
+            "Available storage nodes cannot hold all recovered materials. Anything beyond capacity will be permanently destroyed if you proceed.",
+          confirmLabel: options.overflowConfirmLabel ?? "Proceed & destroy overflow",
+          cancelLabel: options.overflowCancelLabel,
+          loss: Array.from(loss),
+        }, options.onConfirmOverflow);
+      } else {
+        const blockedType = loss.keys().next().value as InventoryItemType | undefined;
+        toast.error("Storage full", {
+          description: blockedType
+            ? `Make room for ${formatResourceType(blockedType)} in a Storage node or Wooden Chest before ${options.blockedAction ?? "continuing"}.`
+            : "Make room in a Storage node or Wooden Chest before continuing.",
+        });
+      }
+      return false;
+    }
+    if (!completed.length) return true;
+
+    const next = cloneStoredMaterialRuntime(current);
+    completed.forEach(({ node, type, amount }) => {
+      depositMaterialIntoStorageInPlace(
+        next,
+        nodesRef.current,
+        type,
+        amount,
+        excludedNodeIds,
+      );
+      if (isExtractorKind(node.kind)) {
+        const extractor = next.extractors[node.id];
+        if (extractor) {
+          next.extractors[node.id] = {
+            ...extractor,
+            progress: 0,
+            stored: 0,
+            full: false,
+            materialType: extractor.materialType ?? type,
+          };
+        }
+      } else if (isProcessorKind(node.kind)) {
+        const processor = next.processors[node.id];
+        if (processor) {
+          next.processors[node.id] = {
+            ...processor,
+            stored: 0,
+            full: false,
+          };
+        }
+      }
+    });
+    runtimeRef.current = next;
+    setRuntime(next);
+    return true;
+  }, [getDisconnectedCompletedOutputs, requestInventoryOverflowConfirmation]);
+
+  const deleteConnection = useCallback(function deleteConnectionInternal(
+    connectionId: string,
+    allowMaterialLoss = false,
+  ) {
+    const before = connectionsRef.current;
+    if (!before.some((connection) => connection.id === connectionId)) return false;
+    const undoSnapshot = captureGraphUndoSnapshot();
+    const next = removeConnectionsWithDependents(
+      before,
+      (connection) => connection.id === connectionId,
+      nodesRef.current,
+      runtimeRef.current,
+    );
+    if (!storeDisconnectedCompletedOutputs(before, next, {
+      blockedAction: "deleting this connection",
+      allowOverflowLoss: allowMaterialLoss,
+      overflowTitle: "Delete connection and lose materials?",
+      overflowDescription: "Disconnecting this cable recovers completed output, but available storage nodes cannot hold all of it. The overflow will be permanently destroyed if you continue.",
+      overflowConfirmLabel: "Delete & destroy overflow",
+      onConfirmOverflow: () => deleteConnectionInternal(connectionId, true),
+    })) return false;
+
+    connectionsRef.current = next;
+    setConnections(next);
+    const remainingConnectionIds = new Set(next.map((connection) => connection.id));
+    setActiveFlows((current) => Object.fromEntries(
+      Object.entries(current).filter(([id]) => remainingConnectionIds.has(id)),
+    ));
+    setSelectedConnection(null);
+    setPendingDeletionConnectionId(null);
+    setConnectionDeleteDialogOpen(false);
+    pushUndoEntry({ kind: "graph", snapshot: undoSnapshot });
+    return true;
+  }, [captureGraphUndoSnapshot, pushUndoEntry, storeDisconnectedCompletedOutputs]);
+
+  const rememberAlwaysDeleteConnections = useCallback(() => {
+    setAlwaysDeleteConnections(true);
+  }, []);
+
+  const requestConnectionDeletion = useCallback((connectionId: string) => {
+    if (!connectionsRef.current.some((connection) => connection.id === connectionId)) return;
+    if (alwaysDeleteConnections) {
+      deleteConnection(connectionId);
+      return;
+    }
+    setSelectedConnection(connectionId);
+    setSelectedNodes([]);
+    setPendingDeletionConnectionId(connectionId);
+    setSuppressFutureConnectionDeleteWarnings(false);
+    setConnectionDeleteDialogOpen(true);
+  }, [alwaysDeleteConnections, deleteConnection]);
+
+  const openMultiConnectionManager = useCallback((
+    nodeId: NodeId,
+    portId: string,
+    direction: PortDirection,
+  ) => {
+    const isMultiPort = direction === "output"
+      ? isMultiOutputPort(nodeId, portId)
+      : isMultiInputPort(nodeId, portId);
+    if (!isMultiPort) return;
+    setSelectedConnection(null);
+    setSelectedNodes([nodeId]);
+    setManagedMultiPort({ nodeId, portId, direction });
+    setMultiConnectionManagerOpen(true);
+  }, []);
+
+  const enableTemporaryBlueprint = useCallback((kind: PurchasableKind) => {
+    if (revealedBuildKinds.has(kind)) return;
+    setRevealedBuildKinds((current) => new Set(current).add(kind));
+    setNewBuildKinds((current) => new Set(current).add(kind));
+    setShowAllBuildNodes(false);
+    setShowBuildableOnly(false);
+    setBuildCategory(getBuildCategory(kind));
+    announceNodeUnlock(kind);
+  }, [revealedBuildKinds]);
+
+  const unlockAllNodesForDevelopment = useCallback(() => {
+    const allKinds = VISIBLE_BUILD_CATALOG.map((item) => item.kind);
+    const newlyUnlocked = allKinds.filter((kind) => !revealedBuildKinds.has(kind));
+
+    setRevealedBuildKinds((current) => {
+      const next = new Set(current);
+      allKinds.forEach((kind) => next.add(kind));
+      return next;
+    });
+    setNewBuildKinds((current) => {
+      const next = new Set(current);
+      newlyUnlocked.forEach((kind) => next.add(kind));
+      return next;
+    });
+    logisticsUnlockedRef.current = true;
+    setLogisticsUnlocked(true);
+    setRuntime((current) => {
+      const next = {
+        ...current,
+        research: {
+          ...current.research,
+          treePlanterUnlocked: true,
+          miningDrillUnlocked: true,
+        },
+      };
+      runtimeRef.current = next;
+      return next;
+    });
+    setShowAllBuildNodes(false);
+    setShowBuildableOnly(false);
+    setShowNeverBuiltOnly(false);
+    setBuildCategory("all");
+    if (newlyUnlocked.length > 0) {
+      setBuildAttention(true);
+      setJournalAttention(true);
+    }
+    toast.success("All nodes unlocked", {
+      description: newlyUnlocked.length > 0
+        ? `${newlyUnlocked.length} new blueprints are now available in Build.`
+        : "Every node blueprint is already available.",
+    });
+  }, [revealedBuildKinds]);
+
+  const unlockAllResearchForDevelopment = useCallback(() => {
+    const current = runtimeRef.current;
+    const newlyCompletedProjects = RESEARCH_PROJECTS.filter(
+      (project) => !isResearchProjectUnlocked(current.research, project.id),
+    );
+    const next: Runtime = {
+      ...current,
+      research: {
+        ...current.research,
+        available: true,
+        activeProject: null,
+        progress: Object.fromEntries(
+          RESEARCH_PROJECTS.map((project) => [project.id, RESEARCH_UNLOCK_COST]),
+        ) as Record<ResearchProjectId, number>,
+        extractor2Unlocked: true,
+        treePlanterUnlocked: true,
+        miningDrillUnlocked: true,
+        explorationUnlocked: true,
+      },
+      researchFoundries: Object.fromEntries(
+        Object.entries(current.researchFoundries).map(([nodeId, foundry]) => [
+          nodeId,
+          { ...foundry, progress: 0 },
+        ]),
+      ),
+    };
+    runtimeRef.current = next;
+    setRuntime(next);
+    newlyCompletedProjects.forEach((project) => {
+      announceResearchCompletion(project.id);
+    });
+  }, []);
+
+  const getDeletionRefund = useCallback((nodeIds: Iterable<NodeId>) => {
+    const refund = new Map<InventoryItemType, number>();
+    const current = runtimeRef.current;
+    Array.from(nodeIds).forEach((nodeId) => {
+      const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+      if (!node || !isDestroyableNode(node) || !current.construction[nodeId]) return;
+      if (repeatPlacementPreviewRef.current?.nodeId === nodeId) return;
+      const catalogItem = BUILD_CATALOG.find((item) => item.kind === node.kind);
+      catalogItem?.recipe.forEach((ingredient) => {
+        refund.set(
+          ingredient.type,
+          (refund.get(ingredient.type) ?? 0) + ingredient.amount,
+        );
+      });
+    });
+    return refund;
+  }, []);
+
+  const getDeletionMaterialSummary = useCallback((nodeIds: Iterable<NodeId>) => {
+    const deletableNodeIds = new Set(nodeIds);
+    const refund = getDeletionRefund(deletableNodeIds);
+    const stored = new Map<InventoryItemType, number>();
+    INVENTORY_ITEMS.forEach(({ type }) => {
+      getStoredItemLocations(
+        runtimeRef.current,
+        nodesRef.current,
+        connectionsRef.current,
+        type,
+      ).forEach((location) => {
+        if (!deletableNodeIds.has(location.nodeId) || location.bucket === "production") return;
+        stored.set(type, (stored.get(type) ?? 0) + location.amount);
+      });
+    });
+    return { refund, stored };
+  }, [getDeletionRefund]);
+
+  const wouldDeleteEveryExtractor = useCallback((nodeIds: Iterable<NodeId>) => {
+    const requestedNodeIds = new Set(nodeIds);
+    const extractorIds = nodesRef.current
+      .filter((node) => isExtractorKind(node.kind))
+      .map((node) => node.id);
+    return extractorIds.length > 0 && extractorIds.every((nodeId) => requestedNodeIds.has(nodeId));
+  }, []);
+
+  const warnLastExtractorRequired = useCallback(() => {
+    toast.error("At least one extractor must remain on the field.");
+  }, []);
+
+  const destroyNodes = useCallback((nodeIds: Iterable<NodeId>) => {
+    const deletableNodeIds = new Set(
+      Array.from(new Set(nodeIds)).filter((nodeId) => {
+        const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+        return Boolean(node && isDestroyableNode(node));
+      }),
+    );
+    if (!deletableNodeIds.size) return false;
+    if (wouldDeleteEveryExtractor(deletableNodeIds)) {
+      setSuppressFutureNodeDestructionWarnings(false);
+      setDestroyDialogOpen(false);
+      warnLastExtractorRequired();
+      return false;
+    }
+
+    const undoSnapshot = captureGraphUndoSnapshot();
+    const materials = getDeletionMaterialSummary(deletableNodeIds);
+    const refund = materials.refund;
+    const beforeConnections = connectionsRef.current;
+    const nextConnections = removeConnectionsWithDependents(
+      beforeConnections,
+      (connection) =>
+        deletableNodeIds.has(connection.sourceNode) ||
+        deletableNodeIds.has(connection.targetNode),
+      nodesRef.current,
+      runtimeRef.current,
+    );
+    const recoveredMaterials = new Map(refund);
+    materials.stored.forEach((amount, type) => {
+      recoveredMaterials.set(type, (recoveredMaterials.get(type) ?? 0) + amount);
+    });
+    if (!storeDisconnectedCompletedOutputs(beforeConnections, nextConnections, {
+      additionalItems: recoveredMaterials,
+      additionalNodeIds: deletableNodeIds,
+      blockedAction: deletableNodeIds.size === 1 ? "destroying this node" : "destroying these nodes",
+      allowOverflowLoss: true,
+    })) return false;
+
+    const nextNodes = nodesRef.current.filter((node) => !deletableNodeIds.has(node.id));
+    nodesRef.current = nextNodes;
+    setNodes(nextNodes);
+
+    const remainingControlGroups = controlGroupsRef.current
+      .map((group) => ({
+        ...group,
+        nodeIds: group.nodeIds.filter((nodeId) => !deletableNodeIds.has(nodeId)),
+      }))
+      .filter((group) => group.nodeIds.length >= 2);
+    const remainingControlGroupIds = new Set(remainingControlGroups.map((group) => group.id));
+    controlGroupsRef.current = remainingControlGroups;
+    setControlGroups(remainingControlGroups);
+    setActiveControlGroupId((current) => current && remainingControlGroupIds.has(current) ? current : null);
+    if (individualControlNodeRef.current && deletableNodeIds.has(individualControlNodeRef.current)) {
+      individualControlNodeRef.current = null;
+    }
+    setIndividualControlNodeId((current) => current && deletableNodeIds.has(current) ? null : current);
+
+    const nextPositions = { ...positionsRef.current };
+    deletableNodeIds.forEach((nodeId) => delete nextPositions[nodeId]);
+    positionsRef.current = nextPositions;
+    setPositions(nextPositions);
+
+    connectionsRef.current = nextConnections;
+    setConnections(nextConnections);
+    const remainingConnectionIds = new Set(nextConnections.map((connection) => connection.id));
+    setActiveFlows((current) => Object.fromEntries(
+      Object.entries(current).filter(([connectionId]) => remainingConnectionIds.has(connectionId)),
+    ));
+
+    const current = runtimeRef.current;
+    const next = cloneStoredMaterialRuntime(current);
+    next.treePlanters = { ...current.treePlanters };
+    next.miningDrills = { ...current.miningDrills };
+    next.minedDeposits = { ...current.minedDeposits };
+    next.inventorySources = { ...current.inventorySources };
+    next.pausedOutputs = { ...(current.pausedOutputs ?? {}) };
+    next.construction = { ...current.construction };
+    recoveredMaterials.forEach((amount, type) => {
+      depositMaterialIntoStorageInPlace(next, nextNodes, type, amount);
+    });
+    deletableNodeIds.forEach((nodeId) => {
+      delete next.extractors[nodeId];
+      delete next.processors[nodeId];
+      delete next.generators[nodeId];
+      delete next.researchFoundries[nodeId];
+      delete next.treePlanters[nodeId];
+      delete next.miningDrills[nodeId];
+      delete next.minedDeposits[nodeId];
+      delete next.splitters[nodeId];
+      delete next.joints[nodeId];
+      delete next.inventorySources[nodeId];
+      delete next.filters[nodeId];
+      delete next.woodenChests[nodeId];
+      delete next.storages[nodeId];
+      delete next.pausedOutputs[nodeId];
+      delete next.construction[nodeId];
+    });
+    runtimeRef.current = next;
+    setRuntime(next);
+
+    if (placingNodeRef.current && deletableNodeIds.has(placingNodeRef.current)) {
+      if (pendingPlacementUndoRef.current?.nodeId === placingNodeRef.current) {
+        pendingPlacementUndoRef.current = null;
+      }
+      placingNodeRef.current = null;
+      repeatPlacementPreviewRef.current = null;
+      setPlacingNodeId(null);
+      updatePlacementBlocked(false);
+    }
+    if (configuringFilterId && deletableNodeIds.has(configuringFilterId)) {
+      setConfiguringFilterId(null);
+    }
+    if (configuringMiningDrillId && deletableNodeIds.has(configuringMiningDrillId)) {
+      setConfiguringMiningDrillId(null);
+    }
+    if (configuringAssemblerId && deletableNodeIds.has(configuringAssemblerId)) {
+      setConfiguringAssemblerId(null);
+    }
+    dragRef.current = null;
+    setDraggingNode(null);
+    setDragCollisionBlocked(false);
+    insertionTargetRef.current = null;
+    setInsertionTarget(null);
+    setSelectedConnection(null);
+    selectedNodesRef.current = [];
+    setSelectedNodes([]);
+    pushUndoEntry({ kind: "graph", snapshot: undoSnapshot });
+    return true;
+  }, [
+    captureGraphUndoSnapshot,
+    configuringFilterId,
+    configuringMiningDrillId,
+    configuringAssemblerId,
+    getDeletionMaterialSummary,
+    pushUndoEntry,
+    storeDisconnectedCompletedOutputs,
+    updatePlacementBlocked,
+    warnLastExtractorRequired,
+    wouldDeleteEveryExtractor,
+  ]);
+
+  const requestNodeDeletion = useCallback((
+    nodeIds: Iterable<NodeId>,
+    options: {
+      highlightedControlGroup?: boolean;
+    } = {},
+  ) => {
+    const destroyableNodes = Array.from(new Set(nodeIds)).flatMap((nodeId) => {
+      const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+      return node && isDestroyableNode(node) ? [node] : [];
+    });
+    if (!destroyableNodes.length) return;
+    const destroyableIds = destroyableNodes.map((node) => node.id);
+    if (wouldDeleteEveryExtractor(destroyableIds)) {
+      warnLastExtractorRequired();
+      return;
+    }
+    setPendingDeletionNodeIds(destroyableIds);
+    setPendingDeletionDetails({
+      count: destroyableNodes.length,
+      title: destroyableNodes.length === 1
+        ? destroyableNodes[0].title
+        : `${destroyableNodes.length} nodes`,
+    });
+
+    if (alwaysApproveNodeDestruction) {
+      destroyNodes(destroyableIds);
+      return;
+    }
+    setPendingDeletionIsHighlightedGroup(Boolean(options.highlightedControlGroup));
+    setDestroyDialogOpen(true);
+  }, [
+    alwaysApproveNodeDestruction,
+    destroyNodes,
+    warnLastExtractorRequired,
+    wouldDeleteEveryExtractor,
+  ]);
+
+  const connectPorts = useCallback(function connectPortsInternal(
+    first: PortHandle,
+    second: PortHandle,
+    replaceConnectionId?: string,
+    allowMaterialLoss = false,
+  ) {
+    if (first.nodeId === second.nodeId || first.port.direction === second.port.direction) {
+      toast.error("Choose an input and an output", {
+        description: "A cable must run between two different nodes.",
+      });
+      return false;
+    }
+
+    const output = first.port.direction === "output" ? first : second;
+    const input = first.port.direction === "input" ? first : second;
+    if (
+      isAssemblerPortDisabled(output.nodeId, output.port.id, runtimeRef.current) ||
+      isAssemblerPortDisabled(input.nodeId, input.port.id, runtimeRef.current)
+    ) {
+      toast.error("Choose an Assembler recipe first", {
+        description: "Only ports used by the selected recipe can be connected.",
+      });
+      return false;
+    }
+    const connectionsWithoutReplacement = connectionsRef.current.filter((item) =>
+      item.id !== replaceConnectionId &&
+      (
+        isMultiInputPort(input.nodeId, input.port.id) ||
+        item.targetNode !== input.nodeId ||
+        item.targetPort !== input.port.id
+      ),
+    );
+    const effectiveInput = getRuntimeAwarePort(
+      input.nodeId,
+      input.port,
+      connectionsWithoutReplacement,
+      runtimeRef.current,
+    );
+
+    if (!isCompatible(output.port, effectiveInput)) {
+      toast.error("Socket type mismatch", {
+        description: `${output.port.type} cannot feed a ${effectiveInput.type} socket.`,
+      });
+      return false;
+    }
+
+    const incompatibleOutputConnections = getIncompatibleLogisticsOutputConnections(
+      input.nodeId,
+      input.port.id,
+      output.port.type,
+      connectionsWithoutReplacement,
+      nodesRef.current,
+      runtimeRef.current,
+    );
+    if (incompatibleOutputConnections.length) {
+      toast.error("Input would invalidate an output", {
+        description: incompatibleOutputConnections.length === 1
+          ? "Disconnect or reroute the incompatible output before changing this logistics input."
+          : `Disconnect or reroute the ${incompatibleOutputConnections.length} incompatible outputs before changing this logistics input.`,
+      });
+      return false;
+    }
+
+    const connection: Connection = {
+      id: `${output.nodeId}-${output.port.id}-${input.nodeId}-${input.port.id}-${Date.now()}`,
+      sourceNode: output.nodeId,
+      sourcePort: output.port.id,
+      targetNode: input.nodeId,
+      targetPort: input.port.id,
+      type: output.port.type,
+    };
+
+    const currentConnections = connectionsRef.current;
+    const isExtractorResourceInput =
+      isExtractorNode(input.nodeId) && input.port.id === "resource-in";
+    const incomingExtractorProduct = isExtractorResourceInput
+      ? EXTRACTOR_RECIPES[output.port.type]?.product ?? null
+      : null;
+    const previousExtractorResourceConnection = isExtractorResourceInput
+      ? currentConnections.find((item) =>
+          item.targetNode === input.nodeId && item.targetPort === "resource-in",
+        ) ?? null
+      : null;
+    const previousExtractorProduct = previousExtractorResourceConnection
+      ? EXTRACTOR_RECIPES[previousExtractorResourceConnection.type]?.product ?? null
+      : runtimeRef.current.extractors[input.nodeId]?.materialType ?? null;
+    const extractorResourceChanged = isExtractorResourceInput && Boolean(
+      previousExtractorResourceConnection
+        ? previousExtractorResourceConnection.sourceNode !== output.nodeId ||
+          previousExtractorResourceConnection.sourcePort !== output.port.id ||
+          previousExtractorResourceConnection.type !== output.port.type
+        : previousExtractorProduct && previousExtractorProduct !== incomingExtractorProduct,
+    );
+    const nextConnections = (() => {
+      const current = currentConnections;
+      const available = replaceConnectionId
+        // Treat a cable move as one atomic graph edit. Revalidating after the
+        // old endpoint is removed but before the replacement is added can
+        // momentarily erase downstream routes that the replacement keeps valid.
+        ? current.filter((item) => item.id !== replaceConnectionId)
+        : current;
+      const isConflictingConnection = (item: Connection) =>
+        (!isMultiOutputPort(connection.sourceNode, connection.sourcePort) &&
+          item.sourceNode === connection.sourceNode && item.sourcePort === connection.sourcePort) ||
+        (!isMultiInputPort(connection.targetNode, connection.targetPort) &&
+          item.targetNode === connection.targetNode && item.targetPort === connection.targetPort);
+      let next = [
+        ...available.filter((item) => !isConflictingConnection(item)),
+        connection,
+      ];
+
+      if (isExtractorNode(input.nodeId) && input.port.id === "resource-in") {
+        const recipe = EXTRACTOR_RECIPES[output.port.type];
+        next = next.flatMap((item) => {
+          if (item.sourceNode !== input.nodeId || item.sourcePort !== "product-out") return [item];
+          if (!recipe) return [];
+          const target = nodesRef.current
+            .find((node) => node.id === item.targetNode)
+            ?.inputs.find((port) => port.id === item.targetPort);
+          const productPort: Port = {
+            id: "product-out",
+            label: recipe.label,
+            type: recipe.product,
+            direction: "output",
+          };
+          return target && isCompatible(productPort, target)
+            ? [{ ...item, type: recipe.product }]
+            : [];
+        });
+      }
+
+      if (isSplitterNode(input.nodeId) && input.port.id === "split-in") {
+        next = next.flatMap((item) => {
+          if (
+            item.sourceNode !== input.nodeId ||
+            (item.sourcePort !== "split-a-out" && item.sourcePort !== "split-b-out")
+          ) return [item];
+          const target = nodesRef.current
+            .find((node) => node.id === item.targetNode)
+            ?.inputs.find((port) => port.id === item.targetPort);
+          const smartPort: Port = {
+            id: item.sourcePort,
+            label: item.sourcePort === "split-a-out" ? "A" : "B",
+            type: output.port.type,
+            direction: "output",
+          };
+          return target && isCompatible(smartPort, target)
+            ? [{ ...item, type: output.port.type }]
+            : [];
+        });
+      }
+
+      if (
+        isMergerNode(input.nodeId) &&
+        (input.port.id === "merge-a-in" || input.port.id === "merge-b-in")
+      ) {
+        next = next.flatMap((item) => {
+          if (item.sourceNode !== input.nodeId || item.sourcePort !== "merge-out") return [item];
+          const targetSpec = nodesRef.current
+            .find((node) => node.id === item.targetNode)
+            ?.inputs.find((port) => port.id === item.targetPort);
+          const target = targetSpec
+            ? getRuntimeAwarePort(
+                item.targetNode,
+                targetSpec,
+                next.filter((edge) => edge.id !== item.id),
+                runtimeRef.current,
+              )
+            : null;
+          const smartPort: Port = {
+            id: "merge-out",
+            label: PRODUCTION_PORT_LABEL,
+            type: output.port.type,
+            direction: "output",
+          };
+          return target && isCompatible(smartPort, target)
+            ? [{ ...item, type: output.port.type }]
+            : [];
+        });
+      }
+
+      if (isJointNode(input.nodeId) && input.port.id === "joint-in") {
+        next = next.flatMap((item) => {
+          if (item.sourceNode !== input.nodeId || item.sourcePort !== "joint-out") return [item];
+          const targetSpec = nodesRef.current
+            .find((node) => node.id === item.targetNode)
+            ?.inputs.find((port) => port.id === item.targetPort);
+          const target = targetSpec
+            ? getRuntimeAwarePort(
+                item.targetNode,
+                targetSpec,
+                next.filter((edge) => edge.id !== item.id),
+                runtimeRef.current,
+              )
+            : null;
+          const smartPort: Port = {
+            id: "joint-out",
+            label: "Out",
+            type: output.port.type,
+            direction: "output",
+          };
+          return target && isCompatible(smartPort, target)
+            ? [{ ...item, type: output.port.type }]
+            : [];
+        });
+      }
+
+      const inputProcessor = runtimeRef.current.processors[input.nodeId];
+      if (isSmartProcessorTypingPort(input.nodeId, input.port.id, inputProcessor)) {
+        const smartOutput = getSmartProcessorOutput(
+          input.nodeId,
+          output.port.type,
+          inputProcessor,
+        );
+        const outputPortId = getSmartProcessorOutputPortId(input.nodeId, inputProcessor);
+        next = next.flatMap((item) => {
+          if (item.sourceNode !== input.nodeId || item.sourcePort !== outputPortId) return [item];
+          if (!smartOutput) return [];
+          const targetSpec = nodesRef.current
+            .find((node) => node.id === item.targetNode)
+            ?.inputs.find((port) => port.id === item.targetPort);
+          const target = targetSpec
+            ? getRuntimeAwarePort(
+                item.targetNode,
+                targetSpec,
+                next.filter((edge) => edge.id !== item.id),
+                runtimeRef.current,
+              )
+            : null;
+          const smartPort: Port = {
+            id: outputPortId ?? item.sourcePort,
+            label: smartOutput.label,
+            type: smartOutput.type,
+            direction: "output",
+          };
+          return target && isCompatible(smartPort, target)
+            ? [{ ...item, type: smartOutput.type }]
+            : [];
+        });
+      }
+
+      next = normalizeDynamicConnections(next, nodesRef.current, runtimeRef.current);
+      return next;
+    })();
+    const undoSnapshot = captureGraphUndoSnapshot();
+    if (!storeDisconnectedCompletedOutputs(currentConnections, nextConnections, {
+      ignoredCompletedNodeIds: extractorResourceChanged ? [input.nodeId] : undefined,
+      blockedAction: "rewiring these nodes",
+      allowOverflowLoss: allowMaterialLoss,
+      overflowTitle: "Continue with limited storage space?",
+      overflowDescription: "Creating this input connection will move stored production items into available storage nodes, but there is not enough space for all of them. The listed overflow will be permanently destroyed if you continue.",
+      overflowConfirmLabel: "Continue",
+      overflowCancelLabel: "Cancel",
+      onConfirmOverflow: () => connectPortsInternal(
+        first,
+        second,
+        replaceConnectionId,
+        true,
+      ),
+    })) return false;
+    connectionsRef.current = nextConnections;
+    setConnections(nextConnections);
+    if (isExtractorResourceInput) {
+      setRuntime((current) => {
+        const previous = current.extractors[input.nodeId] ?? {
+          progress: 0,
+          stored: 0,
+          full: false,
+          materialType: null,
+        };
+        const next = {
+          ...current,
+          extractors: {
+            ...current.extractors,
+            [input.nodeId]: {
+              ...previous,
+              progress: 0,
+              stored: extractorResourceChanged ? 0 : previous.stored,
+              full: extractorResourceChanged
+                ? false
+                : previous.stored >= EXTRACTOR_CAPACITY,
+              materialType: incomingExtractorProduct,
+            },
+          },
+        };
+        runtimeRef.current = next;
+        return next;
+      });
+    } else if (isSplitterNode(input.nodeId) && input.port.id === "split-in") {
+      setRuntime((current) => {
+        const next = {
+          ...current,
+          splitters: {
+            ...current.splitters,
+            [input.nodeId]: { nextOutput: "a" as const },
+          },
+        };
+        runtimeRef.current = next;
+        return next;
+      });
+    } else if (isJointNode(input.nodeId) && input.port.id === "joint-in") {
+      setRuntime((current) => {
+        const next = {
+          ...current,
+          joints: {
+            ...current.joints,
+            [input.nodeId]: { bufferedType: null },
+          },
+        };
+        runtimeRef.current = next;
+        return next;
+      });
+    } else if (isSmartProcessorTypingPort(
+      input.nodeId,
+      input.port.id,
+      runtimeRef.current.processors[input.nodeId],
+    )) {
+      const node = nodesRef.current.find((item) => item.id === input.nodeId);
+      if (node && isProcessorKind(node.kind)) {
+        const processorKind = node.kind;
+        setRuntime((current) => {
+          const previous = current.processors[input.nodeId] ?? makeProcessorState(processorKind);
+          const incomingMaterialType = getConcreteSmartProcessorMaterialType(
+            input.nodeId,
+            output.port.type,
+            previous,
+          );
+          const recipe = getProcessorRecipe(processorKind, previous);
+          const materialLocked = hasSmartProcessorMaterialLock(
+            input.nodeId,
+            previous,
+            recipe ?? PROCESSOR_RECIPES[processorKind],
+          );
+          const next = {
+            ...current,
+            processors: {
+              ...current.processors,
+              [input.nodeId]: incomingMaterialType && !materialLocked
+                ? { ...previous, materialType: incomingMaterialType }
+                : previous,
+            },
+          };
+          runtimeRef.current = next;
+          return next;
+        });
+      }
+    }
+    setSelectedConnection(connection.id);
+    setSelectedNodes([]);
+    pushUndoEntry({ kind: "graph", snapshot: undoSnapshot });
+    return true;
+  }, [captureGraphUndoSnapshot, pushUndoEntry, storeDisconnectedCompletedOutputs]);
+
+  const findPortHandle = useCallback((element: Element | null): PortHandle | null => {
+    const portElement = element?.closest<HTMLElement>("[data-port-node]");
+    if (!portElement) return null;
+    const nodeId = portElement.dataset.portNode as NodeId;
+    const portId = portElement.dataset.portId;
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    const portSpec = node
+      ? [...node.inputs, ...node.outputs].find((item) => item.id === portId)
+      : null;
+    const port = portSpec
+      ? getRuntimeAwarePort(nodeId, portSpec, connectionsRef.current, runtimeRef.current)
+      : null;
+    if (port && isAssemblerPortDisabled(nodeId, port.id, runtimeRef.current)) return null;
+    return port ? { nodeId, port } : null;
+  }, []);
+
+  const findNearbyCompatiblePort = useCallback((
+    clientX: number,
+    clientY: number,
+    source: PortHandle,
+    replaceConnectionId?: string,
+  ): { handle: PortHandle; point: Position } | null => {
+    const elements = new Set<HTMLElement>();
+    const snapPadding = PORT_SNAP_PADDING * getPortZoomScale(zoomRef.current);
+    const halfSnapPadding = snapPadding / 2;
+    const sampleOffsets = [
+      -snapPadding,
+      -halfSnapPadding,
+      0,
+      halfSnapPadding,
+      snapPadding,
+    ];
+    sampleOffsets.forEach((offsetX) => {
+      sampleOffsets.forEach((offsetY) => {
+        document.elementsFromPoint(clientX + offsetX, clientY + offsetY)
+          .forEach((element) => {
+            const portElement = element.closest<HTMLElement>("[data-port-node]");
+            if (portElement) elements.add(portElement);
+          });
+      });
+    });
+
+    let best: { handle: PortHandle; point: Position; distance: number } | null = null;
+    elements.forEach((element) => {
+      const candidate = findPortHandle(element);
+      if (
+        !candidate ||
+        candidate.nodeId === source.nodeId ||
+        candidate.port.direction === source.port.direction
+      ) return;
+
+      const output = source.port.direction === "output" ? source : candidate;
+      const input = source.port.direction === "input" ? source : candidate;
+      const connectionsWithoutReplacement = connectionsRef.current.filter((connection) =>
+        connection.id !== replaceConnectionId &&
+        (
+          isMultiInputPort(input.nodeId, input.port.id) ||
+          connection.targetNode !== input.nodeId ||
+          connection.targetPort !== input.port.id
+        ),
+      );
+      const inputNode = nodesRef.current.find((node) => node.id === input.nodeId);
+      const inputSpec = inputNode?.inputs.find((port) => port.id === input.port.id);
+      const effectiveInput = inputSpec
+        ? getRuntimeAwarePort(
+            input.nodeId,
+            inputSpec,
+            connectionsWithoutReplacement,
+            runtimeRef.current,
+          )
+        : input.port;
+      if (!isCompatible(output.port, effectiveInput)) return;
+      if (getIncompatibleLogisticsOutputConnections(
+        input.nodeId,
+        input.port.id,
+        output.port.type,
+        connectionsWithoutReplacement,
+        nodesRef.current,
+        runtimeRef.current,
+      ).length) return;
+
+      const rect = element.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const dx = Math.max(rect.left - clientX, 0, clientX - rect.right);
+      const dy = Math.max(rect.top - clientY, 0, clientY - rect.bottom);
+      if (dx > snapPadding || dy > snapPadding) return;
+      const distance = Math.hypot(dx, dy);
+      if (best && best.distance <= distance) return;
+
+      const originalPort = portRefs.current[`${candidate.nodeId}:${candidate.port.id}`];
+      const anchorRect = originalPort?.getBoundingClientRect() ?? rect;
+      best = {
+        handle: candidate,
+        point: pointFromEvent(
+          anchorRect.left + anchorRect.width / 2,
+          anchorRect.top + anchorRect.height / 2,
+        ),
+        distance,
+      };
+    });
+
+    const bestMatch = best as { handle: PortHandle; point: Position; distance: number } | null;
+    return bestMatch ? { handle: bestMatch.handle, point: bestMatch.point } : null;
+  }, [findPortHandle, pointFromEvent]);
+
+  const findInsertionTarget = useCallback((nodeId: NodeId, position: Position) => {
+    const element = nodeRefs.current[nodeId];
+    const width = element?.offsetWidth ?? 258;
+    const height = element?.offsetHeight ?? 200;
+    const left = position.x - 10;
+    const right = position.x + width + 10;
+    const top = position.y - 10;
+    const bottom = position.y + height + 10;
+    const center = { x: position.x + width / 2, y: position.y + height / 2 };
+    let best: { id: string; distance: number } | null = null;
+    const nodeMap = Object.fromEntries(nodesRef.current.map((node) => [node.id, node]));
+
+    connectionsRef.current.forEach((connection) => {
+      if (!getInsertionPlan(nodeId, connection, nodeMap, connectionsRef.current, runtimeRef.current)) return;
+      const path = pathRefs.current[connection.id];
+      if (!path) return;
+      const length = path.getTotalLength();
+      const samples = Math.max(12, Math.ceil(length / 10));
+      for (let index = 0; index <= samples; index += 1) {
+        const point = path.getPointAtLength((length * index) / samples);
+        if (point.x < left || point.x > right || point.y < top || point.y > bottom) continue;
+        const distance = Math.hypot(point.x - center.x, point.y - center.y);
+        if (!best || distance < best.distance) best = { id: connection.id, distance };
+      }
+    });
+
+    const bestMatch = best as { id: string; distance: number } | null;
+    return bestMatch ? bestMatch.id : null;
+  }, []);
+
+  const insertNodeIntoConnection = useCallback((nodeId: NodeId, connectionId: string) => {
+    const original = connectionsRef.current.find((connection) => connection.id === connectionId);
+    if (!original) return false;
+    const nodeMap = Object.fromEntries(nodesRef.current.map((node) => [node.id, node]));
+    const plan = getInsertionPlan(nodeId, original, nodeMap, connectionsRef.current, runtimeRef.current);
+    if (!plan) return false;
+    const stamp = Date.now();
+    const incoming: Connection = {
+      id: `${original.sourceNode}-${nodeId}-${plan.input.id}-${stamp}`,
+      sourceNode: original.sourceNode,
+      sourcePort: original.sourcePort,
+      targetNode: nodeId,
+      targetPort: plan.input.id,
+      type: original.type,
+    };
+    const outgoing: Connection = {
+      id: `${nodeId}-${plan.output.id}-${original.targetNode}-${stamp}`,
+      sourceNode: nodeId,
+      sourcePort: plan.output.id,
+      targetNode: original.targetNode,
+      targetPort: original.targetPort,
+      type: plan.output.type,
+    };
+    const next = normalizeDynamicConnections(
+      [
+        ...connectionsRef.current.filter(
+          (connection) =>
+            connection.id !== original.id &&
+            !(connection.targetNode === nodeId && connection.targetPort === plan.input.id) &&
+            !(connection.sourceNode === nodeId && connection.sourcePort === plan.output.id),
+        ),
+        incoming,
+        outgoing,
+      ],
+      nodesRef.current,
+      runtimeRef.current,
+    );
+    connectionsRef.current = next;
+    setConnections(next);
+    if (isSplitterNode(nodeId)) {
+      setRuntime((current) => {
+        const updated = {
+          ...current,
+          splitters: {
+            ...current.splitters,
+            [nodeId]: { nextOutput: "a" as const },
+          },
+        };
+        runtimeRef.current = updated;
+        return updated;
+      });
+    } else if (isJointNode(nodeId)) {
+      setRuntime((current) => {
+        const updated = {
+          ...current,
+          joints: {
+            ...current.joints,
+            [nodeId]: { bufferedType: null },
+          },
+        };
+        runtimeRef.current = updated;
+        return updated;
+      });
+    } else {
+      const node = nodesRef.current.find((item) => item.id === nodeId);
+      const currentProcessor = runtimeRef.current.processors[nodeId];
+      if (
+        node &&
+        isProcessorKind(node.kind) &&
+        getSmartProcessorOutputPortId(nodeId, currentProcessor)
+      ) {
+        const processorKind = node.kind;
+        setRuntime((current) => {
+          const previous = current.processors[nodeId] ?? makeProcessorState(processorKind);
+          const updated = {
+            ...current,
+            processors: {
+              ...current.processors,
+              [nodeId]: makeProcessorState(
+                processorKind,
+                original.type,
+                previous.assemblerRecipe ?? null,
+                previous.refinerRecipe ?? null,
+              ),
+            },
+          };
+          runtimeRef.current = updated;
+          return updated;
+        });
+      }
+    }
+    setSelectedConnection(null);
+    setSelectedNodes([nodeId]);
+    return true;
+  }, []);
+
+  const finishNodePlacement = useCallback((
+    allowWireInsertion: boolean,
+    repeatPlacement: boolean,
+  ) => {
+    const nodeId = placingNodeRef.current;
+    if (!nodeId) return false;
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    const position = positionsRef.current[nodeId];
+    if (!node || !position) return false;
+
+    const blocked = overlapsAnotherNode(node, position);
+    updatePlacementBlocked(blocked);
+    if (blocked) return false;
+
+    const repeatPreview = repeatPlacementPreviewRef.current?.nodeId === nodeId
+      ? repeatPlacementPreviewRef.current
+      : null;
+    const placementUndo = pendingPlacementUndoRef.current?.nodeId === nodeId
+      ? pendingPlacementUndoRef.current
+      : null;
+    if (repeatPreview) {
+      const catalogItem = BUILD_CATALOG.find((item) => item.kind === node.kind);
+      const paidRuntime = removeBuildCosts
+        ? runtimeRef.current
+        : catalogItem
+          ? consumeBuildIngredients(
+              runtimeRef.current,
+              catalogItem.recipe,
+              nodesRef.current,
+              connectionsRef.current,
+            )
+          : null;
+      if (!paidRuntime) {
+        cancelRepeatPlacementPreview();
+        toast.error("Repeat placement ended", {
+          description: "There are not enough materials to place another node.",
+        });
+        return false;
+      }
+      runtimeRef.current = paidRuntime;
+      setRuntime(paidRuntime);
+      repeatPlacementPreviewRef.current = null;
+    }
+
+    const connectionId = allowWireInsertion && node.kind === "joint"
+      ? insertionTargetRef.current ?? findInsertionTarget(nodeId, position)
+      : null;
+    placingNodeRef.current = null;
+    repeatPlacementPreviewRef.current = null;
+    setPlacingNodeId(null);
+    setSelectedNodes([nodeId]);
+    setSelectedConnection(null);
+    if (connectionId) insertNodeIntoConnection(nodeId, connectionId);
+    insertionTargetRef.current = null;
+    setInsertionTarget(null);
+    updatePlacementBlocked(false);
+    if (isPurchasableKind(node.kind)) {
+      const placedKind = node.kind;
+      setPlacedBuildKinds((current) => new Set(current).add(placedKind));
+    }
+    if (isExtractorKind(node.kind)) unlockLogisticsBuildings();
+    if (placementUndo) {
+      pushUndoEntry({ kind: "graph", snapshot: placementUndo.snapshot });
+      pendingPlacementUndoRef.current = null;
+    }
+    if (repeatPlacement) {
+      const catalogItem = BUILD_CATALOG.find((item) => item.kind === node.kind);
+      if (catalogItem) buildNode(catalogItem.kind, catalogItem.recipe, nodeId);
+    }
+    return true;
+  }, [
+    buildNode,
+    cancelRepeatPlacementPreview,
+    findInsertionTarget,
+    insertNodeIntoConnection,
+    overlapsAnotherNode,
+    pushUndoEntry,
+    removeBuildCosts,
+    unlockLogisticsBuildings,
+    updatePlacementBlocked,
+  ]);
+
+  useEffect(() => {
+    const getSelectionBoxHits = (start: Position, end: Position) => {
+      const left = Math.min(start.x, end.x);
+      const right = Math.max(start.x, end.x);
+      const top = Math.min(start.y, end.y);
+      const bottom = Math.max(start.y, end.y);
+      return nodesRef.current.filter((node) => {
+        if (isResourceNodeKind(node.kind)) return false;
+        const position = positionsRef.current[node.id];
+        const element = nodeRefs.current[node.id];
+        const width = element?.offsetWidth ?? 258;
+        const height = element?.offsetHeight ?? 208;
+        return (
+          position.x < right &&
+          position.x + width > left &&
+          position.y < bottom &&
+          position.y + height > top
+        );
+      }).map((node) => node.id);
+    };
+
+    const getSelectionBoxResult = (
+      start: Position,
+      end: Position,
+      baseSelection: NodeId[],
+    ) => {
+      const hits = getSelectionBoxHits(start, end);
+      const hitNodeIds = new Set(hits);
+      const representedGroups = end.x >= start.x && end.y >= start.y
+        ? controlGroupsRef.current.filter((group) =>
+            group.nodeIds.some((nodeId) => hitNodeIds.has(nodeId)),
+          )
+        : [];
+      const representedGroupNodeIds = representedGroups.flatMap((group) => group.nodeIds);
+      const availableNodeIds = new Set(nodesRef.current.map((node) => node.id));
+      const selectedNodeIds = Array.from(new Set<NodeId>([
+        ...baseSelection,
+        ...hits,
+        ...representedGroupNodeIds,
+      ])).filter((nodeId) => availableNodeIds.has(nodeId));
+      return { selectedNodeIds, representedGroups };
+    };
+
+    let connectionAutoScrollFrame: number | null = null;
+    let previousConnectionAutoScrollTime: number | null = null;
+
+    const getConnectionEdgeVelocity = (
+      coordinate: number,
+      start: number,
+      end: number,
+    ) => {
+      if (coordinate < start + CONNECTION_AUTO_SCROLL_EDGE) {
+        const intensity = Math.min(
+          1,
+          Math.max(0, (start + CONNECTION_AUTO_SCROLL_EDGE - coordinate) / CONNECTION_AUTO_SCROLL_EDGE),
+        );
+        return -CONNECTION_AUTO_SCROLL_MAX_SPEED * intensity;
+      }
+      if (coordinate > end - CONNECTION_AUTO_SCROLL_EDGE) {
+        const intensity = Math.min(
+          1,
+          Math.max(0, (coordinate - (end - CONNECTION_AUTO_SCROLL_EDGE)) / CONNECTION_AUTO_SCROLL_EDGE),
+        );
+        return CONNECTION_AUTO_SCROLL_MAX_SPEED * intensity;
+      }
+      return 0;
+    };
+
+    const stopConnectionAutoScroll = () => {
+      if (connectionAutoScrollFrame !== null) {
+        window.cancelAnimationFrame(connectionAutoScrollFrame);
+        connectionAutoScrollFrame = null;
+      }
+      previousConnectionAutoScrollTime = null;
+    };
+
+    const runConnectionAutoScroll = (timestamp: number) => {
+      connectionAutoScrollFrame = null;
+      const drag = connectionDragRef.current;
+      const viewport = workspaceRef.current;
+      if (!drag || !viewport) {
+        previousConnectionAutoScrollTime = null;
+        return;
+      }
+
+      const bounds = viewport.getBoundingClientRect();
+      const velocityX = getConnectionEdgeVelocity(drag.clientX, bounds.left, bounds.right);
+      const velocityY = getConnectionEdgeVelocity(drag.clientY, bounds.top, bounds.bottom);
+      const maxScrollLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+      const maxScrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      const canScrollX = velocityX < 0
+        ? viewport.scrollLeft > 0
+        : velocityX > 0 && viewport.scrollLeft < maxScrollLeft;
+      const canScrollY = velocityY < 0
+        ? viewport.scrollTop > 0
+        : velocityY > 0 && viewport.scrollTop < maxScrollTop;
+
+      if (!canScrollX && !canScrollY) {
+        previousConnectionAutoScrollTime = null;
+        return;
+      }
+
+      const elapsedSeconds = previousConnectionAutoScrollTime === null
+        ? 1 / 60
+        : Math.min(0.05, Math.max(0, (timestamp - previousConnectionAutoScrollTime) / 1000));
+      previousConnectionAutoScrollTime = timestamp;
+      const previousLeft = viewport.scrollLeft;
+      const previousTop = viewport.scrollTop;
+
+      if (canScrollX) {
+        viewport.scrollLeft = Math.max(
+          0,
+          Math.min(maxScrollLeft, previousLeft + velocityX * elapsedSeconds),
+        );
+      }
+      if (canScrollY) {
+        viewport.scrollTop = Math.max(
+          0,
+          Math.min(maxScrollTop, previousTop + velocityY * elapsedSeconds),
+        );
+      }
+
+      const didScroll =
+        Math.abs(viewport.scrollLeft - previousLeft) > 0.01 ||
+        Math.abs(viewport.scrollTop - previousTop) > 0.01;
+      if (didScroll) {
+        updateGridPosition();
+        setWirePointer(pointFromEvent(drag.clientX, drag.clientY));
+      }
+
+      if (didScroll) {
+        connectionAutoScrollFrame = window.requestAnimationFrame(runConnectionAutoScroll);
+      } else {
+        previousConnectionAutoScrollTime = null;
+      }
+    };
+
+    const startConnectionAutoScroll = () => {
+      if (connectionAutoScrollFrame !== null || !connectionDragRef.current) return;
+      connectionAutoScrollFrame = window.requestAnimationFrame(runConnectionAutoScroll);
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      const viewport = workspaceRef.current;
+      const bounds = viewport?.getBoundingClientRect();
+      if (
+        bounds &&
+        event.clientX >= bounds.left &&
+        event.clientX <= bounds.right &&
+        event.clientY >= bounds.top &&
+        event.clientY <= bounds.bottom
+      ) {
+        lastCanvasPointerRef.current = { x: event.clientX, y: event.clientY };
+      }
+      if (placingNodeRef.current && bounds) {
+        const nodeId = placingNodeRef.current;
+        const placingNode = nodesRef.current.find((node) => node.id === nodeId);
+        if (!placingNode) return;
+        const { width: placementWidth, height: placementHeight } = getNodeSize(nodeId, placingNode);
+        const placementOffsetY = placingNode?.kind === "joint" || placingNode?.kind === "powerSplitter"
+          ? placementHeight / 2
+          : 42;
+        const point = pointFromEvent(event.clientX, event.clientY);
+        const position = {
+          x: Math.max(12, Math.min(WORLD_SIZE.width - placementWidth - 12, point.x - placementWidth / 2)),
+          y: Math.max(52, Math.min(WORLD_SIZE.height - placementHeight - 12, point.y - placementOffsetY)),
+        };
+        const nextPositions = {
+          ...positionsRef.current,
+          [nodeId]: position,
+        };
+        positionsRef.current = nextPositions;
+        setPositions(nextPositions);
+        const blocked = overlapsAnotherNode(placingNode, position);
+        updatePlacementBlocked(blocked);
+        const insertionTarget = !blocked && placingNode.kind === "joint" && hasPlatformInsertModifier(event)
+          ? findInsertionTarget(nodeId, nextPositions[nodeId])
+          : null;
+        insertionTargetRef.current = insertionTarget;
+        setInsertionTarget(insertionTarget);
+        return;
+      }
+      if (panRef.current) {
+        if (!viewport) return;
+        if (
+          Math.hypot(
+            event.clientX - panRef.current.startX,
+            event.clientY - panRef.current.startY,
+          ) > 4
+        ) {
+          panRef.current.moved = true;
+        }
+        viewport.scrollLeft = panRef.current.scrollLeft - (event.clientX - panRef.current.startX);
+        viewport.scrollTop = panRef.current.scrollTop - (event.clientY - panRef.current.startY);
+        return;
+      }
+      if (selectionBoxRef.current) {
+        const box = selectionBoxRef.current;
+        const end = pointFromEvent(event.clientX, event.clientY);
+        box.end = end;
+        if (Math.hypot(end.x - box.start.x, end.y - box.start.y) > 3) box.moved = true;
+        setSelectionBox({ start: box.start, end });
+
+        if (box.moved) {
+          const { selectedNodeIds, representedGroups } = getSelectionBoxResult(
+            box.start,
+            end,
+            box.baseSelection,
+          );
+          box.currentSelection = selectedNodeIds;
+          selectedNodesRef.current = selectedNodeIds;
+          setSelectedNodes(selectedNodeIds);
+          setActiveControlGroupId(
+            representedGroups.length === 1 ? representedGroups[0].id : null,
+          );
+          individualControlNodeRef.current = null;
+          setIndividualControlNodeId(null);
+        }
+        return;
+      }
+      if (dragRef.current) {
+        const drag = dragRef.current;
+        const requestedTotalDx = (event.clientX - drag.startX) / zoomRef.current;
+        const requestedTotalDy = (event.clientY - drag.startY) / zoomRef.current;
+        if (Math.abs(requestedTotalDx) + Math.abs(requestedTotalDy) > 4) drag.moved = true;
+
+        const canvas = canvasRef.current;
+        const canvasWidth = canvas?.clientWidth ?? WORLD_SIZE.width;
+        const canvasHeight = canvas?.clientHeight ?? WORLD_SIZE.height;
+        const minimumDx = Math.max(...drag.nodeIds.map((nodeId) => {
+          const origin = drag.origins[nodeId];
+          return origin ? 12 - origin.x : 0;
+        }));
+        const maximumDx = Math.min(...drag.nodeIds.map((nodeId) => {
+          const origin = drag.origins[nodeId];
+          return origin ? canvasWidth - getNodeSize(nodeId).width - 12 - origin.x : 0;
+        }));
+        const minimumDy = Math.max(...drag.nodeIds.map((nodeId) => {
+          const origin = drag.origins[nodeId];
+          return origin ? 52 - origin.y : 0;
+        }));
+        const maximumDy = Math.min(...drag.nodeIds.map((nodeId) => {
+          const origin = drag.origins[nodeId];
+          return origin ? canvasHeight - getNodeSize(nodeId).height - 12 - origin.y : 0;
+        }));
+        const appliedDx = Math.max(minimumDx, Math.min(maximumDx, requestedTotalDx));
+        const appliedDy = Math.max(minimumDy, Math.min(maximumDy, requestedTotalDy));
+        const nextPositions = { ...positionsRef.current };
+        drag.nodeIds.forEach((nodeId) => {
+          const origin = drag.origins[nodeId];
+          if (!origin) return;
+          nextPositions[nodeId] = {
+            x: origin.x + appliedDx,
+            y: origin.y + appliedDy,
+          };
+        });
+
+        const movingNodeIds = new Set(drag.nodeIds);
+        const blockedByNode = drag.nodeIds.some((nodeId) => {
+          const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+          const position = nextPositions[nodeId];
+          return Boolean(node && position && overlapsAnotherNode(node, position, movingNodeIds));
+        });
+        drag.overlapping = blockedByNode;
+        if (!blockedByNode) {
+          drag.lastValidPositions = Object.fromEntries(
+            drag.nodeIds.flatMap((nodeId) => {
+              const position = nextPositions[nodeId];
+              return position ? [[nodeId, { ...position }] as const] : [];
+            }),
+          );
+        }
+
+        positionsRef.current = nextPositions;
+        setPositions(nextPositions);
+        const primaryPosition = nextPositions[drag.primaryNodeId];
+        setDragCollisionBlocked(blockedByNode);
+        const target =
+          drag.nodeIds.length === 1 &&
+          drag.moved &&
+          !blockedByNode &&
+          hasPlatformInsertModifier(event)
+            ? findInsertionTarget(drag.primaryNodeId, primaryPosition)
+            : null;
+        insertionTargetRef.current = target;
+        setInsertionTarget(target);
+      }
+      if (connecting || connectionDragRef.current) {
+        const drag = connectionDragRef.current;
+        if (drag) {
+          drag.clientX = event.clientX;
+          drag.clientY = event.clientY;
+          if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4) {
+            drag.moved = true;
+          }
+          startConnectionAutoScroll();
+        }
+        const activeConnection = connecting ?? drag?.connectionStart ?? null;
+        const snapped = activeConnection
+          ? findNearbyCompatiblePort(
+              event.clientX,
+              event.clientY,
+              activeConnection,
+              drag?.replaceConnectionId,
+            )
+          : null;
+        updateSnappedPort(snapped?.handle ?? null);
+        if (snapped) {
+          setHoveredPort((current) =>
+            current?.nodeId === snapped.handle.nodeId &&
+            current.port.id === snapped.handle.port.id
+              ? current
+              : snapped.handle,
+          );
+        }
+        setWirePointer(snapped?.point ?? pointFromEvent(event.clientX, event.clientY));
+      }
+    };
+
+    const onPointerUp = (event: PointerEvent) => {
+      if (panRef.current) {
+        if (
+          panRef.current.nodeId &&
+          panRef.current.moved &&
+          !panRef.current.contextMenuHandled
+        ) {
+          suppressedNodeContextMenuRef.current = {
+            nodeId: panRef.current.nodeId,
+            until: performance.now() + 350,
+          };
+        }
+        panRef.current = null;
+        setIsPanning(false);
+      }
+      if (selectionBoxRef.current) {
+        const box = selectionBoxRef.current;
+        if (event.type === "pointerup") {
+          const end = pointFromEvent(event.clientX, event.clientY);
+          box.end = end;
+          if (Math.hypot(end.x - box.start.x, end.y - box.start.y) > 3) box.moved = true;
+
+          if (box.moved) {
+            const { selectedNodeIds, representedGroups } = getSelectionBoxResult(
+              box.start,
+              end,
+              box.baseSelection,
+            );
+            box.currentSelection = selectedNodeIds;
+            selectedNodesRef.current = selectedNodeIds;
+            setSelectedNodes(selectedNodeIds);
+            setActiveControlGroupId(
+              representedGroups.length === 1 ? representedGroups[0].id : null,
+            );
+            individualControlNodeRef.current = null;
+            setIndividualControlNodeId(null);
+            announceMultiNodeSelection(selectedNodeIds);
+          }
+        } else {
+          selectedNodesRef.current = box.baseSelection;
+          setSelectedNodes(box.baseSelection);
+        }
+        selectionBoxRef.current = null;
+        setSelectionBox(null);
+      }
+      if (dragRef.current) {
+        const drag = dragRef.current;
+        let insertedIntoConnection = false;
+        if (drag.overlapping) {
+          const restoredPositions = { ...positionsRef.current };
+          Object.entries(drag.lastValidPositions).forEach(([nodeId, position]) => {
+            if (position) restoredPositions[nodeId] = position;
+          });
+          positionsRef.current = restoredPositions;
+          setPositions(restoredPositions);
+        } else if (
+          drag.nodeIds.length === 1 &&
+          drag.moved &&
+          insertionTargetRef.current &&
+          hasPlatformInsertModifier(event)
+        ) {
+          const insertionUndoSnapshot = captureGraphUndoSnapshot();
+          Object.entries(drag.origins).forEach(([nodeId, position]) => {
+            if (position) insertionUndoSnapshot.positions[nodeId] = { ...position };
+          });
+          insertedIntoConnection = insertNodeIntoConnection(
+            drag.primaryNodeId,
+            insertionTargetRef.current,
+          );
+          if (insertedIntoConnection) {
+            pushUndoEntry({ kind: "graph", snapshot: insertionUndoSnapshot });
+          }
+        }
+        const positionChanged = drag.nodeIds.some((nodeId) => {
+          const origin = drag.origins[nodeId];
+          const current = positionsRef.current[nodeId];
+          return Boolean(
+            origin &&
+            current &&
+            (Math.abs(origin.x - current.x) > 0.01 || Math.abs(origin.y - current.y) > 0.01)
+          );
+        });
+        if (!insertedIntoConnection && drag.moved && positionChanged) {
+          pushUndoEntry({
+            kind: "movement",
+            positions: Object.fromEntries(
+              Object.entries(drag.origins).flatMap(([nodeId, position]) =>
+                position ? [[nodeId, { ...position }] as const] : [],
+              ),
+            ),
+          });
+        }
+        dragRef.current = null;
+        insertionTargetRef.current = null;
+        setInsertionTarget(null);
+        setDraggingNode(null);
+        setDragCollisionBlocked(false);
+      }
+      const connectionDrag = connectionDragRef.current;
+      const activeConnection = connecting ?? connectionDrag?.connectionStart;
+      if (activeConnection) {
+        stopConnectionAutoScroll();
+        const isPointerUp = event.type === "pointerup";
+        const replaceConnectionId = connectionDrag?.replaceConnectionId;
+        const moved = connectionDrag?.moved ?? false;
+        const clickedMultiPort = Boolean(
+          connectionDrag && (
+            connectionDrag.originPortDirection === "output"
+              ? isMultiOutputPort(connectionDrag.originNodeId, connectionDrag.originPortId)
+              : isMultiInputPort(connectionDrag.originNodeId, connectionDrag.originPortId)
+          ),
+        );
+        const target = isPointerUp
+          ? snappedPortRef.current ?? findPortHandle(document.elementFromPoint(event.clientX, event.clientY))
+          : null;
+        if (isPointerUp && !moved && clickedMultiPort && connectionDrag) {
+          openMultiConnectionManager(
+            connectionDrag.originNodeId,
+            connectionDrag.originPortId,
+            connectionDrag.originPortDirection,
+          );
+        } else if (
+          target &&
+          (!replaceConnectionId || moved) &&
+          !(target.nodeId === activeConnection.nodeId && target.port.id === activeConnection.port.id)
+        ) {
+          connectPorts(activeConnection, target, replaceConnectionId);
+        }
+        connectionDragRef.current = null;
+        updateSnappedPort(null);
+        setConnecting(null);
+        setWirePointer(null);
+        setRewiringConnectionId(null);
+      }
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      stopConnectionAutoScroll();
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+  }, [
+    captureGraphUndoSnapshot,
+    connectPorts,
+    connecting,
+    announceMultiNodeSelection,
+    findNearbyCompatiblePort,
+    findInsertionTarget,
+    findPortHandle,
+    getNodeSize,
+    insertNodeIntoConnection,
+    openMultiConnectionManager,
+    overlapsAnotherNode,
+    pointFromEvent,
+    pushUndoEntry,
+    updateSnappedPort,
+    updatePlacementBlocked,
+    updateGridPosition,
+  ]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = performance.now();
+      const elapsed = Math.min(
+        MAX_SIMULATION_ELAPSED,
+        Math.max(0, now - lastSimulationTickRef.current),
+      );
+      lastSimulationTickRef.current = now;
+      if (!isRunningRef.current) return;
+      gameElapsedMsRef.current += elapsed;
+
+      const previous = runtimeRef.current;
+      const next: Runtime = {
+        ironOre: { ...previous.ironOre },
+        copperOre: { ...(previous.copperOre ?? { remaining: RESOURCE_CAPACITIES.copperOre }) },
+        stone: { ...(previous.stone ?? { remaining: RESOURCE_CAPACITIES.stone }) },
+        forest: {
+          ...previous.forest,
+          regenerationElapsed: previous.forest.regenerationElapsed ?? 0,
+        },
+        extractors: Object.fromEntries(
+          Object.entries(previous.extractors).map(([id, state]) => [id, { ...state }]),
+        ),
+        processors: Object.fromEntries(
+          Object.entries(previous.processors).map(([id, state]) => [
+            id,
+            {
+              ...state,
+              stored: getProcessorStored(state),
+              full: getProcessorStored(state) >= PROCESSOR_CAPACITY,
+              inputs: Object.fromEntries(
+                Object.entries(state.inputs ?? {}).map(([portId, amount]) => [
+                  portId,
+                  Math.min(
+                    PRODUCTION_INGREDIENT_CAPACITY,
+                    Math.max(0, Math.floor(Number(amount) || 0)),
+                  ),
+                ]),
+              ),
+            },
+          ]),
+        ),
+        generators: Object.fromEntries(
+          Object.entries(previous.generators ?? {}).map(([id, state]) => [id, {
+            ...state,
+            power: Math.min(GENERATOR_MAX_POWER, Math.max(0, state.power ?? 0)),
+            charcoal: Math.min(
+              PRODUCTION_INGREDIENT_CAPACITY,
+              Math.max(0, Math.floor(Number(state.charcoal) || 0)),
+            ),
+          }]),
+        ),
+        researchFoundries: Object.fromEntries(
+          Object.entries(previous.researchFoundries ?? {}).map(([id, state]) => [id, {
+            ...state,
+            cores: getResearchFoundryCores(state),
+            coreLoaded: undefined,
+          }]),
+        ),
+        treePlanters: Object.fromEntries(
+          Object.entries(previous.treePlanters ?? {}).map(([id, state]) => [id, { ...state }]),
+        ),
+        miningDrills: Object.fromEntries(
+          Object.entries(previous.miningDrills ?? {}).map(([id, state]) => [id, { ...state }]),
+        ),
+        minedDeposits: Object.fromEntries(
+          Object.entries(previous.minedDeposits ?? {}).map(([id, state]) => [id, { ...state }]),
+        ),
+        research: {
+          ...makeResearchState(),
+          ...previous.research,
+          progress: {
+            ...makeResearchState().progress,
+            ...(previous.research?.progress ?? {}),
+          },
+        },
+        splitters: Object.fromEntries(
+          Object.entries(previous.splitters ?? {}).map(([id, state]) => [
+            id,
+            { nextOutput: state.nextOutput === "b" ? "b" as const : "a" as const },
+          ]),
+        ),
+        joints: Object.fromEntries(
+          Object.entries(previous.joints ?? {}).map(([id, state]) => [id, { ...state }]),
+        ),
+        inventorySources: Object.fromEntries(
+          Object.entries(previous.inventorySources ?? {}).map(([id, state]) => [
+            id,
+            {
+              ...state,
+              channels: Object.fromEntries(
+                Object.entries(state.channels ?? {}).map(([edgeId, channel]) => [
+                  edgeId,
+                  { ...channel },
+                ]),
+              ),
+            },
+          ]),
+        ),
+        filters: Object.fromEntries(
+          Object.entries(previous.filters ?? {}).map(([id, state]) => [id, { ...state }]),
+        ),
+        woodenChests: Object.fromEntries(
+          Object.entries(previous.woodenChests ?? {}).map(([id, state]) => [id, { ...state }]),
+        ),
+        storages: Object.fromEntries(
+          Object.entries(previous.storages ?? {}).map(([id, state]) => [id, {
+            ...state,
+            items: normalizeItemStore(state.items, state.capacityPerItem),
+          }]),
+        ),
+        pausedOutputs: { ...(previous.pausedOutputs ?? {}) },
+        construction: Object.fromEntries(
+          Object.entries(previous.construction).map(([id, state]) => [id, { ...state }]),
+        ),
+        produced: { ...makeEmptyItemStore(), ...(previous.produced ?? {}) },
+      };
+      const fired: string[] = [];
+      const edges = connectionsRef.current;
+      const simulationNodes = nodesRef.current;
+      const simulationNodeById = new Map(
+        simulationNodes.map((node) => [node.id, node] as const),
+      );
+      const simulationNodesByKind = new Map<NodeKind, NodeSpec[]>();
+      simulationNodes.forEach((node) => {
+        const matchingNodes = simulationNodesByKind.get(node.kind);
+        if (matchingNodes) matchingNodes.push(node);
+        else simulationNodesByKind.set(node.kind, [node]);
+      });
+      const processorNodes = simulationNodes.filter((node) => isProcessorKind(node.kind));
+      const extractorNodes = simulationNodes.filter((node) => isExtractorKind(node.kind));
+      const edgeById = new Map(edges.map((edge) => [edge.id, edge] as const));
+      const incomingEdgeByPort = new Map<string, Connection>();
+      const outgoingEdgesByPort = new Map<string, Connection[]>();
+      edges.forEach((edge) => {
+        incomingEdgeByPort.set(`${edge.targetNode}:${edge.targetPort}`, edge);
+        const outputKey = `${edge.sourceNode}:${edge.sourcePort}`;
+        const outputEdges = outgoingEdgesByPort.get(outputKey);
+        if (outputEdges) outputEdges.push(edge);
+        else outgoingEdgesByPort.set(outputKey, [edge]);
+      });
+      const powerGeneratorBySource = new Map<NodeId, NodeId | null>();
+      const resolvePowerGenerator = (sourceNode: NodeId) => {
+        if (powerGeneratorBySource.has(sourceNode)) {
+          return powerGeneratorBySource.get(sourceNode) ?? null;
+        }
+        const generatorId = findPowerGeneratorId(
+          sourceNode,
+          edges,
+          next.generators,
+          next.pausedOutputs,
+        );
+        powerGeneratorBySource.set(sourceNode, generatorId);
+        return generatorId;
+      };
+      const markPowerTransfer = (consumerEdge: Connection) => {
+        fired.push(consumerEdge.id);
+        let upstreamNode = consumerEdge.sourceNode;
+        const visited = new Set<NodeId>();
+        while (
+          !visited.has(upstreamNode) &&
+          (isJointNode(upstreamNode) || isPowerSplitterNode(upstreamNode))
+        ) {
+          visited.add(upstreamNode);
+          const upstreamEdge = incomingEdgeByPort.get(
+            `${upstreamNode}:${isPowerSplitterNode(upstreamNode) ? "power-split-in" : "joint-in"}`,
+          );
+          if (!upstreamEdge || upstreamEdge.type !== ResourceType.POWER) break;
+          fired.push(upstreamEdge.id);
+          upstreamNode = upstreamEdge.sourceNode;
+        }
+      };
+      let dynamicConnectionsDirty = false;
+
+      if (next.forest.remaining >= RESOURCE_CAPACITIES.forest) {
+        next.forest.regenerationElapsed = 0;
+      } else {
+        const accumulatedRegeneration = next.forest.regenerationElapsed + elapsed;
+        const regeneratedLogs = Math.floor(
+          accumulatedRegeneration / FOREST_BASE_REGENERATION_DURATION,
+        );
+        if (regeneratedLogs > 0) {
+          next.forest.remaining = Math.min(
+            RESOURCE_CAPACITIES.forest,
+            next.forest.remaining + regeneratedLogs,
+          );
+        }
+        next.forest.regenerationElapsed = next.forest.remaining >= RESOURCE_CAPACITIES.forest
+          ? 0
+          : accumulatedRegeneration % FOREST_BASE_REGENERATION_DURATION;
+      }
+
+      simulationNodes.forEach((node) => {
+        const build = next.construction[node.id];
+        if (!build || build.complete || !isPurchasableKind(node.kind)) return;
+        if (repeatPlacementPreviewRef.current?.nodeId === node.id) return;
+        const duration = BUILD_TIMES[node.kind];
+        build.progress = Math.min(100, build.progress + (elapsed / duration) * 100);
+        if (build.progress >= 100) build.complete = true;
+      });
+
+      (simulationNodesByKind.get("generator") ?? [])
+        .forEach((node) => {
+          const construction = next.construction[node.id];
+          const generator = next.generators[node.id] ?? { power: 0, charcoal: 0 };
+          next.generators[node.id] = generator;
+          if (construction && !construction.complete) return;
+          while (
+            generator.charcoal > 0 &&
+            generator.power <= GENERATOR_MAX_POWER - POWER_PER_CHARCOAL
+          ) {
+            generator.charcoal -= 1;
+            generator.power += POWER_PER_CHARCOAL;
+          }
+        });
+
+      const deliverProduct = (
+        sourceNode: NodeId,
+        sourcePort: string,
+        product: ResourceType,
+        targetEdgeId?: string,
+        visitedConnectionIds: ReadonlySet<string> = new Set(),
+      ): boolean => {
+        if (next.pausedOutputs[sourceNode]) return false;
+        const targetEdge = targetEdgeId ? edgeById.get(targetEdgeId) : null;
+        const edge = targetEdgeId
+          ? targetEdge?.sourceNode === sourceNode && targetEdge.sourcePort === sourcePort
+            ? targetEdge
+            : null
+          : outgoingEdgesByPort.get(`${sourceNode}:${sourcePort}`)?.[0];
+        if (!edge || visitedConnectionIds.has(edge.id)) return false;
+        const nextVisitedConnectionIds = new Set(visitedConnectionIds);
+        nextVisitedConnectionIds.add(edge.id);
+
+        const targetNode = simulationNodeById.get(edge.targetNode);
+        const targetConstruction = next.construction[edge.targetNode];
+        const targetReady = !targetConstruction || targetConstruction.complete;
+
+        if (
+          targetNode?.kind === "generator" &&
+          targetReady &&
+          edge.targetPort === "generator-charcoal-in" &&
+          product === ResourceType.CHARCOAL
+        ) {
+          const generator = next.generators[edge.targetNode] ?? { power: 0, charcoal: 0 };
+          next.generators[edge.targetNode] = generator;
+          if (generator.charcoal < PRODUCTION_INGREDIENT_CAPACITY) {
+            generator.charcoal += 1;
+            fired.push(edge.id);
+            return true;
+          }
+        }
+
+        if (
+          targetNode?.kind === "researchFoundry" &&
+          targetReady &&
+          edge.targetPort === "research-core-in" &&
+          product === ResourceType.AUTOMATA_CORE
+        ) {
+          const foundry = next.researchFoundries[edge.targetNode] ?? {
+            progress: 0,
+            cores: 0,
+          };
+          next.researchFoundries[edge.targetNode] = foundry;
+          if (foundry.cores < PRODUCTION_INGREDIENT_CAPACITY) {
+            foundry.cores += 1;
+            foundry.coreLoaded = undefined;
+            next.research.available = true;
+            fired.push(edge.id);
+            return true;
+          }
+        }
+
+        if (
+          targetNode?.kind === "forest" &&
+          targetReady &&
+          edge.targetPort === "forest-growth-in" &&
+          product === ResourceType.FOREST_GROWTH &&
+          next.forest.remaining < RESOURCE_CAPACITIES.forest
+        ) {
+          next.forest.remaining = Math.min(
+            RESOURCE_CAPACITIES.forest,
+            next.forest.remaining + 1,
+          );
+          fired.push(edge.id);
+          return true;
+        }
+
+        if (targetNode && isProcessorKind(targetNode.kind) && targetReady) {
+          let targetProcessor = next.processors[edge.targetNode] ??
+            makeProcessorState(targetNode.kind);
+          next.processors[edge.targetNode] = targetProcessor;
+          const targetRecipe = getProcessorRecipe(targetNode.kind, targetProcessor);
+          const requirement = targetRecipe?.inputs.find(
+            (input) => input.id === edge.targetPort,
+          );
+          const productPort: Port = {
+            id: "delivered-product",
+            label: formatResourceType(product),
+            type: product,
+            direction: "output",
+          };
+          const requirementPort: Port | null = requirement
+            ? {
+                id: requirement.id,
+                label: requirement.label,
+                type: requirement.type,
+                direction: "input",
+              }
+            : null;
+          const smartTypingDelivery = Boolean(
+            requirement &&
+            getSmartProcessorOutputPortId(edge.targetNode, targetProcessor) &&
+            isSmartProcessorTypingPort(edge.targetNode, edge.targetPort, targetProcessor),
+          );
+          const deliveredMaterialType = smartTypingDelivery
+            ? getConcreteSmartProcessorMaterialType(edge.targetNode, product, targetProcessor)
+            : null;
+          if (deliveredMaterialType) {
+            const currentMaterialType = getConcreteSmartProcessorMaterialType(
+              edge.targetNode,
+              targetProcessor.materialType,
+              targetProcessor,
+            );
+            const materialLocked = hasSmartProcessorMaterialLock(
+              edge.targetNode,
+              targetProcessor,
+              targetRecipe ?? PROCESSOR_RECIPES[targetNode.kind],
+            );
+            if (
+              !currentMaterialType ||
+              (!materialLocked && currentMaterialType !== deliveredMaterialType)
+            ) {
+              // The item travelling over the cable is authoritative. This also
+              // upgrades older/generic PLATE or METAL cables without discarding
+              // manually buffered secondary ingredients such as Charcoal.
+              targetProcessor = {
+                ...targetProcessor,
+                materialType: deliveredMaterialType,
+              };
+              next.processors[edge.targetNode] = targetProcessor;
+              dynamicConnectionsDirty = true;
+            }
+          }
+          if (
+            targetProcessor &&
+            requirement &&
+            requirementPort &&
+            (
+              !smartTypingDelivery ||
+              getConcreteSmartProcessorMaterialType(
+                edge.targetNode,
+                targetProcessor.materialType,
+                targetProcessor,
+              ) === product
+            ) &&
+            isCompatible(productPort, requirementPort) &&
+            (targetProcessor.inputs[requirement.id] ?? 0) < PRODUCTION_INGREDIENT_CAPACITY
+          ) {
+            targetProcessor.inputs[requirement.id] =
+              (targetProcessor.inputs[requirement.id] ?? 0) + 1;
+            fired.push(edge.id);
+            return true;
+          }
+        }
+
+        if (
+          targetNode?.kind === "filter" &&
+          targetReady &&
+          edge.targetPort === "filter-in" &&
+          isInventoryItemType(product)
+        ) {
+          const targetFilter = next.filters[edge.targetNode] ?? {
+            selectedType: null,
+            bufferedType: null,
+          };
+          next.filters[edge.targetNode] = targetFilter;
+          if (
+            targetFilter.selectedType === product &&
+            targetFilter.bufferedType === null
+          ) {
+            targetFilter.bufferedType = product;
+            fired.push(edge.id);
+            return true;
+          }
+        }
+
+        if (
+          targetNode?.kind === "splitter" &&
+          targetReady &&
+          edge.targetPort === "split-in"
+        ) {
+          const targetSplitter = next.splitters[edge.targetNode] ?? {
+            nextOutput: "a" as const,
+          };
+          next.splitters[edge.targetNode] = targetSplitter;
+          const preferredOutput = targetSplitter.nextOutput;
+          const alternateOutput = preferredOutput === "a" ? "b" : "a";
+          const deliverTo = (output: "a" | "b") => deliverProduct(
+            edge.targetNode,
+            output === "a" ? "split-a-out" : "split-b-out",
+            product,
+            undefined,
+            nextVisitedConnectionIds,
+          );
+          const deliveredTo = deliverTo(preferredOutput)
+            ? preferredOutput
+            : deliverTo(alternateOutput)
+              ? alternateOutput
+              : null;
+          if (deliveredTo) {
+            targetSplitter.nextOutput = deliveredTo === "a" ? "b" : "a";
+            fired.push(edge.id);
+            return true;
+          }
+        }
+
+        if (
+          targetNode?.kind === "merger" &&
+          targetReady &&
+          (edge.targetPort === "merge-a-in" || edge.targetPort === "merge-b-in")
+        ) {
+          const mergerType = getMergerInputType(edge.targetNode, edges);
+          if (
+            mergerType === product &&
+            deliverProduct(
+              edge.targetNode,
+              "merge-out",
+              product,
+              undefined,
+              nextVisitedConnectionIds,
+            )
+          ) {
+            fired.push(edge.id);
+            return true;
+          }
+        }
+
+        if (
+          targetNode?.kind === "joint" &&
+          targetReady &&
+          edge.targetPort === "joint-in"
+        ) {
+          const targetJoint = next.joints[edge.targetNode];
+          if (targetJoint && targetJoint.bufferedType === null) {
+            targetJoint.bufferedType = product;
+            fired.push(edge.id);
+            return true;
+          }
+        }
+
+        if (
+          targetNode?.kind === "woodenChest" &&
+          targetReady &&
+          edge.targetPort === "chest-in" &&
+          isInventoryItemType(product)
+        ) {
+          const chest = next.woodenChests[edge.targetNode] ?? { itemType: null, stored: 0 };
+          next.woodenChests[edge.targetNode] = chest;
+          if (chest.itemType && chest.itemType !== product) return false;
+          if (!chest.itemType) {
+            chest.itemType = product;
+            dynamicConnectionsDirty = true;
+          }
+          if (chest.stored < WOODEN_CHEST_CAPACITY) {
+            chest.stored += 1;
+            fired.push(edge.id);
+            return true;
+          }
+        }
+
+        if (
+          targetNode?.kind === "storage" &&
+          targetReady &&
+          isInventoryItemType(product)
+        ) {
+          const storage = next.storages[edge.targetNode];
+          if (storage && (storage.items[product] ?? 0) < storage.capacityPerItem) {
+            storage.items[product] = (storage.items[product] ?? 0) + 1;
+            fired.push(edge.id);
+            return true;
+          }
+        }
+
+        return false;
+      };
+
+      processorNodes
+        .forEach((node) => {
+          if (!isProcessorKind(node.kind)) return;
+          const construction = next.construction[node.id];
+          if (construction && !construction.complete) return;
+          const state = next.processors[node.id];
+          if (!state || state.full) return;
+          (getProcessorRecipe(node.kind, state)?.inputs ?? [])
+            .filter((input) => input.type === ResourceType.IRON_ORE)
+            .forEach((input) => {
+              const edge = incomingEdgeByPort.get(`${node.id}:${input.id}`);
+              if (
+                edge?.sourceNode === "ironOre" &&
+                next.ironOre.remaining > 0 &&
+                (state.inputs[input.id] ?? 0) < input.amount
+              ) {
+                state.inputs[input.id] = (state.inputs[input.id] ?? 0) + 1;
+                next.ironOre.remaining -= 1;
+                fired.push(edge.id);
+              }
+            });
+        });
+
+      const extractorIds = extractorNodes.map((node) => node.id);
+      extractorIds.forEach((extractorId) => {
+        const construction = next.construction[extractorId];
+        if (construction && !construction.complete) {
+          next.extractors[extractorId] = {
+            progress: 0,
+            stored: 0,
+            full: false,
+            materialType: null,
+          };
+          return;
+        }
+        const resourceEdge = incomingEdgeByPort.get(`${extractorId}:resource-in`);
+        const recipe = resourceEdge ? EXTRACTOR_RECIPES[resourceEdge.type] : null;
+        const extractor = next.extractors[extractorId] ?? {
+          progress: 0,
+          stored: 0,
+          full: false,
+          materialType: null,
+        };
+        next.extractors[extractorId] = extractor;
+        const sourceAvailable = Boolean(
+          resourceEdge &&
+          getResourceRemaining(next, resourceEdge.sourceNode, resourceEdge.type, edges) > 0,
+        );
+
+        const bufferedProduct = extractor.stored > 0
+          ? extractor.materialType ?? recipe?.product ?? null
+          : null;
+        if (bufferedProduct && deliverProduct(extractorId, "product-out", bufferedProduct)) {
+          extractor.stored -= 1;
+          extractor.full = extractor.stored >= EXTRACTOR_CAPACITY;
+          if (extractor.stored === 0 && recipe?.product) {
+            extractor.materialType = recipe.product;
+          }
+        }
+
+        if (!recipe || !resourceEdge) {
+          extractor.progress = 0;
+          extractor.full = extractor.stored >= EXTRACTOR_CAPACITY;
+          return;
+        }
+
+        if (
+          extractor.stored > 0 &&
+          extractor.materialType &&
+          extractor.materialType !== recipe.product
+        ) {
+          extractor.progress = 0;
+          extractor.full = extractor.stored >= EXTRACTOR_CAPACITY;
+          return;
+        }
+        if (extractor.stored === 0) extractor.materialType = recipe.product;
+
+        if (sourceAvailable && extractor.stored < EXTRACTOR_CAPACITY) {
+          const cycleDuration = recipe.duration * (
+            next.research.extractor2Unlocked
+              ? EXTRACTOR_RESEARCH_CYCLE_MULTIPLIER
+              : 1
+          );
+          extractor.progress = Math.min(
+            100,
+            extractor.progress + (elapsed / cycleDuration) * 100,
+          );
+          if (extractor.progress >= 100) {
+            extractor.progress = 0;
+            extractor.stored = Math.min(EXTRACTOR_CAPACITY, extractor.stored + 1);
+            extractor.full = extractor.stored >= EXTRACTOR_CAPACITY;
+            extractor.materialType = recipe.product;
+            next.produced[recipe.product] += 1;
+            consumeResource(next, resourceEdge.sourceNode, resourceEdge.type, edges);
+            fired.push(resourceEdge.id);
+          }
+        } else if (!sourceAvailable) {
+          extractor.progress = 0;
+        }
+      });
+
+      processorNodes
+        .forEach((node) => {
+          if (!isProcessorKind(node.kind)) return;
+          const construction = next.construction[node.id];
+          if (construction && !construction.complete) {
+            const existing = next.processors[node.id];
+            next.processors[node.id] = makeProcessorState(
+              node.kind,
+              null,
+              existing?.assemblerRecipe ?? null,
+              existing?.refinerRecipe ?? null,
+            );
+            return;
+          }
+
+          let processor = next.processors[node.id] ?? makeProcessorState(node.kind);
+          const recipe = getProcessorRecipe(node.kind, processor);
+          if (!recipe) {
+            processor.progress = 0;
+            processor.powerCommitted = false;
+            next.processors[node.id] = processor;
+            return;
+          }
+          const connectedMaterialType = getConnectedSmartProcessorMaterialType(
+            node.id,
+            edges,
+            processor,
+          );
+          const hasBufferedIngredients = Object.values(processor.inputs).some(
+            (amount) => amount > 0,
+          );
+          if (
+            getSmartProcessorOutputPortId(node.id, processor) &&
+            connectedMaterialType &&
+            processor.materialType !== connectedMaterialType &&
+            getProcessorStored(processor) === 0 &&
+            !hasBufferedIngredients &&
+            processor.progress === 0
+          ) {
+            processor = makeProcessorState(
+              node.kind,
+              connectedMaterialType,
+              processor.assemblerRecipe ?? null,
+              processor.refinerRecipe ?? null,
+            );
+            dynamicConnectionsDirty = true;
+          }
+          next.processors[node.id] = processor;
+
+          const effectiveMaterialType = getEffectiveSmartProcessorMaterialType(
+            node.id,
+            processor,
+            edges,
+          );
+          const dynamicOutput = getSmartProcessorOutput(
+            node.id,
+            effectiveMaterialType,
+            processor,
+          );
+          const output = dynamicOutput ?? (
+            isInventoryItemType(recipe.output.type)
+              ? { type: recipe.output.type, label: recipe.output.label }
+              : null
+          );
+
+          if (!output) {
+            processor.progress = 0;
+            processor.full = getProcessorStored(processor) >= PROCESSOR_CAPACITY;
+            processor.powerCommitted = false;
+            return;
+          }
+
+          if (processor.stored > 0 && deliverProduct(node.id, recipe.output.id, output.type)) {
+            processor.stored -= 1;
+            processor.full = processor.stored >= PROCESSOR_CAPACITY;
+          }
+
+          if (processor.stored >= PROCESSOR_CAPACITY) {
+            processor.progress = 0;
+            processor.full = true;
+            return;
+          }
+
+          const hasInputs = recipe.inputs.every(
+            (input) => (processor.inputs[input.id] ?? 0) >= input.amount,
+          );
+          if (!hasInputs) {
+            processor.progress = 0;
+            return;
+          }
+
+          const powerCost = POWER_COSTS[node.kind] ?? 0;
+          if (powerCost > 0 && !processor.powerCommitted) {
+            const powerEdge = incomingEdgeByPort.get(`${node.id}:power-in`);
+            const generatorId = powerEdge
+              ? resolvePowerGenerator(powerEdge.sourceNode)
+              : null;
+            const generator = generatorId ? next.generators[generatorId] : null;
+            if (!powerEdge || !generator || generator.power < powerCost) {
+              processor.progress = 0;
+              return;
+            }
+            generator.power -= powerCost;
+            processor.powerCommitted = true;
+            markPowerTransfer(powerEdge);
+          }
+
+          processor.progress = Math.min(
+            100,
+            processor.progress + (elapsed / recipe.duration) * 100,
+          );
+          if (processor.progress >= 100) {
+            processor.progress = 0;
+            processor.stored = Math.min(PROCESSOR_CAPACITY, processor.stored + 1);
+            processor.full = processor.stored >= PROCESSOR_CAPACITY;
+            processor.powerCommitted = false;
+            if (isInventoryItemType(output.type)) {
+              next.produced[output.type] += 1;
+            }
+            recipe.inputs.forEach((input) => {
+              processor.inputs[input.id] = Math.max(
+                0,
+                (processor.inputs[input.id] ?? 0) - input.amount,
+              );
+            });
+          }
+        });
+
+      (simulationNodesByKind.get("researchFoundry") ?? [])
+        .forEach((node) => {
+          const construction = next.construction[node.id];
+          const foundry = next.researchFoundries[node.id] ?? {
+            progress: 0,
+            cores: 0,
+          };
+          next.researchFoundries[node.id] = foundry;
+
+          if (construction && !construction.complete) {
+            foundry.progress = 0;
+            foundry.cores = 0;
+            return;
+          }
+          if (foundry.cores <= 0) {
+            foundry.progress = 0;
+            return;
+          }
+
+          const activeProject = next.research.activeProject;
+          if (!activeProject || isResearchProjectUnlocked(next.research, activeProject)) {
+            foundry.progress = 0;
+            return;
+          }
+
+          foundry.progress = Math.min(
+            100,
+            foundry.progress + (elapsed / RESEARCH_CYCLE_DURATION) * 100,
+          );
+          if (foundry.progress >= 100) {
+            foundry.progress = 0;
+            foundry.cores = Math.max(0, foundry.cores - 1);
+            next.research.progress[activeProject] = Math.min(
+              RESEARCH_UNLOCK_COST,
+              next.research.progress[activeProject] + 1,
+            );
+            if (next.research.progress[activeProject] >= RESEARCH_UNLOCK_COST) {
+              if (activeProject === "extractor2") {
+                next.research.extractor2Unlocked = true;
+              } else if (activeProject === "treePlanter") {
+                next.research.treePlanterUnlocked = true;
+              } else if (activeProject === "miningDrill") {
+                next.research.miningDrillUnlocked = true;
+              } else {
+                next.research.explorationUnlocked = true;
+              }
+              announceResearchCompletion(activeProject);
+              next.research.activeProject = null;
+            }
+          }
+        });
+
+      (simulationNodesByKind.get("treePlanter") ?? [])
+        .forEach((node) => {
+          const construction = next.construction[node.id];
+          const planter = next.treePlanters[node.id] ?? { progress: 0 };
+          next.treePlanters[node.id] = planter;
+
+          if (construction && !construction.complete) {
+            planter.progress = 0;
+            return;
+          }
+
+          const powerEdge = incomingEdgeByPort.get(`${node.id}:power-in`);
+          const outputEdge = outgoingEdgesByPort.get(`${node.id}:forest-growth-out`)?.[0];
+          const generatorId = powerEdge
+            ? resolvePowerGenerator(powerEdge.sourceNode)
+            : null;
+          const generator = generatorId ? next.generators[generatorId] : null;
+
+          if (
+            !powerEdge ||
+            !outputEdge ||
+            !generator ||
+            generator.power < TREE_PLANTER_POWER_COST ||
+            next.forest.remaining >= RESOURCE_CAPACITIES.forest
+          ) {
+            planter.progress = 0;
+            return;
+          }
+
+          planter.progress = Math.min(
+            100,
+            planter.progress + (elapsed / TREE_PLANTER_CYCLE_DURATION) * 100,
+          );
+          if (
+            planter.progress >= 100 &&
+            deliverProduct(node.id, "forest-growth-out", ResourceType.FOREST_GROWTH)
+          ) {
+            planter.progress = 0;
+            generator.power -= TREE_PLANTER_POWER_COST;
+            markPowerTransfer(powerEdge);
+          }
+        });
+
+      const completedMiningDrills: Array<{ nodeId: NodeId; type: MiningDrillTarget }> = [];
+      (simulationNodesByKind.get("miningDrill") ?? [])
+        .forEach((node) => {
+          const construction = next.construction[node.id];
+          const drill = next.miningDrills[node.id] ?? {
+            progress: 0,
+            iterations: 0,
+            selectedType: null,
+            powerCommitted: false,
+          };
+          next.miningDrills[node.id] = drill;
+
+          if (construction && !construction.complete) {
+            drill.progress = 0;
+            drill.iterations = 0;
+            drill.powerCommitted = false;
+            return;
+          }
+          if (!drill.selectedType) {
+            drill.progress = 0;
+            drill.iterations = 0;
+            drill.powerCommitted = false;
+            return;
+          }
+
+          const powerEdge = incomingEdgeByPort.get(`${node.id}:power-in`);
+          const generatorId = powerEdge
+            ? resolvePowerGenerator(powerEdge.sourceNode)
+            : null;
+          const generator = generatorId ? next.generators[generatorId] : null;
+
+          if (!drill.powerCommitted) {
+            if (!powerEdge || !generator || generator.power < MINING_DRILL_POWER_COST) {
+              drill.progress = 0;
+              return;
+            }
+            generator.power -= MINING_DRILL_POWER_COST;
+            drill.powerCommitted = true;
+            markPowerTransfer(powerEdge);
+          }
+
+          drill.progress = Math.min(
+            100,
+            drill.progress + (elapsed / MINING_DRILL_CYCLE_DURATION) * 100,
+          );
+          if (drill.progress >= 100) {
+            drill.progress = 0;
+            drill.iterations = Math.min(MINING_DRILL_ITERATIONS, drill.iterations + 1);
+            drill.powerCommitted = false;
+            if (drill.iterations >= MINING_DRILL_ITERATIONS) {
+              completedMiningDrills.push({ nodeId: node.id, type: drill.selectedType });
+            }
+          }
+        });
+
+      if (completedMiningDrills.length > 0) {
+        const completedIds = new Set(completedMiningDrills.map(({ nodeId }) => nodeId));
+        const nextNodes = nodesRef.current.map((node) => {
+          const completion = completedMiningDrills.find(({ nodeId }) => nodeId === node.id);
+          return completion ? createMinedDepositNode(node.id, completion.type) : node;
+        });
+        const removedConnectionIds = new Set(
+          edges
+            .filter((edge) => completedIds.has(edge.targetNode))
+            .map((edge) => edge.id),
+        );
+        const nextConnections = edges.filter((edge) => !removedConnectionIds.has(edge.id));
+
+        completedMiningDrills.forEach(({ nodeId, type }) => {
+          next.minedDeposits[nodeId] = {
+            type,
+            remaining: MINED_DEPOSIT_CAPACITY,
+            capacity: MINED_DEPOSIT_CAPACITY,
+          };
+          delete next.miningDrills[nodeId];
+          delete next.construction[nodeId];
+          toast.success(`${getMiningTarget(type)?.title ?? "Ore"} deposit discovered`, {
+            description: `${MINED_DEPOSIT_CAPACITY.toLocaleString()} units are ready for extraction.`,
+          });
+        });
+
+        nodesRef.current = nextNodes;
+        setNodes(nextNodes);
+        connectionsRef.current = nextConnections;
+        setConnections(nextConnections);
+        setSelectedConnection((current) => current && removedConnectionIds.has(current) ? null : current);
+        setConfiguringMiningDrillId((current) => current && completedIds.has(current) ? null : current);
+        window.requestAnimationFrame(measureAnchors);
+      }
+
+      (simulationNodesByKind.get("inventorySource") ?? [])
+        .forEach((node) => {
+          const construction = next.construction[node.id];
+          const source = next.inventorySources[node.id] ?? {
+            progress: 0,
+            full: false,
+            itemType: null,
+            channels: {},
+          };
+          next.inventorySources[node.id] = source;
+
+          if (construction && !construction.complete) {
+            source.progress = 0;
+            source.full = false;
+            source.itemType = null;
+            source.channels = {};
+            return;
+          }
+
+          const filterEdges = (outgoingEdgesByPort.get(`${node.id}:inventory-out`) ?? []).filter(
+            (edge) =>
+              edge.targetPort === "filter-in" &&
+              simulationNodeById.get(edge.targetNode)?.kind === "filter",
+          );
+          const channels: Runtime["inventorySources"][NodeId]["channels"] = {};
+
+          filterEdges.forEach((filterEdge) => {
+            const selectedType = next.filters[filterEdge.targetNode]?.selectedType ?? null;
+            const channel = source.channels?.[filterEdge.id] ?? {
+              progress: 0,
+              full: false,
+              itemType: null,
+            };
+            channels[filterEdge.id] = channel;
+
+            if (channel.itemType !== selectedType) {
+              channel.progress = 0;
+              channel.full = false;
+              channel.itemType = selectedType;
+            }
+            const available = selectedType
+              ? getStoredItemAmount(
+                  next,
+                  simulationNodes,
+                  edges,
+                  selectedType,
+                  new Set([node.id]),
+                )
+              : 0;
+            if (!selectedType || available <= 0) {
+              channel.progress = 0;
+              channel.full = false;
+              return;
+            }
+
+            if (!channel.full) {
+              channel.progress = Math.min(
+                100,
+                channel.progress + (elapsed / INVENTORY_SOURCE_CYCLE_DURATION) * 100,
+              );
+              if (channel.progress >= 100) channel.full = true;
+            }
+
+            if (
+              channel.full &&
+              available > 0 &&
+              deliverProduct(node.id, "inventory-out", selectedType, filterEdge.id)
+            ) {
+              consumeStoredMaterialInPlace(
+                next,
+                simulationNodes,
+                edges,
+                selectedType,
+                1,
+                new Set([node.id, filterEdge.targetNode]),
+              );
+              channel.progress = 0;
+              channel.full = false;
+            }
+          });
+
+          source.channels = channels;
+          const activeChannels = Object.values(channels);
+          source.progress = activeChannels.length
+            ? Math.max(...activeChannels.map((channel) => channel.progress))
+            : 0;
+          source.full = activeChannels.some((channel) => channel.full);
+          source.itemType = activeChannels.find((channel) => channel.itemType)?.itemType ?? null;
+        });
+
+      (simulationNodesByKind.get("joint") ?? [])
+        .forEach((node) => {
+          const construction = next.construction[node.id];
+          const joint = next.joints[node.id] ?? { bufferedType: null };
+          next.joints[node.id] = joint;
+
+          if (construction && !construction.complete) {
+            joint.bufferedType = null;
+            return;
+          }
+          if (!getJointInputType(node.id, edges)) {
+            joint.bufferedType = null;
+            return;
+          }
+          if (
+            joint.bufferedType &&
+            deliverProduct(node.id, "joint-out", joint.bufferedType)
+          ) {
+            joint.bufferedType = null;
+          }
+        });
+
+      (simulationNodesByKind.get("filter") ?? [])
+        .forEach((node) => {
+          const construction = next.construction[node.id];
+          const filter = next.filters[node.id] ?? {
+            selectedType: null,
+            bufferedType: null,
+          };
+          next.filters[node.id] = filter;
+
+          if (construction && !construction.complete) {
+            filter.bufferedType = null;
+            return;
+          }
+          if (!filter.selectedType) {
+            filter.bufferedType = null;
+            return;
+          }
+          if (
+            filter.bufferedType === filter.selectedType &&
+            deliverProduct(node.id, "filter-out", filter.bufferedType)
+          ) {
+            filter.bufferedType = null;
+          }
+        });
+
+      (simulationNodesByKind.get("woodenChest") ?? [])
+        .forEach((node) => {
+          const construction = next.construction[node.id];
+          if (construction && !construction.complete) return;
+          const chest = next.woodenChests[node.id];
+          if (!chest?.itemType || chest.stored <= 0) return;
+          if (deliverProduct(node.id, "chest-out", chest.itemType)) {
+            chest.stored = Math.max(0, chest.stored - 1);
+          }
+        });
+
+      runtimeRef.current = next;
+      if (wireAnimationsEnabledRef.current) {
+        fired.forEach((edgeId) => pendingActiveFlowIdsRef.current.add(edgeId));
+      } else {
+        pendingActiveFlowIdsRef.current.clear();
+      }
+      if (dynamicConnectionsDirty) {
+        const normalizedEdges = normalizeDynamicConnections(
+          edges,
+          nodesRef.current,
+          next,
+        );
+        if (!connectionsAreEqual(edges, normalizedEdges)) {
+          connectionsRef.current = normalizedEdges;
+          setConnections(normalizedEdges);
+        }
+      }
+
+      const shouldUpdateUi =
+        now - lastSimulationUiUpdateRef.current >= SIMULATION_UI_INTERVAL;
+      if (shouldUpdateUi) {
+        lastSimulationUiUpdateRef.current = now;
+        const runtimeSignature = JSON.stringify(next);
+        if (runtimeSignature !== lastPublishedRuntimeSignatureRef.current) {
+          lastPublishedRuntimeSignatureRef.current = runtimeSignature;
+          setRuntime(next);
+        }
+      }
+      if (
+        shouldUpdateUi &&
+        wireAnimationsEnabledRef.current &&
+        pendingActiveFlowIdsRef.current.size > 0
+      ) {
+        const timestamp = Date.now();
+        const pendingFlowIds = [...pendingActiveFlowIdsRef.current];
+        pendingActiveFlowIdsRef.current.clear();
+        setActiveFlows((current) => {
+          const updated = { ...current };
+          pendingFlowIds.forEach((id) => {
+            updated[id] = timestamp;
+          });
+          return updated;
+        });
+      }
+    }, SIMULATION_TICK_INTERVAL);
+
+    return () => window.clearInterval(timer);
+  }, [measureAnchors, unlockLogisticsBuildings]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const cutoff = Date.now() - 1000;
+      setActiveFlows((current) => {
+        const retained = Object.entries(current).filter(([, timestamp]) => timestamp > cutoff);
+        return retained.length === Object.keys(current).length
+          ? current
+          : Object.fromEntries(retained);
+      });
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      const isEditing =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable);
+      if (
+        !isEditing &&
+        !event.shiftKey &&
+        (event.ctrlKey || event.metaKey) &&
+        event.key.toLowerCase() === "z"
+      ) {
+        if (undoLastAction()) event.preventDefault();
+        return;
+      }
+      if (event.code === "Space" && !isEditing) {
+        spacePressedRef.current = true;
+        event.preventDefault();
+      }
+      if ((event.key === "Delete" || event.key === "Backspace") && !isEditing) {
+        if (cancelRepeatPlacementPreview()) {
+          event.preventDefault();
+          return;
+        }
+        const deletableNodeIds = new Set(
+          selectedNodes.filter((nodeId) => {
+            const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+            return Boolean(node && isDestroyableNode(node));
+          }),
+        );
+        const hasHighlightedNodeGroup = deletableNodeIds.size > 1;
+
+        if (deletableNodeIds.size > 0) {
+          event.preventDefault();
+          requestNodeDeletion(deletableNodeIds, {
+            highlightedControlGroup: hasHighlightedNodeGroup,
+          });
+        } else if (selectedConnection) {
+          event.preventDefault();
+          requestConnectionDeletion(selectedConnection);
+        } else if (selectedNodes.length > 0) {
+          event.preventDefault();
+        }
+      }
+      if (event.key === "Escape") {
+        cancelRepeatPlacementPreview();
+        updateSnappedPort(null);
+        setConnecting(null);
+        setWirePointer(null);
+        setRewiringConnectionId(null);
+        connectionDragRef.current = null;
+        selectionBoxRef.current = null;
+        setSelectionBox(null);
+        setSelectedConnection(null);
+        selectedNodesRef.current = [];
+        setSelectedNodes([]);
+        setActiveControlGroupId(null);
+        individualControlNodeRef.current = null;
+        setIndividualControlNodeId(null);
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === "Space") spacePressedRef.current = false;
+      if (event.key === "Shift") cancelRepeatPlacementPreview();
+    };
+    const onBlur = () => {
+      spacePressedRef.current = false;
+      cancelRepeatPlacementPreview();
+      updateSnappedPort(null);
+      panRef.current = null;
+      suppressedNodeContextMenuRef.current = null;
+      selectionBoxRef.current = null;
+      const interruptedDrag = dragRef.current;
+      if (interruptedDrag?.overlapping) {
+        const restoredPositions = { ...positionsRef.current };
+        Object.entries(interruptedDrag.lastValidPositions).forEach(([nodeId, position]) => {
+          if (position) restoredPositions[nodeId] = position;
+        });
+        positionsRef.current = restoredPositions;
+        setPositions(restoredPositions);
+      }
+      dragRef.current = null;
+      setSelectionBox(null);
+      setIsPanning(false);
+      setDraggingNode(null);
+      setDragCollisionBlocked(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [
+    cancelRepeatPlacementPreview,
+    requestNodeDeletion,
+    requestConnectionDeletion,
+    selectedConnection,
+    selectedNodes,
+    undoLastAction,
+    updateSnappedPort,
+  ]);
+
+  const beginNodeDrag = (event: React.PointerEvent, nodeId: NodeId) => {
+    if (event.button !== 0 || spacePressedRef.current) return;
+    if (placingNodeRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      finishNodePlacement(hasPlatformInsertModifier(event), event.shiftKey);
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const clickedNode = nodesRef.current.find((node) => node.id === nodeId);
+    if (clickedNode && isResourceNodeKind(clickedNode.kind)) {
+      selectedNodesRef.current = [nodeId];
+      setSelectedNodes([nodeId]);
+      setSelectedConnection(null);
+      setActiveControlGroupId(null);
+      individualControlNodeRef.current = null;
+      setIndividualControlNodeId(null);
+      return;
+    }
+    if (hasPlatformInsertModifier(event)) {
+      const currentSelection = selectedNodesRef.current;
+      const nodeIds = (
+        currentSelection.includes(nodeId)
+          ? currentSelection.filter((selectedNodeId) => selectedNodeId !== nodeId)
+          : [...currentSelection, nodeId]
+      ).filter((selectedNodeId) => {
+        const selectedNode = nodesRef.current.find((node) => node.id === selectedNodeId);
+        return Boolean(selectedNode && !isResourceNodeKind(selectedNode.kind));
+      });
+      selectedNodesRef.current = nodeIds;
+      setSelectedNodes(nodeIds);
+      setSelectedConnection(null);
+      setActiveControlGroupId(null);
+      individualControlNodeRef.current = null;
+      setIndividualControlNodeId(null);
+      return;
+    }
+
+    const controlGroup = controlGroupsRef.current.find((group) => group.nodeIds.includes(nodeId));
+    const isIndividualControl = individualControlNodeRef.current === nodeId || event.detail >= 2;
+    let nodeIds: NodeId[];
+    if (controlGroup && !isIndividualControl) {
+      const availableNodeIds = new Set(nodesRef.current.map((node) => node.id));
+      nodeIds = controlGroup.nodeIds.filter((groupNodeId) => availableNodeIds.has(groupNodeId));
+      setActiveControlGroupId(controlGroup.id);
+      individualControlNodeRef.current = null;
+      setIndividualControlNodeId(null);
+    } else if (isIndividualControl) {
+      nodeIds = [nodeId];
+      setActiveControlGroupId(null);
+      individualControlNodeRef.current = nodeId;
+      setIndividualControlNodeId(nodeId);
+    } else {
+      const currentSelection = selectedNodesRef.current;
+      nodeIds = currentSelection.includes(nodeId)
+        ? currentSelection
+        : event.shiftKey
+          ? [...currentSelection, nodeId]
+          : [nodeId];
+      setActiveControlGroupId(null);
+      individualControlNodeRef.current = null;
+      setIndividualControlNodeId(null);
+    }
+    nodeIds = nodeIds.filter((selectedNodeId) => {
+      const selectedNode = nodesRef.current.find((node) => node.id === selectedNodeId);
+      return Boolean(selectedNode && !isResourceNodeKind(selectedNode.kind));
+    });
+    const origins = Object.fromEntries(
+      nodeIds.map((selectedNodeId) => [selectedNodeId, { ...positionsRef.current[selectedNodeId] }]),
+    ) as Partial<Positions>;
+    selectedNodesRef.current = nodeIds;
+    setSelectedNodes(nodeIds);
+    setSelectedConnection(null);
+    dragRef.current = {
+      primaryNodeId: nodeId,
+      nodeIds,
+      startX: event.clientX,
+      startY: event.clientY,
+      origins,
+      lastValidPositions: origins,
+      overlapping: false,
+      moved: false,
+    };
+    setDraggingNode(nodeId);
+    setDragCollisionBlocked(false);
+  };
+
+  const beginCanvasPan = (event: React.PointerEvent, nodeId?: NodeId) => {
+    if (event.button === 0 && placingNodeRef.current) {
+      event.preventDefault();
+      finishNodePlacement(hasPlatformInsertModifier(event), event.shiftKey);
+      return;
+    }
+    if (event.button === 1 || event.button === 2 || (event.button === 0 && spacePressedRef.current)) {
+      const viewport = workspaceRef.current;
+      if (!viewport) return;
+      event.preventDefault();
+      panRef.current = {
+        startX: event.clientX,
+        startY: event.clientY,
+        scrollLeft: viewport.scrollLeft,
+        scrollTop: viewport.scrollTop,
+        moved: false,
+        nodeId,
+        contextMenuHandled: false,
+      };
+      setIsPanning(true);
+      return;
+    }
+    if (event.button === 0) {
+      event.preventDefault();
+      const start = pointFromEvent(event.clientX, event.clientY);
+      const baseSelection = event.shiftKey ? selectedNodes : [];
+      selectionBoxRef.current = {
+        start,
+        end: start,
+        baseSelection,
+        currentSelection: baseSelection,
+        moved: false,
+      };
+      setSelectionBox({ start, end: start });
+      setSelectedConnection(null);
+      setActiveControlGroupId(null);
+      individualControlNodeRef.current = null;
+      setIndividualControlNodeId(null);
+      if (!event.shiftKey) {
+        selectedNodesRef.current = [];
+        setSelectedNodes([]);
+      }
+    }
+  };
+
+  const beginConnection = (event: React.PointerEvent, nodeId: NodeId, port: Port) => {
+    if (event.button !== 0 || spacePressedRef.current) return;
+    if (placingNodeRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      finishNodePlacement(hasPlatformInsertModifier(event), event.shiftKey);
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    let connectionStart = { nodeId, port } satisfies PortHandle;
+    let replaceConnectionId: string | undefined;
+
+    if (port.direction === "input") {
+      const attached = connectionsRef.current.filter(
+        (connection) => connection.targetNode === nodeId && connection.targetPort === port.id,
+      );
+      const existing =
+        attached.find((connection) => connection.id === selectedConnection) ??
+        (attached.length === 1 ? attached[0] : null);
+      if (existing) {
+        const sourceNode = nodesRef.current.find((node) => node.id === existing.sourceNode);
+        const sourceSpec = sourceNode?.outputs.find((output) => output.id === existing.sourcePort);
+        if (sourceSpec) {
+          connectionStart = {
+            nodeId: existing.sourceNode,
+            port: getEffectivePort(existing.sourceNode, sourceSpec, connectionsRef.current),
+          };
+          replaceConnectionId = existing.id;
+        }
+      }
+    }
+
+    setConnecting(connectionStart);
+    setRewiringConnectionId(replaceConnectionId ?? null);
+    connectionDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      moved: false,
+      connectionStart,
+      replaceConnectionId,
+      originNodeId: nodeId,
+      originPortId: port.id,
+      originPortDirection: port.direction,
+    };
+    setWirePointer(pointFromEvent(event.clientX, event.clientY));
+    setSelectedConnection(null);
+    setSelectedNodes([nodeId]);
+  };
+
+  const handlePortKeyboard = (event: React.KeyboardEvent, nodeId: NodeId, port: Port) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    setSelectedNodes([nodeId]);
+    setSelectedConnection(null);
+    connectionDragRef.current = null;
+    if (!connecting) {
+      setConnecting({ nodeId, port });
+      return;
+    }
+    connectPorts(connecting, { nodeId, port });
+    updateSnappedPort(null);
+    setConnecting(null);
+    setWirePointer(null);
+  };
+
+  const setProductionRunning = useCallback((running: boolean) => {
+    isRunningRef.current = running;
+    setIsRunning(running);
+  }, []);
+
+  const toggleNodeOutputPause = useCallback((nodeId: NodeId) => {
+    const current = runtimeRef.current;
+    const next: Runtime = {
+      ...current,
+      pausedOutputs: {
+        ...(current.pausedOutputs ?? {}),
+        [nodeId]: !current.pausedOutputs?.[nodeId],
+      },
+    };
+    runtimeRef.current = next;
+    setRuntime(next);
+  }, []);
+
+  const chooseResearchProject = useCallback((projectId: ResearchProjectId) => {
+    const current = runtimeRef.current;
+    if (
+      !current.research.available ||
+      isResearchProjectUnlocked(current.research, projectId)
+    ) return;
+    const next: Runtime = {
+      ...current,
+      research: {
+        ...current.research,
+        activeProject: projectId,
+        progress: { ...current.research.progress },
+      },
+      researchFoundries: Object.fromEntries(
+        Object.entries(current.researchFoundries).map(([nodeId, foundry]) => [
+          nodeId,
+          { ...foundry, progress: 0 },
+        ]),
+      ),
+    };
+    runtimeRef.current = next;
+    setRuntime(next);
+  }, []);
+
+  const resetFactory = useCallback(() => {
+    undoHistoryRef.current = [];
+    pendingPlacementUndoRef.current = null;
+    nodesRef.current = INITIAL_NODES;
+    setNodes(INITIAL_NODES);
+    positionsRef.current = INITIAL_POSITIONS;
+    setPositions(INITIAL_POSITIONS);
+    setConnections(INITIAL_CONNECTIONS);
+    connectionsRef.current = INITIAL_CONNECTIONS;
+    const fresh = makeRuntime();
+    runtimeRef.current = fresh;
+    setRuntime(fresh);
+    lastSimulationTickRef.current = performance.now();
+    connectionDragRef.current = null;
+    updateSnappedPort(null);
+    setConnecting(null);
+    setWirePointer(null);
+    setRewiringConnectionId(null);
+    setSelectedConnection(null);
+    selectedNodesRef.current = [];
+    setSelectedNodes([]);
+    controlGroupsRef.current = [];
+    setControlGroups([]);
+    setActiveControlGroupId(null);
+    individualControlNodeRef.current = null;
+    setIndividualControlNodeId(null);
+    setPendingControlGroupNodeIds([]);
+    controlGroupTutorialSuppressedRef.current = false;
+    setSuppressControlGroupTutorial(false);
+    setControlGroupOnboardingOpen(false);
+    setControlGroupColorOpen(false);
+    setPendingDisbandControlGroupId(null);
+    setDisbandControlGroupOpen(false);
+    controlGroupSequenceRef.current = 0;
+    panRef.current = null;
+    suppressedNodeContextMenuRef.current = null;
+    setIsPanning(false);
+    placingNodeRef.current = null;
+    repeatPlacementPreviewRef.current = null;
+    setPlacingNodeId(null);
+    updatePlacementBlocked(false);
+    dragRef.current = null;
+    setDraggingNode(null);
+    setDragCollisionBlocked(false);
+    inventoryOverflowActionRef.current = null;
+    inventoryOverflowWarningSuppressedRef.current = false;
+    setInventoryOverflowPrompt(null);
+    setInventoryOverflowDialogOpen(false);
+    setSuppressFutureInventoryOverflowWarnings(false);
+    setAlwaysDeleteConnections(false);
+    setSuppressFutureConnectionDeleteWarnings(false);
+    setAlwaysApproveNodeDestruction(false);
+    setAlwaysApproveAssemblerRecipeChanges(false);
+    setPendingAssemblerRecipeChange(null);
+    setAssemblerRecipeChangeDialogOpen(false);
+    setSuppressFutureAssemblerRecipeWarnings(false);
+    setSuppressFutureNodeDestructionWarnings(false);
+    setPendingDeletionNodeIds([]);
+    setPendingDeletionIsHighlightedGroup(false);
+    setPendingDeletionDetails(null);
+    setDestroyDialogOpen(false);
+    setPendingDeletionConnectionId(null);
+    setConnectionDeleteDialogOpen(false);
+    setBuildOpen(false);
+    setResearchOpen(false);
+    setMapOpen(false);
+    setOptionsOpen(false);
+    setSaveOpen(false);
+    setShortcutBars(makeDefaultShortcutBars());
+    setRemoveBuildCosts(false);
+    setDevOpen(false);
+    setSelectedMapSector(null);
+    setMapNodeProgress(makeInitialMapNodeProgress());
+    buildOpenRef.current = false;
+    setShowBuildableOnly(false);
+    setShowNeverBuiltOnly(false);
+    setCompactBuildView(false);
+    setBuildCategory("all");
+    setJournalCategory("all");
+    setShowAllBuildNodes(false);
+    setConfiguringFilterId(null);
+    setConfiguringMiningDrillId(null);
+    setConfiguringAssemblerId(null);
+    setRevealedBuildKinds(new Set(["extractor", "woodenChest"]));
+    setBuiltBuildKinds(new Set(["extractor"]));
+    setPlacedBuildKinds(new Set());
+    setNewBuildKinds(new Set());
+    gameElapsedMsRef.current = 0;
+    setUnlockTimes({ extractor: 0, woodenChest: 0 });
+    setBuildAttention(false);
+    setJournalAttention(false);
+    logisticsUnlockedRef.current = false;
+    setLogisticsUnlocked(false);
+    buildSequenceRef.current = makeBuildSequence();
+    insertionTargetRef.current = null;
+    setInsertionTarget(null);
+    setProductionRunning(true);
+    zoomRef.current = MIN_ZOOM;
+    pinchTargetZoomRef.current = MIN_ZOOM;
+    setZoom(MIN_ZOOM);
+    focusHome();
+    toast.success("Foundry reset");
+  }, [focusHome, setProductionRunning, updatePlacementBlocked, updateSnappedPort]);
+
+  const saveGameToSlot = useCallback((slotIndex: number) => {
+    try {
+      const viewport = workspaceRef.current;
+      const name = saveNames[slotIndex]?.trim() || `Save ${slotIndex + 1}`;
+      const gameElapsedMs = Math.max(0, gameElapsedMsRef.current);
+      const savedUnlockTimes = { ...unlockTimes };
+      revealedBuildKinds.forEach((kind) => {
+        if (savedUnlockTimes[kind] === undefined) savedUnlockTimes[kind] = gameElapsedMs;
+      });
+      const slot = JSON.parse(JSON.stringify({
+        name,
+        savedAt: new Date().toISOString(),
+        data: {
+          version: 1,
+          nodes: nodesRef.current.map(serializeNode),
+          positions: positionsRef.current,
+          connections: connectionsRef.current,
+          runtime: runtimeRef.current,
+          controlGroups: controlGroupsRef.current,
+          revealedBuildKinds: [...revealedBuildKinds],
+          builtBuildKinds: [...builtBuildKinds],
+          placedBuildKinds: [...placedBuildKinds],
+          newBuildKinds: [...newBuildKinds],
+          unlockTimes: savedUnlockTimes,
+          logisticsUnlocked: logisticsUnlockedRef.current,
+          selectedMapSector,
+          mapNodeProgress,
+          gameElapsedMs,
+          zoom: zoomRef.current,
+          viewport: {
+            scrollLeft: viewport?.scrollLeft ?? HOME_OFFSET.x * zoomRef.current,
+            scrollTop: viewport?.scrollTop ?? HOME_OFFSET.y * zoomRef.current,
+          },
+          buildSequence: buildSequenceRef.current,
+          controlGroupSequence: controlGroupSequenceRef.current,
+          isRunning: isRunningRef.current,
+          buildAttention,
+          journalAttention,
+          shortcutBars,
+          removeBuildCosts,
+          promptPreferences: {
+            skipConnectionDeleteConfirmation: alwaysDeleteConnections,
+            automaticallyDestroyInventoryOverflow:
+              inventoryOverflowWarningSuppressedRef.current,
+            skipNodeDestructionConfirmation: alwaysApproveNodeDestruction,
+            skipHighlightedGroupDeleteConfirmation: alwaysApproveNodeDestruction,
+            skipControlGroupTutorial: controlGroupTutorialSuppressedRef.current,
+            skipAssemblerRecipeChangeConfirmation: alwaysApproveAssemblerRecipeChanges,
+          },
+        },
+      })) as SaveGameSlot;
+      const nextSlots = [...saveSlots];
+      nextSlots[slotIndex] = slot;
+      window.localStorage.setItem(SAVE_STORAGE_KEY, JSON.stringify(nextSlots));
+      setSaveSlots(nextSlots);
+      setSaveNames((current) => current.map((value, index) => index === slotIndex ? name : value));
+      toast.success(`Saved to Slot ${slotIndex + 1}`, {
+        description: `${name} · ${formatSaveDate(slot.savedAt)}`,
+      });
+    } catch (error) {
+      toast.error("Save failed", {
+        description: error instanceof Error
+          ? error.message
+          : "The browser could not write this save to local storage.",
+      });
+    }
+  }, [
+    alwaysApproveAssemblerRecipeChanges,
+    alwaysApproveNodeDestruction,
+    alwaysDeleteConnections,
+    builtBuildKinds,
+    buildAttention,
+    journalAttention,
+    mapNodeProgress,
+    newBuildKinds,
+    placedBuildKinds,
+    removeBuildCosts,
+    revealedBuildKinds,
+    saveNames,
+    saveSlots,
+    selectedMapSector,
+    shortcutBars,
+    unlockTimes,
+  ]);
+
+  const loadGameFromSlot = useCallback((slotIndex: number) => {
+    const slot = saveSlots[slotIndex];
+    if (!slot || !isSaveGameSlot(slot)) {
+      toast.error("This save slot cannot be loaded");
+      return;
+    }
+
+    try {
+      const payload = slot.data;
+      let nextNodes = payload.nodes.map(hydrateNode);
+      const validNodeIds = new Set(nextNodes.map((node) => node.id));
+      const nextConnections = payload.connections.filter(
+        (connection) => validNodeIds.has(connection.sourceNode) && validNodeIds.has(connection.targetNode),
+      );
+      const legacyInventory = normalizeItemStore(payload.runtime.inventory);
+      const hasLegacyItems = INVENTORY_ITEMS.some(({ type }) => legacyInventory[type] > 0);
+      const nextPositions = { ...payload.positions };
+      const nextWoodenChests = Object.fromEntries(
+        Object.entries(payload.runtime.woodenChests ?? {}).map(([id, chest]) => [
+          id,
+          {
+            ...chest,
+            stored: Math.min(
+              WOODEN_CHEST_CAPACITY,
+              Math.max(0, Math.floor(Number(chest.stored) || 0)),
+            ),
+          },
+        ]),
+      ) as Runtime["woodenChests"];
+      const nextStorages = Object.fromEntries(
+        Object.entries(payload.runtime.storages ?? {}).map(([id, storage]) => {
+          const capacityPerItem = Math.max(
+            STORAGE_NODE_CAPACITY,
+            Math.floor(Number(storage.capacityPerItem) || STORAGE_NODE_CAPACITY),
+          );
+          return [id, {
+            capacityPerItem,
+            items: normalizeItemStore(storage.items, capacityPerItem),
+          }];
+        }),
+      ) as Runtime["storages"];
+      nextNodes
+        .filter((node) => node.kind === "storage")
+        .forEach((node) => {
+          if (nextStorages[node.id]) return;
+          nextStorages[node.id] = {
+            capacityPerItem: STORAGE_NODE_CAPACITY,
+            items: makeEmptyItemStore(),
+          };
+        });
+
+      // Version-1 saves may still contain the retired personal inventory. Preserve
+      // those materials by migrating them into a real Storage node once.
+      if (hasLegacyItems) {
+        let migrationNode = nextNodes.find((node) => node.kind === "storage");
+        if (!migrationNode) {
+          migrationNode = createBuildableNode("storage", "storage-migrated", 1);
+          nextNodes = [...nextNodes, migrationNode];
+          nextPositions[migrationNode.id] = {
+            x: HOME_OFFSET.x + 1100,
+            y: HOME_OFFSET.y + 260,
+          };
+        }
+        const existing = nextStorages[migrationNode.id] ?? {
+          capacityPerItem: STORAGE_NODE_CAPACITY,
+          items: makeEmptyItemStore(),
+        };
+        const capacityPerItem = Math.max(
+          existing.capacityPerItem,
+          ...INVENTORY_ITEMS.map(({ type }) => (existing.items[type] ?? 0) + legacyInventory[type]),
+        );
+        nextStorages[migrationNode.id] = {
+          capacityPerItem,
+          items: Object.fromEntries(
+            INVENTORY_ITEMS.map(({ type }) => [
+              type,
+              (existing.items[type] ?? 0) + legacyInventory[type],
+            ]),
+          ) as Record<InventoryItemType, number>,
+        };
+      }
+      const nextRuntime: Runtime = {
+        ...makeRuntime(),
+        ...payload.runtime,
+        forest: {
+          ...makeRuntime().forest,
+          ...(payload.runtime.forest ?? {}),
+        },
+        produced: {
+          ...makeEmptyItemStore(),
+          ...(payload.runtime.produced ?? {}),
+        },
+        processors: Object.fromEntries(
+          Object.entries(payload.runtime.processors ?? {}).map(([id, processor]) => [id, {
+            ...processor,
+            assemblerRecipe: isAssemblerRecipeId(processor.assemblerRecipe)
+              ? processor.assemblerRecipe
+              : null,
+            refinerRecipe: isRefinerRecipeId(processor.refinerRecipe)
+              ? processor.refinerRecipe
+              : null,
+            inputs: Object.fromEntries(
+              Object.entries(processor.inputs ?? {}).map(([portId, amount]) => [
+                portId,
+                Math.min(
+                  PRODUCTION_INGREDIENT_CAPACITY,
+                  Math.max(0, Math.floor(Number(amount) || 0)),
+                ),
+              ]),
+            ),
+          }]),
+        ),
+        generators: Object.fromEntries(
+          Object.entries(payload.runtime.generators ?? {}).map(([id, generator]) => [id, {
+            ...generator,
+            charcoal: Math.min(
+              PRODUCTION_INGREDIENT_CAPACITY,
+              Math.max(0, Math.floor(Number(generator.charcoal) || 0)),
+            ),
+          }]),
+        ),
+        researchFoundries: Object.fromEntries(
+          Object.entries(payload.runtime.researchFoundries ?? {}).map(([id, foundry]) => [id, {
+            ...foundry,
+            cores: getResearchFoundryCores(foundry),
+            coreLoaded: undefined,
+          }]),
+        ),
+        splitters: Object.fromEntries(
+          Object.entries(payload.runtime.splitters ?? {}).map(([id, splitter]) => [
+            id,
+            { nextOutput: splitter.nextOutput === "b" ? "b" as const : "a" as const },
+          ]),
+        ),
+        woodenChests: nextWoodenChests,
+        storages: nextStorages,
+        pausedOutputs: payload.runtime.pausedOutputs ?? {},
+      };
+      delete nextRuntime.inventory;
+      delete nextRuntime.inventoryCapacity;
+      delete (nextRuntime as Runtime & { mergers?: unknown }).mergers;
+      if (hasLegacyItems) {
+        const migrationStorage = nextNodes.find((node) => node.kind === "storage");
+        if (migrationStorage && !nextRuntime.construction[migrationStorage.id]) {
+          nextRuntime.construction[migrationStorage.id] = { progress: 100, complete: true };
+        }
+      }
+      const validBuildKinds = new Set(BUILD_CATALOG.map((item) => item.kind));
+      const filterBuildKinds = (kinds: PurchasableKind[]) =>
+        kinds.filter((kind) => validBuildKinds.has(kind));
+      const nextRevealed = new Set(filterBuildKinds(payload.revealedBuildKinds ?? []));
+      const nextBuilt = new Set(filterBuildKinds(payload.builtBuildKinds ?? []));
+      const initialNodeIds = new Set(INITIAL_NODES.map((node) => node.id));
+      const inferredPlacedKinds = nextNodes.flatMap((node) =>
+        isPurchasableKind(node.kind) && !initialNodeIds.has(node.id)
+          ? [node.kind]
+          : [],
+      );
+      const nextPlaced = new Set(filterBuildKinds(
+        payload.placedBuildKinds ?? inferredPlacedKinds,
+      ));
+      const nextNew = new Set(filterBuildKinds(payload.newBuildKinds ?? []));
+      const savedUnlockTimes = payload.unlockTimes ?? {};
+      const latestSavedUnlockTime = Math.max(
+        0,
+        ...Object.values(savedUnlockTimes).filter(
+          (value): value is number => typeof value === "number" && Number.isFinite(value),
+        ),
+      );
+      const loadedGameElapsedMs = Math.max(
+        0,
+        Number.isFinite(payload.gameElapsedMs) ? payload.gameElapsedMs : latestSavedUnlockTime,
+        latestSavedUnlockTime,
+      );
+      const nextUnlockTimes: UnlockTimes = {};
+      filterBuildKinds(Object.keys(savedUnlockTimes) as PurchasableKind[]).forEach((kind) => {
+        const unlockedAt = savedUnlockTimes[kind];
+        if (typeof unlockedAt !== "number" || !Number.isFinite(unlockedAt)) return;
+        nextUnlockTimes[kind] = Math.max(0, unlockedAt);
+        if (unlockedAt <= loadedGameElapsedMs) nextRevealed.add(kind);
+      });
+      nextRevealed.forEach((kind) => {
+        if (nextUnlockTimes[kind] === undefined) nextUnlockTimes[kind] = loadedGameElapsedMs;
+      });
+      const nextZoom = clampZoom(payload.zoom ?? 1);
+      const nextPromptPreferences = normalizePromptPreferences(payload.promptPreferences);
+
+      nodesRef.current = nextNodes;
+      undoHistoryRef.current = [];
+      pendingPlacementUndoRef.current = null;
+      setNodes(nextNodes);
+      positionsRef.current = nextPositions;
+      setPositions(nextPositions);
+      connectionsRef.current = nextConnections;
+      setConnections(nextConnections);
+      runtimeRef.current = nextRuntime;
+      setRuntime(nextRuntime);
+      controlGroupsRef.current = payload.controlGroups ?? [];
+      setControlGroups(payload.controlGroups ?? []);
+      setRevealedBuildKinds(nextRevealed);
+      setBuiltBuildKinds(nextBuilt);
+      setPlacedBuildKinds(nextPlaced);
+      setNewBuildKinds(nextNew);
+      setUnlockTimes(nextUnlockTimes);
+      setBuildAttention(payload.buildAttention ?? false);
+      setJournalAttention(payload.journalAttention ?? false);
+      setShortcutBars(normalizeShortcutBars(payload.shortcutBars));
+      setRemoveBuildCosts(payload.removeBuildCosts === true);
+      setAlwaysDeleteConnections(
+        nextPromptPreferences.skipConnectionDeleteConfirmation,
+      );
+      setSuppressFutureConnectionDeleteWarnings(false);
+      inventoryOverflowWarningSuppressedRef.current =
+        nextPromptPreferences.automaticallyDestroyInventoryOverflow;
+      setAlwaysApproveNodeDestruction(
+        nextPromptPreferences.skipNodeDestructionConfirmation,
+      );
+      setAlwaysApproveAssemblerRecipeChanges(
+        nextPromptPreferences.skipAssemblerRecipeChangeConfirmation,
+      );
+      controlGroupTutorialSuppressedRef.current =
+        nextPromptPreferences.skipControlGroupTutorial;
+      setPendingAssemblerRecipeChange(null);
+      setAssemblerRecipeChangeDialogOpen(false);
+      setSuppressFutureAssemblerRecipeWarnings(false);
+      setSuppressControlGroupTutorial(false);
+      setSuppressFutureNodeDestructionWarnings(false);
+      setSuppressFutureInventoryOverflowWarnings(false);
+      logisticsUnlockedRef.current = Boolean(payload.logisticsUnlocked);
+      setLogisticsUnlocked(Boolean(payload.logisticsUnlocked));
+      setSelectedMapSector(payload.selectedMapSector ?? null);
+      setMapNodeProgress(normalizeMapNodeProgress(payload.mapNodeProgress));
+      buildSequenceRef.current = {
+        ...makeBuildSequence(),
+        ...(payload.buildSequence ?? {}),
+      };
+      controlGroupSequenceRef.current = payload.controlGroupSequence ?? 0;
+      gameElapsedMsRef.current = loadedGameElapsedMs;
+      zoomRef.current = nextZoom;
+      pinchTargetZoomRef.current = nextZoom;
+      setZoom(nextZoom);
+      setProductionRunning(payload.isRunning ?? true);
+      lastSimulationTickRef.current = performance.now();
+
+      connectionDragRef.current = null;
+      updateSnappedPort(null);
+      setConnecting(null);
+      setHoveredPort(null);
+      setWirePointer(null);
+      setRewiringConnectionId(null);
+      setSelectedConnection(null);
+      selectedNodesRef.current = [];
+      setSelectedNodes([]);
+      setActiveFlows({});
+      setActiveControlGroupId(null);
+      individualControlNodeRef.current = null;
+      setIndividualControlNodeId(null);
+      setPendingControlGroupNodeIds([]);
+      setControlGroupOnboardingOpen(false);
+      setControlGroupColorOpen(false);
+      setPendingDisbandControlGroupId(null);
+      setDisbandControlGroupOpen(false);
+      selectionBoxRef.current = null;
+      setSelectionBox(null);
+      dragRef.current = null;
+      setDraggingNode(null);
+      setDragCollisionBlocked(false);
+      inventoryOverflowActionRef.current = null;
+      setInventoryOverflowPrompt(null);
+      setInventoryOverflowDialogOpen(false);
+      setPendingDeletionNodeIds([]);
+      setPendingDeletionIsHighlightedGroup(false);
+      setPendingDeletionDetails(null);
+      setDestroyDialogOpen(false);
+      setPendingDeletionConnectionId(null);
+      setConnectionDeleteDialogOpen(false);
+      placingNodeRef.current = null;
+      repeatPlacementPreviewRef.current = null;
+      setPlacingNodeId(null);
+      updatePlacementBlocked(false);
+      insertionTargetRef.current = null;
+      setInsertionTarget(null);
+      panRef.current = null;
+      suppressedNodeContextMenuRef.current = null;
+      setIsPanning(false);
+      setConfiguringFilterId(null);
+      setConfiguringMiningDrillId(null);
+      setConfiguringAssemblerId(null);
+      setBuildOpen(false);
+      buildOpenRef.current = false;
+      setResearchOpen(false);
+      setMapOpen(false);
+      setJournalOpen(false);
+      setOptionsOpen(false);
+      setSaveOpen(false);
+      setDevOpen(false);
+      setLoadConfirmOpen(false);
+      setPendingLoadSlot(null);
+
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          const viewport = workspaceRef.current;
+          if (viewport) {
+            viewport.scrollLeft = Math.max(0, payload.viewport?.scrollLeft ?? HOME_OFFSET.x * nextZoom);
+            viewport.scrollTop = Math.max(0, payload.viewport?.scrollTop ?? HOME_OFFSET.y * nextZoom);
+          }
+          updateGridPosition();
+          measureAnchors();
+        });
+      });
+      toast.success(`Loaded ${slot.name}`, {
+        description: `Slot ${slotIndex + 1} · saved ${formatSaveDate(slot.savedAt)}`,
+      });
+    } catch {
+      toast.error("Load failed", {
+        description: "This save is incomplete or incompatible with the current game version.",
+      });
+    }
+  }, [measureAnchors, saveSlots, setProductionRunning, updateGridPosition, updatePlacementBlocked, updateSnappedPort]);
+
+  useEffect(() => {
+    const context = (document as Document & { modelContext?: ModelContextApi }).modelContext;
+    if (!context?.registerTool) return;
+    const lifecycle = new AbortController();
+    const register = (tool: ModelTool) =>
+      Promise.resolve(context.registerTool(tool, { signal: lifecycle.signal })).catch(() => undefined);
+
+    void Promise.all([
+      register({
+        name: "read_foundry_status",
+        title: "Read foundry status",
+        description: "Read the visible production state, cable count, and node-held materials without changing the foundry.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        annotations: { readOnlyHint: true, untrustedContentHint: false },
+        execute: () => ({
+          running: isRunningRef.current,
+          cables: connectionsRef.current.length,
+          logisticsUnlocked: logisticsUnlockedRef.current,
+          ironOre: { ...runtimeRef.current.ironOre },
+          copperOre: { ...(runtimeRef.current.copperOre ?? { remaining: RESOURCE_CAPACITIES.copperOre }) },
+          stone: { ...(runtimeRef.current.stone ?? { remaining: RESOURCE_CAPACITIES.stone }) },
+          forest: { ...(runtimeRef.current.forest ?? { remaining: RESOURCE_CAPACITIES.forest }) },
+          minedDeposits: { ...(runtimeRef.current.minedDeposits ?? {}) },
+          ironExtractor: {
+            ...runtimeRef.current.extractors.ironExtractor,
+            product: getExtractorRecipe("ironExtractor", connectionsRef.current)?.product ?? null,
+          },
+          machines: nodesRef.current
+            .filter((node) => isPurchasableKind(node.kind))
+            .map((node) => ({
+              id: node.id,
+              title: node.title,
+              state: node.kind === "extractor"
+                ? runtimeRef.current.extractors[node.id]
+                : node.kind === "generator"
+                  ? runtimeRef.current.generators[node.id]
+                : node.kind === "powerSplitter"
+                  ? {
+                      powered: Boolean(findPowerGeneratorId(
+                        node.id,
+                        connectionsRef.current,
+                        runtimeRef.current.generators,
+                        runtimeRef.current.pausedOutputs,
+                      )),
+                    }
+                : node.kind === "researchFoundry"
+                  ? runtimeRef.current.researchFoundries[node.id]
+                : node.kind === "treePlanter"
+                  ? runtimeRef.current.treePlanters[node.id]
+                : node.kind === "miningDrill"
+                  ? runtimeRef.current.miningDrills[node.id]
+                : node.kind === "splitter"
+                    ? runtimeRef.current.splitters[node.id]
+                : node.kind === "merger"
+                      ? { routing: "direct" }
+                    : node.kind === "joint"
+                      ? runtimeRef.current.joints[node.id]
+                    : node.kind === "inventorySource"
+                      ? runtimeRef.current.inventorySources[node.id]
+                    : node.kind === "filter"
+                      ? runtimeRef.current.filters[node.id]
+                    : node.kind === "woodenChest"
+                      ? runtimeRef.current.woodenChests[node.id]
+                    : node.kind === "storage"
+                      ? runtimeRef.current.storages[node.id]
+                      : runtimeRef.current.processors[node.id],
+              construction: runtimeRef.current.construction[node.id] ?? { progress: 100, complete: true },
+            })),
+          research: { ...runtimeRef.current.research },
+          storedItems: Object.fromEntries(
+            INVENTORY_ITEMS.map(({ type }) => [
+              type,
+              getStoredItemAmount(
+                runtimeRef.current,
+                nodesRef.current,
+                connectionsRef.current,
+                type,
+              ),
+            ]),
+          ),
+          storageBreakdown: Object.fromEntries(
+            INVENTORY_ITEMS.map(({ type }) => [
+              type,
+              getStoredItemLocations(
+                runtimeRef.current,
+                nodesRef.current,
+                connectionsRef.current,
+                type,
+              ),
+            ]),
+          ),
+          produced: { ...runtimeRef.current.produced },
+        }),
+      }),
+      register({
+        name: "set_production_state",
+        title: "Set production state",
+        description: "Pause or resume the production simulation.",
+        inputSchema: {
+          type: "object",
+          properties: { running: { type: "boolean" } },
+          required: ["running"],
+          additionalProperties: false,
+        },
+        annotations: { readOnlyHint: false, untrustedContentHint: false },
+        execute: (input) => {
+          const running = (input as { running?: unknown })?.running;
+          if (typeof running !== "boolean") throw new Error("running must be a boolean");
+          setProductionRunning(running);
+          return { running };
+        },
+      }),
+      register({
+        name: "connect_foundry_ports",
+        title: "Connect foundry ports",
+        description: "Connect one output socket to one compatible input socket in the visible node graph.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sourceNode: { type: "string", description: "ID of any node with an output socket" },
+            sourcePort: { type: "string", enum: ["ore-out", "copper-ore-out", "stone-out", "forest-out", "product-out", "charcoal-out", "plate-out", "gear-out", "wire-out", "motor-out", "circuit-a-out", "automata-core-out", "assembler-out", "refiner-out", "power-out", "power-split-top", "power-split-out", "power-split-bottom", "forest-growth-out", "split-a-out", "split-b-out", "merge-out", "joint-out", "inventory-out", "filter-out", "chest-out"] },
+            targetNode: { type: "string", description: "ID of any node with an input socket" },
+            targetPort: { type: "string", enum: ["resource-in", "wood-in", "metal-in", "charcoal-in", "generator-charcoal-in", "research-core-in", "power-in", "power-split-in", "forest-growth-in", "plate-a-in", "plate-b-in", "wire-plate-in", "motor-gear-in", "motor-wire-in", "circuit-wire-in", "circuit-plate-in", "core-motor-in", "core-circuit-in", "assembler-a-in", "assembler-b-in", "refiner-in", "split-in", "merge-a-in", "merge-b-in", "joint-in", "filter-in", "storage-in", "chest-in"] },
+          },
+          required: ["sourceNode", "sourcePort", "targetNode", "targetPort"],
+          additionalProperties: false,
+        },
+        annotations: { readOnlyHint: false, untrustedContentHint: false },
+        execute: (input) => {
+          const value = input as Partial<Record<"sourceNode" | "sourcePort" | "targetNode" | "targetPort", string>>;
+          const sourceNode = value.sourceNode as NodeId;
+          const targetNode = value.targetNode as NodeId;
+          const sourceNodeSpec = nodesRef.current.find((node) => node.id === sourceNode);
+          const targetNodeSpec = nodesRef.current.find((node) => node.id === targetNode);
+          const sourceSpec = sourceNodeSpec?.outputs.find((port) => port.id === value.sourcePort);
+          const source = sourceSpec
+            ? getRuntimeAwarePort(sourceNode, sourceSpec, connectionsRef.current, runtimeRef.current)
+            : null;
+          const targetSpec = targetNodeSpec?.inputs.find((port) => port.id === value.targetPort);
+          const target = targetSpec
+            ? getRuntimeAwarePort(targetNode, targetSpec, connectionsRef.current, runtimeRef.current)
+            : null;
+          if (!source || !target) throw new Error("Unknown source or target socket");
+          if (!isCompatible(source, target)) throw new Error(`${source.type} cannot connect to ${target.type}`);
+          connectPorts({ nodeId: sourceNode, port: source }, { nodeId: targetNode, port: target });
+          return { connected: true, from: `${sourceNode}:${source.id}`, to: `${targetNode}:${target.id}` };
+        },
+      }),
+      register({
+        name: "reset_foundry",
+        title: "Reset foundry",
+        description: "Restore the default cables, node positions, production timers, and node storage.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        annotations: { readOnlyHint: false, untrustedContentHint: false },
+        execute: () => {
+          resetFactory();
+          return { reset: true, cables: INITIAL_CONNECTIONS.length };
+        },
+      }),
+    ]);
+
+    return () => lifecycle.abort();
+  }, [connectPorts, resetFactory, setProductionRunning]);
+
+  const renderedConnections = useMemo(
+    () =>
+      connections
+        .filter((connection) => connection.id !== rewiringConnectionId)
+        .map((connection) => ({
+          ...connection,
+          start: anchors[`${connection.sourceNode}:${connection.sourcePort}`],
+          end: anchors[`${connection.targetNode}:${connection.targetPort}`],
+        }))
+        .filter((connection) => connection.start && connection.end),
+    [anchors, connections, rewiringConnectionId],
+  );
+  const selectedRenderedConnection = selectedConnection
+    ? renderedConnections.find((connection) => connection.id === selectedConnection) ?? null
+    : null;
+  const selectedConnectionMidpoint = selectedRenderedConnection
+    ? getCurveMidpoint(
+        selectedRenderedConnection.start,
+        selectedRenderedConnection.end,
+        selectedRenderedConnection.sourcePort,
+      )
+    : null;
+
+  const previewStart = connecting ? anchors[`${connecting.nodeId}:${connecting.port.id}`] : null;
+  const previewPath =
+    previewStart && wirePointer
+      ? getCurve(
+          connecting?.port.direction === "output" ? previewStart : wirePointer,
+          connecting?.port.direction === "output" ? wirePointer : previewStart,
+          connecting?.port.direction === "output" ? connecting.port.id : undefined,
+        )
+      : null;
+
+  const nodeById = useMemo(
+    () => new Map(nodes.map((node) => [node.id, node] as const)),
+    [nodes],
+  );
+  const connectionIndex = useMemo(() => {
+    const incomingByPort = new Map<string, Connection>();
+    const outgoingByPort = new Map<string, Connection[]>();
+    connections.forEach((connection) => {
+      incomingByPort.set(
+        `${connection.targetNode}:${connection.targetPort}`,
+        connection,
+      );
+      const sourceKey = `${connection.sourceNode}:${connection.sourcePort}`;
+      const outgoing = outgoingByPort.get(sourceKey);
+      if (outgoing) outgoing.push(connection);
+      else outgoingByPort.set(sourceKey, [connection]);
+    });
+    return { incomingByPort, outgoingByPort };
+  }, [connections]);
+  const smartProcessorInputTypes = useMemo(() => new Map(
+    nodes
+      .filter((node) => isProcessorKind(node.kind))
+      .map((node) => [
+        node.id,
+        getEffectiveSmartProcessorMaterialType(
+          node.id,
+          runtime.processors[node.id],
+          connections,
+        ),
+      ] as const),
+  ), [connections, nodes, runtime.processors]);
+
+  const worldSize = {
+    width: Math.max(WORLD_SIZE.width, viewportSize.width / zoom),
+    height: Math.max(WORLD_SIZE.height, viewportSize.height / zoom),
+  };
+
+  const extractorRecipes = useMemo(() => Object.fromEntries(
+    nodes
+      .filter((node) => isExtractorKind(node.kind))
+      .map((node) => {
+        const resourceEdge = connectionIndex.incomingByPort.get(`${node.id}:resource-in`);
+        return [node.id, resourceEdge ? EXTRACTOR_RECIPES[resourceEdge.type] ?? null : null];
+      }),
+  ) as Record<ExtractorNodeId, ReturnType<typeof getExtractorRecipe>>, [
+    connectionIndex,
+    nodes,
+  ]);
+  const extractorIsWaiting = (nodeId: ExtractorNodeId) => {
+    const recipe = extractorRecipes[nodeId];
+    if (!recipe) return true;
+    const resourceEdge = connectionIndex.incomingByPort.get(`${nodeId}:resource-in`);
+    return !resourceEdge || getResourceRemaining(
+      runtime,
+      resourceEdge.sourceNode,
+      resourceEdge.type,
+      connections,
+    ) <= 0;
+  };
+  const getPowerConnection = (nodeId: NodeId) =>
+    connectionIndex.incomingByPort.get(`${nodeId}:power-in`);
+  const getAvailablePower = (nodeId: NodeId) => {
+    const powerConnection = getPowerConnection(nodeId);
+    const generatorId = powerConnection
+      ? findPowerGeneratorId(
+          powerConnection.sourceNode,
+          connections,
+          runtime.generators,
+          runtime.pausedOutputs,
+        )
+      : null;
+    return generatorId ? runtime.generators[generatorId]?.power ?? 0 : 0;
+  };
+  const processorNeedsInputs = (nodeId: NodeId, kind: ProcessorKind) => {
+    const processor = runtime.processors[nodeId];
+    const recipe = getProcessorRecipe(kind, processor);
+    if (!processor || !recipe) return true;
+    const effectiveMaterialType = smartProcessorInputTypes.get(nodeId) ??
+      processor?.materialType ??
+      null;
+    const awaitingSmartType = Boolean(
+      getSmartProcessorOutputPortId(nodeId, processor) &&
+      !getSmartProcessorOutput(nodeId, effectiveMaterialType, processor),
+    );
+    return awaitingSmartType || recipe.inputs.some(
+        (input) => (processor.inputs[input.id] ?? 0) < input.amount,
+      );
+  };
+  const processorNeedsPower = (nodeId: NodeId, kind: ProcessorKind) => {
+    const powerCost = POWER_COSTS[kind] ?? 0;
+    if (!powerCost || runtime.processors[nodeId]?.powerCommitted) return false;
+    return getAvailablePower(nodeId) < powerCost;
+  };
+  const processorIsWaiting = (nodeId: NodeId, kind: ProcessorKind) =>
+    processorNeedsInputs(nodeId, kind) || processorNeedsPower(nodeId, kind);
+  const getNodeProgress = (node: NodeSpec) => {
+    const minedDeposit = runtime.minedDeposits[node.id];
+    if (minedDeposit) return (minedDeposit.remaining / minedDeposit.capacity) * 100;
+    if (node.kind === "ironOre") return (runtime.ironOre.remaining / RESOURCE_CAPACITIES.ironOre) * 100;
+    if (node.kind === "copperOre") return (runtime.copperOre.remaining / RESOURCE_CAPACITIES.copperOre) * 100;
+    if (node.kind === "stone") return (runtime.stone.remaining / RESOURCE_CAPACITIES.stone) * 100;
+    if (node.kind === "forest") return (runtime.forest.remaining / RESOURCE_CAPACITIES.forest) * 100;
+    if (node.kind === "storage") return 100;
+    if (node.kind === "woodenChest") return 100;
+    if (isExtractorKind(node.kind)) {
+      const extractor = runtime.extractors[node.id];
+      return extractor?.progress ?? 0;
+    }
+    if (node.kind === "researchFoundry") {
+      return isAllResearchComplete(runtime.research)
+        ? 100
+        : runtime.researchFoundries[node.id]?.progress ?? 0;
+    }
+    if (node.kind === "treePlanter") return runtime.treePlanters[node.id]?.progress ?? 0;
+    if (node.kind === "miningDrill") {
+      const drill = runtime.miningDrills[node.id];
+      return drill
+        ? ((drill.iterations + drill.progress / 100) / MINING_DRILL_ITERATIONS) * 100
+        : 0;
+    }
+    if (node.kind === "generator") return ((runtime.generators[node.id]?.power ?? 0) / GENERATOR_MAX_POWER) * 100;
+    if (node.kind === "inventorySource") return runtime.inventorySources[node.id]?.progress ?? 0;
+    if (isProcessorKind(node.kind)) {
+      const processor = runtime.processors[node.id];
+      return processor?.progress ?? 0;
+    }
+    return 0;
+  };
+  const getNodeFull = (node: NodeSpec) => {
+    if (isExtractorKind(node.kind)) {
+      return (runtime.extractors[node.id]?.stored ?? 0) >= EXTRACTOR_CAPACITY;
+    }
+    if (node.kind === "generator") return (runtime.generators[node.id]?.power ?? 0) >= GENERATOR_MAX_POWER;
+    if (node.kind === "inventorySource") return runtime.inventorySources[node.id]?.full ?? false;
+    if (isProcessorKind(node.kind)) {
+      return getProcessorStored(runtime.processors[node.id]) >= PROCESSOR_CAPACITY;
+    }
+    return false;
+  };
+  const getPortConnectionClass = (nodeId: NodeId, port: Port) => {
+    if (isAssemblerPortDisabled(nodeId, port.id, runtime)) return "disabled";
+    if (snappedPort?.nodeId === nodeId && snappedPort.port.id === port.id) {
+      return "compatible snap-target";
+    }
+    const source = connecting ?? hoveredPort;
+    if (!source) return "";
+    if (source.nodeId === nodeId && source.port.id === port.id) {
+      return connecting ? "" : "hover-source";
+    }
+    if (source.nodeId === nodeId || source.port.direction === port.direction) return "";
+    if (!connecting) {
+      const sourceNode = nodes.find((node) => node.id === source.nodeId);
+      const candidateNode = nodes.find((node) => node.id === nodeId);
+      const sourceIsProduction = Boolean(
+        sourceNode &&
+        isPurchasableKind(sourceNode.kind) &&
+        !isLogisticsNodeKind(sourceNode.kind),
+      );
+      if (sourceIsProduction && candidateNode && isLogisticsNodeKind(candidateNode.kind)) return "";
+    }
+
+    const compatible = isCompatible(source.port, port);
+    if (connecting) return compatible ? "compatible" : "incompatible";
+
+    const available = port.direction === "output"
+      ? isMultiOutputPort(nodeId, port.id) || !connections.some(
+          (connection) => connection.sourceNode === nodeId && connection.sourcePort === port.id,
+        )
+      : isMultiInputPort(nodeId, port.id) || !connections.some(
+          (connection) => connection.targetNode === nodeId && connection.targetPort === port.id,
+        );
+    return compatible && available ? "hover-compatible" : "";
+  };
+  const clearHoveredPort = (nodeId: NodeId, portId: string) => {
+    setHoveredPort((current) =>
+      current?.nodeId === nodeId && current.port.id === portId ? null : current,
+    );
+  };
+  const selectionBoxStyle = selectionBox
+    ? {
+        left: Math.min(selectionBox.start.x, selectionBox.end.x),
+        top: Math.min(selectionBox.start.y, selectionBox.end.y),
+        width: Math.abs(selectionBox.end.x - selectionBox.start.x),
+        height: Math.abs(selectionBox.end.y - selectionBox.start.y),
+      }
+    : null;
+  const selectedNodeRects = selectedNodes.flatMap((nodeId) => {
+    const node = nodes.find((candidate) => candidate.id === nodeId);
+    const position = positions[nodeId];
+    if (!node || !position) return [];
+    const size = getNodeSize(nodeId, node);
+    return [{ node, position, size }];
+  });
+  const selectedNodeBounds = selectedNodeRects.length > 0
+    ? {
+        left: Math.min(...selectedNodeRects.map(({ position }) => position.x)),
+        top: Math.min(...selectedNodeRects.map(({ position }) => position.y)),
+        right: Math.max(...selectedNodeRects.map(({ position, size }) => position.x + size.width)),
+        bottom: Math.max(...selectedNodeRects.map(({ position, size }) => position.y + size.height)),
+      }
+    : null;
+  const selectedDestroyableNodeIds = selectedNodeRects
+    .filter(({ node }) => isDestroyableNode(node))
+    .map(({ node }) => node.id);
+  const buildMaterialAvailability = useMemo(
+    () => getBuildMaterialAvailability(runtime, nodes, connections),
+    [connections, nodes, runtime],
+  );
+  useEffect(() => {
+    const newlyRecorded = Array.from(revealedBuildKinds).filter(
+      (kind) => unlockTimes[kind] === undefined,
+    );
+    if (newlyRecorded.length === 0) return;
+    const elapsed = Math.max(0, gameElapsedMsRef.current);
+    const recordFrame = window.requestAnimationFrame(() => {
+      if (!journalOpen) setJournalAttention(true);
+      setUnlockTimes((current) => {
+        const next = { ...current };
+        newlyRecorded.forEach((kind) => {
+          if (next[kind] === undefined) next[kind] = elapsed;
+        });
+        return next;
+      });
+    });
+    return () => window.cancelAnimationFrame(recordFrame);
+  }, [journalOpen, revealedBuildKinds, unlockTimes]);
+
+  useEffect(() => {
+    const unlockContext: BuildUnlockContext = {
+      runtime,
+      builtKinds: builtBuildKinds,
+      logisticsUnlocked,
+    };
+    const discoveredKinds = VISIBLE_BUILD_CATALOG
+      .filter((item) => !revealedBuildKinds.has(item.kind))
+      .filter((item) => isBuildUnlockSatisfied(item.kind, unlockContext))
+      .map((item) => item.kind);
+
+    if (discoveredKinds.length === 0) return;
+    const revealFrame = window.requestAnimationFrame(() => {
+      discoveredKinds
+        .filter((kind) => !RESEARCH_GATED_BUILD_KINDS.has(kind))
+        .forEach(announceNodeUnlock);
+      setRevealedBuildKinds((current) => {
+        const next = new Set(current);
+        discoveredKinds.forEach((kind) => next.add(kind));
+        return next;
+      });
+      setNewBuildKinds((current) => {
+        const next = new Set(current);
+        discoveredKinds.forEach((kind) => next.add(kind));
+        return next;
+      });
+      if (!buildOpen) setBuildAttention(true);
+    });
+    return () => window.cancelAnimationFrame(revealFrame);
+  }, [
+    buildOpen,
+    builtBuildKinds,
+    logisticsUnlocked,
+    revealedBuildKinds,
+    runtime,
+  ]);
+  const buildCatalog = useMemo(() => {
+    const unlockContext: BuildUnlockContext = {
+      runtime,
+      builtKinds: builtBuildKinds,
+      logisticsUnlocked,
+    };
+    const visibleItems = VISIBLE_BUILD_CATALOG
+      .map((item) => {
+        const unlocked = revealedBuildKinds.has(item.kind) ||
+          isBuildUnlockSatisfied(item.kind, unlockContext);
+        const hasMaterials = removeBuildCosts || item.recipe.every(
+          (ingredient) =>
+            buildMaterialAvailability[ingredient.type].total >= ingredient.amount,
+        );
+        return {
+          item,
+          unlocked,
+          hasMaterials,
+          canBuild: unlocked && hasMaterials,
+        };
+      })
+      .filter(({ unlocked }) => showAllBuildNodes || unlocked)
+      .sort((a, b) =>
+        Number(b.canBuild) - Number(a.canBuild) ||
+        Number(b.unlocked) - Number(a.unlocked),
+      );
+
+    const neverBuiltCount = visibleItems.filter(({ item, unlocked }) =>
+      unlocked &&
+      !placedBuildKinds.has(item.kind) &&
+      (showAllBuildNodes || buildCategory === "all" || getBuildCategory(item.kind) === buildCategory)
+    ).length;
+    const placementFilteredItems = showNeverBuiltOnly
+      ? visibleItems.filter(({ item, unlocked }) =>
+          unlocked && !placedBuildKinds.has(item.kind),
+        )
+      : visibleItems;
+    const categoryCounts = {
+      production: placementFilteredItems.filter(({ item }) => getBuildCategory(item.kind) === "production").length,
+      logistics: placementFilteredItems.filter(({ item }) => getBuildCategory(item.kind) === "logistics").length,
+      storage: placementFilteredItems.filter(({ item }) => getBuildCategory(item.kind) === "storage").length,
+    };
+    const categoryItems = showAllBuildNodes || buildCategory === "all"
+      ? placementFilteredItems
+      : placementFilteredItems.filter(({ item }) => getBuildCategory(item.kind) === buildCategory);
+    const buildableCount = categoryItems.filter(({ canBuild }) => canBuild).length;
+    return {
+      buildableCount,
+      categoryCounts,
+      neverBuiltCount,
+      totalCount: categoryItems.length,
+      items: showBuildableOnly && !showAllBuildNodes
+        ? categoryItems.filter(({ canBuild }) => canBuild)
+        : categoryItems,
+    };
+  }, [
+    buildCategory,
+    buildMaterialAvailability,
+    builtBuildKinds,
+    logisticsUnlocked,
+    placedBuildKinds,
+    removeBuildCosts,
+    revealedBuildKinds,
+    runtime,
+    showAllBuildNodes,
+    showBuildableOnly,
+    showNeverBuiltOnly,
+  ]);
+  const shortcutNodeOptions = useMemo<ShortcutNodeOption[]>(() => {
+    const unlockContext: BuildUnlockContext = {
+      runtime,
+      builtKinds: builtBuildKinds,
+      logisticsUnlocked,
+    };
+    return VISIBLE_BUILD_CATALOG
+      .filter((item) =>
+        revealedBuildKinds.has(item.kind) || isBuildUnlockSatisfied(item.kind, unlockContext),
+      )
+      .map((item) => ({
+        kind: item.kind,
+        title: item.title,
+        icon: item.icon,
+        canBuild: removeBuildCosts || item.recipe.every((ingredient) =>
+          buildMaterialAvailability[ingredient.type].total >= ingredient.amount,
+        ),
+      }));
+  }, [
+    buildMaterialAvailability,
+    builtBuildKinds,
+    logisticsUnlocked,
+    removeBuildCosts,
+    revealedBuildKinds,
+    runtime,
+  ]);
+  const buildFromShortcut = useCallback((kind: PurchasableKind) => {
+    const item = VISIBLE_BUILD_CATALOG.find((candidate) => candidate.kind === kind);
+    if (item) buildNode(item.kind, item.recipe);
+  }, [buildNode]);
+  const hoveredPortConnectionOptions = useMemo(() => {
+    if (!hoveredPort) return [];
+    const currentNode = nodes.find((node) => node.id === hoveredPort.nodeId);
+    if (!currentNode) return [];
+
+    const currentPortSpec = (hoveredPort.port.direction === "input"
+      ? currentNode.inputs
+      : currentNode.outputs
+    ).find((port) => port.id === hoveredPort.port.id);
+    if (!currentPortSpec) return [];
+    const currentPort = getRuntimeAwarePort(currentNode.id, currentPortSpec, connections, runtime);
+    if (isAssemblerPortDisabled(currentNode.id, currentPort.id, runtime)) return [];
+    const currentPortIsMulti = currentPort.direction === "input"
+      ? isMultiInputPort(currentNode.id, currentPort.id)
+      : isMultiOutputPort(currentNode.id, currentPort.id);
+    const currentNodeIsProduction = isPurchasableKind(currentNode.kind) &&
+      !isLogisticsNodeKind(currentNode.kind);
+    if (!currentPortIsMulti && !currentNodeIsProduction) return [];
+    const options = new Map<string, NodeConnectionOption>();
+    const portIsAvailable = (nodeId: NodeId, port: Port) =>
+      port.direction === "input"
+        ? isMultiInputPort(nodeId, port.id) || !connections.some(
+            (connection) => connection.targetNode === nodeId && connection.targetPort === port.id,
+          )
+        : isMultiOutputPort(nodeId, port.id) || !connections.some(
+            (connection) => connection.sourceNode === nodeId && connection.sourcePort === port.id,
+          );
+
+    const addRoute = (
+      candidate: NodeSpec,
+      mode: NodeConnectionOption["mode"],
+      route: string,
+      connected: boolean,
+    ) => {
+      const key = `${candidate.id}:${mode}`;
+      const existing = options.get(key);
+      if (existing) {
+        if (!existing.routes.includes(route)) existing.routes.push(route);
+        existing.connected ||= connected;
+        return;
+      }
+      options.set(key, {
+        nodeId: candidate.id,
+        title: candidate.title,
+        eyebrow: candidate.eyebrow,
+        color: candidate.color,
+        mode,
+        routes: [route],
+        connected,
+      });
+    };
+
+    nodes.forEach((candidate) => {
+      if (
+        candidate.id === currentNode.id ||
+        (!currentPortIsMulti && isLogisticsNodeKind(candidate.kind))
+      ) return;
+      if (currentPort.direction === "output") {
+        candidate.inputs
+          .filter((port) => !isAssemblerPortDisabled(candidate.id, port.id, runtime))
+          .map((port) => getRuntimeAwarePort(candidate.id, port, connections, runtime))
+          .forEach((input) => {
+            if (!isCompatible(currentPort, input)) return;
+            const connected = connections.some(
+              (connection) =>
+                connection.sourceNode === currentNode.id &&
+                connection.sourcePort === currentPort.id &&
+                connection.targetNode === candidate.id &&
+                connection.targetPort === input.id,
+            );
+            if (!connected && !portIsAvailable(candidate.id, input)) return;
+            addRoute(candidate, "send", `${currentPort.label} → ${input.label}`, connected);
+          });
+        return;
+      }
+
+      candidate.outputs
+        .filter((port) => !isAssemblerPortDisabled(candidate.id, port.id, runtime))
+        .map((port) => getRuntimeAwarePort(candidate.id, port, connections, runtime))
+        .forEach((output) => {
+          if (!isCompatible(output, currentPort)) return;
+          const connected = connections.some(
+            (connection) =>
+              connection.sourceNode === candidate.id &&
+              connection.sourcePort === output.id &&
+              connection.targetNode === currentNode.id &&
+              connection.targetPort === currentPort.id,
+          );
+          if (!connected && !portIsAvailable(candidate.id, output)) return;
+          addRoute(candidate, "receive", `${output.label} → ${currentPort.label}`, connected);
+        });
+    });
+
+    return Array.from(options.values()).sort((a, b) =>
+      Number(b.connected) - Number(a.connected) ||
+      a.title.localeCompare(b.title) ||
+      a.mode.localeCompare(b.mode),
+    );
+  }, [connections, hoveredPort, nodes, runtime]);
+  const inventoryTotal = INVENTORY_ITEMS.reduce(
+    (total, item) => total + buildMaterialAvailability[item.type].total,
+    0,
+  );
+  const storageBreakdownByType = useMemo(() => {
+    const nodeById = new Map(nodes.map((node) => [node.id, node] as const));
+    return Object.fromEntries(
+      INVENTORY_ITEMS.map(({ type }) => {
+        const totalsByNode = new Map<NodeId, number>();
+        getStoredItemLocations(runtime, nodes, connections, type).forEach((location) => {
+          totalsByNode.set(
+            location.nodeId,
+            (totalsByNode.get(location.nodeId) ?? 0) + location.amount,
+          );
+        });
+
+        const totalsByNodeType = new Map<string, number>();
+        totalsByNode.forEach((amount, nodeId) => {
+          const nodeType = nodeById.get(nodeId)?.title ?? "Unknown node";
+          totalsByNodeType.set(
+            nodeType,
+            (totalsByNodeType.get(nodeType) ?? 0) + amount,
+          );
+        });
+
+        return [type, {
+          nodeCount: totalsByNode.size,
+          nodeTypes: Array.from(totalsByNodeType, ([nodeType, amount]) => ({ nodeType, amount }))
+            .sort((a, b) => a.nodeType.localeCompare(b.nodeType)),
+        }];
+      }),
+    ) as Record<InventoryItemType, InventoryStorageBreakdown>;
+  }, [connections, nodes, runtime]);
+  const visibleInventoryItems = useMemo(() => {
+    const visibleTypes = new Set<InventoryItemType>(STARTING_INVENTORY_ITEM_TYPES);
+
+    nodes.forEach((node) => {
+      const construction = runtime.construction[node.id];
+      if (construction && !construction.complete) return;
+      PRODUCIBLE_INVENTORY_TYPES_BY_KIND[node.kind]?.forEach((type) => visibleTypes.add(type));
+    });
+
+    INVENTORY_ITEMS.forEach((item) => {
+      if (runtime.produced[item.type] > 0 || buildMaterialAvailability[item.type].total > 0) {
+        visibleTypes.add(item.type);
+      }
+    });
+
+    return INVENTORY_ITEMS.filter((item) => visibleTypes.has(item.type));
+  }, [buildMaterialAvailability, nodes, runtime.construction, runtime.produced]);
+  const activeResearchProject = getResearchProject(runtime.research.activeProject);
+  const completedResearchCount = RESEARCH_PROJECTS.filter((project) =>
+    isResearchProjectUnlocked(runtime.research, project.id)
+  ).length;
+  const selectedMapNodeProgress = selectedMapSector
+    ? mapNodeProgress[selectedMapSector]
+    : null;
+  const selectedMapNodeLabel = selectedMapSector
+    ? selectedMapNodeProgress?.customName?.trim() || (
+        selectedMapNodeProgress?.explored ? "Unnamed" : "Unexplored"
+      )
+    : "Not selected";
+  const pendingLoadSave = pendingLoadSlot === null ? null : saveSlots[pendingLoadSlot];
+  const configuringFilter = configuringFilterId
+    ? runtime.filters[configuringFilterId] ?? null
+    : null;
+  const configuringMiningDrill = configuringMiningDrillId
+    ? runtime.miningDrills[configuringMiningDrillId] ?? null
+    : null;
+  const configuringAssembler = configuringAssemblerId
+    ? runtime.processors[configuringAssemblerId] ?? null
+    : null;
+  const configuringRecipeNode = configuringAssemblerId
+    ? nodes.find((node) => node.id === configuringAssemblerId) ?? null
+    : null;
+  const configuringRecipeKind = configuringRecipeNode?.kind === "refiner"
+    ? "refiner"
+    : "assembler";
+  const configuringRecipeTitle = configuringRecipeKind === "refiner" ? "Refiner" : "Assembler";
+  const configuringRecipeOptions = configuringRecipeKind === "refiner"
+    ? REFINER_RECIPE_OPTIONS.map((option) => ({
+        ...option,
+        recipe: REFINER_RECIPES[option.id],
+        selected: configuringAssembler?.refinerRecipe === option.id,
+      }))
+    : ASSEMBLER_RECIPE_OPTIONS.map((option) => ({
+        ...option,
+        recipe: ASSEMBLER_RECIPES[option.id],
+        selected: configuringAssembler?.assemblerRecipe === option.id,
+      }));
+  const pendingRecipeMachineTitle = pendingAssemblerRecipeChange?.kind === "refiner"
+    ? "Refiner"
+    : "Assembler";
+  const allBuildNodesUnlocked = VISIBLE_BUILD_CATALOG.every((item) =>
+    revealedBuildKinds.has(item.kind),
+  );
+  const allResearchUnlocked = isAllResearchComplete(runtime.research);
+  const journalEntries = VISIBLE_BUILD_CATALOG
+    .flatMap((item, catalogIndex) => {
+      const unlockedAt = unlockTimes[item.kind];
+      return unlockedAt === undefined ? [] : [{ item, unlockedAt, catalogIndex }];
+    })
+    .sort((a, b) => b.unlockedAt - a.unlockedAt || b.catalogIndex - a.catalogIndex);
+  const journalCategoryCounts = journalEntries.reduce(
+    (counts, entry) => {
+      counts[getBuildCategory(entry.item.kind)] += 1;
+      return counts;
+    },
+    { production: 0, logistics: 0, storage: 0 },
+  );
+  const visibleJournalEntries = journalCategory === "all"
+    ? journalEntries
+    : journalEntries.filter((entry) => getBuildCategory(entry.item.kind) === journalCategory);
+  const pendingDeletionConnection = pendingDeletionConnectionId
+    ? connections.find((connection) => connection.id === pendingDeletionConnectionId) ?? null
+    : null;
+  const pendingDisbandControlGroup = pendingDisbandControlGroupId
+    ? controlGroups.find((group) => group.id === pendingDisbandControlGroupId) ?? null
+    : null;
+  const pendingConnectionSourceNode = pendingDeletionConnection
+    ? nodes.find((node) => node.id === pendingDeletionConnection.sourceNode) ?? null
+    : null;
+  const pendingConnectionTargetNode = pendingDeletionConnection
+    ? nodes.find((node) => node.id === pendingDeletionConnection.targetNode) ?? null
+    : null;
+  const pendingConnectionSourcePort = pendingDeletionConnection && pendingConnectionSourceNode
+    ? pendingConnectionSourceNode.outputs.find((port) => port.id === pendingDeletionConnection.sourcePort) ?? null
+    : null;
+  const pendingConnectionTargetPort = pendingDeletionConnection && pendingConnectionTargetNode
+    ? pendingConnectionTargetNode.inputs.find((port) => port.id === pendingDeletionConnection.targetPort) ?? null
+    : null;
+  const managedMultiPortNode = managedMultiPort
+    ? nodes.find((node) => node.id === managedMultiPort.nodeId) ?? null
+    : null;
+  const managedMultiPortSpec = managedMultiPort && managedMultiPortNode
+    ? (managedMultiPort.direction === "output"
+        ? managedMultiPortNode.outputs
+        : managedMultiPortNode.inputs
+      ).find((port) => port.id === managedMultiPort.portId) ?? null
+    : null;
+  const managedMultiConnections = managedMultiPort
+    ? connections.filter((connection) => managedMultiPort.direction === "output"
+      ? connection.sourceNode === managedMultiPort.nodeId && connection.sourcePort === managedMultiPort.portId
+      : connection.targetNode === managedMultiPort.nodeId && connection.targetPort === managedMultiPort.portId)
+    : [];
+  return (
+    <TooltipProvider delayDuration={250}>
+    <main className="foundry-shell">
+      <header className="topbar">
+        <div className="brand-lockup" aria-label="Factorinode">
+          <div className="brand-mark"><Hammer aria-hidden="true" /></div>
+          <div>
+            <strong>FACTORINODE</strong>
+          </div>
+        </div>
+
+        <div aria-hidden="true" />
+
+        <div className="topbar-actions">
+          {runtime.research.explorationUnlocked ? (
+            <Dialog open={mapOpen} onOpenChange={setMapOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  className="map-trigger"
+                  size="sm"
+                  variant="outline"
+                  aria-label={`Map${selectedMapSector ? `, ${selectedMapNodeLabel} target selected` : ""}`}
+                >
+                  <MapIcon aria-hidden="true" />
+                  <span className="map-trigger-label">Map</span>
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="map-dialog">
+                <DialogHeader className="map-dialog-header">
+                  <DialogTitle>Node Map</DialogTitle>
+                </DialogHeader>
+                <div className="map-summary">
+                  <span>Current Node <strong>H · Home Factory</strong></span>
+                  <span>Target Node <strong>{selectedMapNodeLabel}</strong></span>
+                </div>
+                <div className="map-viewport" ref={mapViewportRef}>
+                  <div
+                    className="map-grid"
+                    role="region"
+                    aria-label="Exploration sectors"
+                    style={{
+                      gridTemplateColumns: `repeat(${MAP_GRID_SIZE}, 58px)`,
+                      gridTemplateRows: `repeat(${MAP_GRID_SIZE}, 58px)`,
+                    }}
+                  >
+                    {Array.from({ length: MAP_GRID_SIZE * MAP_GRID_SIZE }).map((_, index) => {
+                      const x = index % MAP_GRID_SIZE;
+                      const y = Math.floor(index / MAP_GRID_SIZE);
+                      const sectorKey = `${x},${y}`;
+                      const isHome = x === MAP_HOME_INDEX && y === MAP_HOME_INDEX;
+                      const direction = MAP_ADJACENT_SECTORS.get(sectorKey);
+                      if (isHome) {
+                        return (
+                          <div
+                            className="map-sector home"
+                            role="img"
+                            aria-label="Home Factory, current sector"
+                            key={sectorKey}
+                          >
+                            <strong>H</strong>
+                          </div>
+                        );
+                      }
+                      if (direction) {
+                        const isSelected = selectedMapSector === sectorKey;
+                        return (
+                          <button
+                            type="button"
+                            className={`map-sector adjacent ${isSelected ? "selected" : ""}`}
+                            aria-label={`${direction} sector, ${isSelected ? "selected" : "available for exploration"}`}
+                            aria-pressed={isSelected}
+                            onClick={() => setSelectedMapSector(sectorKey)}
+                            key={sectorKey}
+                          >
+                            <span>{isSelected ? "●" : "?"}</span>
+                          </button>
+                        );
+                      }
+                      return <div className="map-sector uncharted" aria-hidden="true" key={sectorKey} />;
+                    })}
+                  </div>
+                </div>
+                <div className="map-legend" aria-label="Map legend">
+                  <span><i className="home-swatch" />Home</span>
+                  <span><i className="available-swatch" />Available</span>
+                  <span><i className="uncharted-swatch" />Uncharted</span>
+                  <small>Scroll to survey the wider region</small>
+                </div>
+              </DialogContent>
+            </Dialog>
+          ) : null}
+          <Dialog open={researchOpen} onOpenChange={setResearchOpen}>
+            {runtime.research.available ? (
+              <DialogTrigger asChild>
+                <Button
+                  className={`research-trigger ${!activeResearchProject && completedResearchCount < RESEARCH_PROJECTS.length ? "attention" : ""}`}
+                  size="sm"
+                  variant="outline"
+                  aria-label={`Research, ${completedResearchCount} of ${RESEARCH_PROJECTS.length} projects complete${activeResearchProject ? `, researching ${activeResearchProject.title}` : ""}`}
+                >
+                  <FlaskConical aria-hidden="true" />
+                  <span className="research-trigger-label">Research</span>
+                  <span className="research-trigger-count">{completedResearchCount}/{RESEARCH_PROJECTS.length}</span>
+                </Button>
+              </DialogTrigger>
+            ) : null}
+            <DialogContent className="research-dialog">
+                <DialogHeader>
+                  <DialogTitle>Research</DialogTitle>
+                  <DialogDescription>
+                    Choose where Research Foundries apply analyzed Automata Cores.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="research-summary">
+                  <span>Active project</span>
+                  <strong>{activeResearchProject?.title ?? (completedResearchCount === RESEARCH_PROJECTS.length ? "All research complete" : "Choose a project")}</strong>
+                </div>
+                <div className="research-list">
+                  {RESEARCH_PROJECTS.map((project) => {
+                    const Icon = project.icon;
+                    const projectProgress = runtime.research.progress[project.id];
+                    const unlocked = isResearchProjectUnlocked(runtime.research, project.id);
+                    const active = runtime.research.activeProject === project.id;
+                    return (
+                      <article className={`research-card ${active ? "active" : ""} ${unlocked ? "complete" : ""}`} key={project.id}>
+                        <span className="research-card-icon"><Icon aria-hidden="true" /></span>
+                        <div className="research-card-copy">
+                          <div className="research-card-heading">
+                            <div>
+                              <span>{unlocked ? "Completed research" : active ? "Active research" : "Available research"}</span>
+                              <strong>{project.title}</strong>
+                            </div>
+                            <span className="research-cost">{RESEARCH_UNLOCK_COST} Automata Cores</span>
+                          </div>
+                          <p>{project.description}</p>
+                          <small>{project.unlock}</small>
+                          <div className="research-card-progress">
+                            <Progress
+                              value={(projectProgress / RESEARCH_UNLOCK_COST) * 100}
+                              aria-label={`${project.title}, ${projectProgress} of ${RESEARCH_UNLOCK_COST} Automata Cores analyzed`}
+                            />
+                            <strong>{projectProgress} / {RESEARCH_UNLOCK_COST}</strong>
+                          </div>
+                        </div>
+                        <Button
+                          className="research-card-action"
+                          size="sm"
+                          variant={active ? "secondary" : "outline"}
+                          disabled={unlocked || active}
+                          onClick={() => chooseResearchProject(project.id)}
+                        >
+                          {unlocked ? "Unlocked" : active ? "Active" : projectProgress > 0 ? "Continue" : "Research"}
+                        </Button>
+                      </article>
+                    );
+                  })}
+                </div>
+                <p className="research-note">
+                  Each connected Research Foundry analyzes one Automata Core in {(RESEARCH_CYCLE_DURATION / 1000).toFixed(0)} seconds. Switching projects restarts the current analysis but keeps the loaded Core.
+                </p>
+            </DialogContent>
+          </Dialog>
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button
+                className="inventory-trigger"
+                size="sm"
+                variant="outline"
+                aria-label={`Inventory, ${inventoryTotal} items available`}
+              >
+                <PackageOpen aria-hidden="true" />
+                <span className="inventory-trigger-label">Inventory</span>
+                <span className="inventory-trigger-count">{inventoryTotal}</span>
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="inventory-dialog">
+              <DialogHeader>
+                <DialogTitle>Inventory</DialogTitle>
+              </DialogHeader>
+              <div className="inventory-list" aria-live="polite">
+                {visibleInventoryItems.map((item) => {
+                  const availability = buildMaterialAvailability[item.type];
+                  const count = availability.total;
+                  const breakdown = storageBreakdownByType[item.type];
+                  return (
+                    <Tooltip key={item.type} open={breakdown.nodeTypes.length > 0 ? undefined : false}>
+                      <TooltipTrigger asChild>
+                        <div
+                          className="inventory-row"
+                          style={{ "--item-color": RESOURCE_COLORS[item.type] } as React.CSSProperties}
+                          tabIndex={breakdown.nodeTypes.length > 0 ? 0 : undefined}
+                          aria-label={`${item.label}, ${count} stored across ${breakdown.nodeCount} ${breakdown.nodeCount === 1 ? "node" : "nodes"}`}
+                        >
+                          <span className="inventory-swatch" />
+                          <div className="inventory-copy">
+                            <strong>{item.label}</strong>
+                          </div>
+                          <div className="inventory-count">
+                            <strong>{count}</strong>
+                            <span>stored</span>
+                          </div>
+                          <span className="inventory-location-count">
+                            {breakdown.nodeCount === 0
+                              ? "No node storage"
+                              : `${breakdown.nodeCount} ${breakdown.nodeCount === 1 ? "node" : "nodes"}`}
+                          </span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent
+                        className="inventory-breakdown-tooltip"
+                        side="top"
+                        sideOffset={10}
+                        aria-label={`${item.label} stored by node type`}
+                      >
+                        <ul>
+                          {breakdown.nodeTypes.map(({ nodeType, amount }) => (
+                            <li key={nodeType}>
+                              <span>{nodeType}</span>
+                              <b>{amount}</b>
+                            </li>
+                          ))}
+                        </ul>
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog
+            open={buildOpen}
+            onOpenChange={(open) => {
+              buildOpenRef.current = open;
+              setBuildOpen(open);
+              if (open) setBuildAttention(false);
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button
+                className={`build-trigger ${buildAttention ? "attention" : ""}`}
+                size="sm"
+                variant="outline"
+                aria-label={buildAttention ? "Build, new machine available" : "Build"}
+                title={buildAttention ? "New machine available" : undefined}
+              >
+                <Hammer aria-hidden="true" />
+                Build
+              </Button>
+            </DialogTrigger>
+            <DialogContent className={`build-dialog ${showAllBuildNodes ? "show-all-nodes" : ""}`}>
+              <DialogHeader>
+                <DialogTitle>Node Construction</DialogTitle>
+                  <DialogDescription>
+                  Resources required to create a new node are drawn directly from physical node storage, including completed machine output, Storage nodes, and Wooden Chests.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="build-category-filters" role="group" aria-label="Filter buildings by category">
+                <Button
+                  className={`build-category-filter production ${buildCategory === "production" ? "active" : ""}`}
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  disabled={showAllBuildNodes}
+                  aria-pressed={buildCategory === "production"}
+                  onClick={() => setBuildCategory((current) => current === "production" ? "all" : "production")}
+                >
+                  <Factory aria-hidden="true" />
+                  <span>Production</span>
+                  <span className="build-category-count">{buildCatalog.categoryCounts.production}</span>
+                </Button>
+                <Button
+                  className={`build-category-filter logistics ${buildCategory === "logistics" ? "active" : ""}`}
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  disabled={showAllBuildNodes}
+                  aria-pressed={buildCategory === "logistics"}
+                  onClick={() => setBuildCategory((current) => current === "logistics" ? "all" : "logistics")}
+                >
+                  <GitMerge aria-hidden="true" />
+                  <span>Logistics</span>
+                  <span className="build-category-count">{buildCatalog.categoryCounts.logistics}</span>
+                </Button>
+                <Button
+                  className={`build-category-filter storage ${buildCategory === "storage" ? "active" : ""}`}
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  disabled={showAllBuildNodes}
+                  aria-pressed={buildCategory === "storage"}
+                  onClick={() => setBuildCategory((current) => current === "storage" ? "all" : "storage")}
+                >
+                  <Archive aria-hidden="true" />
+                  <span>Storage</span>
+                  <span className="build-category-count">{buildCatalog.categoryCounts.storage}</span>
+                </Button>
+              </div>
+              <div className="build-toolbar">
+                <div className="build-toolbar-filters" role="group" aria-label="Additional build filters">
+                  <Button
+                    className={`buildable-filter ${showBuildableOnly ? "active" : ""}`}
+                    size="sm"
+                    variant="outline"
+                    type="button"
+                    disabled={showAllBuildNodes}
+                    aria-pressed={showBuildableOnly}
+                    onClick={() => setShowBuildableOnly((current) => !current)}
+                  >
+                    <Hammer aria-hidden="true" />
+                    Buildable only
+                    <span className="build-filter-count">{buildCatalog.buildableCount}</span>
+                  </Button>
+                  <Button
+                    className={`buildable-filter never-built-filter ${showNeverBuiltOnly ? "active" : ""}`}
+                    size="sm"
+                    variant="outline"
+                    type="button"
+                    aria-pressed={showNeverBuiltOnly}
+                    onClick={() => setShowNeverBuiltOnly((current) => !current)}
+                  >
+                    <Plus aria-hidden="true" />
+                    Never Built
+                    <span className="build-filter-count">{buildCatalog.neverBuiltCount}</span>
+                  </Button>
+                </div>
+                <Button
+                  className={`buildable-filter compact-view-filter ${compactBuildView ? "active" : ""}`}
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  aria-pressed={compactBuildView}
+                  onClick={() => setCompactBuildView((current) => !current)}
+                >
+                  <Eye aria-hidden="true" />
+                  Compact View
+                </Button>
+              </div>
+              <div className={`build-list ${compactBuildView ? "compact" : ""}`}>
+                {buildCatalog.items.map(({ item, canBuild, unlocked }) => {
+                  const Icon = item.icon;
+                  const isNewBuild = newBuildKinds.has(item.kind);
+                  const hasBeenBuilt = builtBuildKinds.has(item.kind);
+                  const itemCategory = getBuildCategory(item.kind);
+                  const CategoryIcon = itemCategory === "production"
+                    ? Factory
+                    : itemCategory === "logistics"
+                      ? GitMerge
+                      : Archive;
+                  const categoryLabel = itemCategory === "production"
+                    ? "Production"
+                    : itemCategory === "logistics"
+                      ? "Logistics"
+                      : "Storage";
+                  const previewNode = createBuildableNode(item.kind, `build-preview-${item.kind}`, 1);
+                  const missingIngredients = removeBuildCosts
+                    ? []
+                    : item.recipe
+                        .map((ingredient) => ({
+                          ...ingredient,
+                          missing: Math.max(
+                            0,
+                            ingredient.amount - buildMaterialAvailability[ingredient.type].total,
+                          ),
+                        }))
+                        .filter((ingredient) => ingredient.missing > 0);
+                  const requiredInputs = getBuildRequiredInputs(item.kind);
+                  const productionOutputs = getBuildProductionOutputs(item.kind, previewNode);
+                  if (compactBuildView) {
+                    return (
+                      <Tooltip key={item.kind}>
+                        <TooltipTrigger asChild>
+                          <div
+                            className={`build-compact-entry ${canBuild ? "" : "unavailable"} ${unlocked ? "" : "locked"} ${isNewBuild ? "newly-buildable" : ""}`}
+                            onPointerEnter={() => acknowledgeBuildKind(item.kind)}
+                            onFocusCapture={() => acknowledgeBuildKind(item.kind)}
+                          >
+                            <span className="build-compact-icon"><Icon aria-hidden="true" /></span>
+                            <strong className="build-compact-name">{item.title}</strong>
+                            <span
+                              className={`compact-never-built ${hasBeenBuilt ? "empty" : ""}`}
+                              aria-hidden={hasBeenBuilt}
+                            >
+                              {hasBeenBuilt ? "\u00A0" : "Never built"}
+                            </span>
+                            <Button
+                              className="build-card-action build-compact-action"
+                              size="sm"
+                              disabled={!canBuild}
+                              onClick={() => buildNode(item.kind, item.recipe)}
+                            >
+                              {canBuild ? <Hammer aria-hidden="true" /> : null}
+                              {canBuild ? "Build" : unlocked ? "Missing items" : "Locked"}
+                            </Button>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent
+                          className="build-compact-tooltip"
+                          side="right"
+                          sideOffset={12}
+                          collisionPadding={{ top: 24, right: 24, bottom: 24, left: 24 }}
+                          avoidCollisions
+                          sticky="always"
+                        >
+                          <div className="build-compact-tooltip-heading">
+                            <span className="build-compact-tooltip-icon"><Icon aria-hidden="true" /></span>
+                            <div>
+                              <strong>{item.title}</strong>
+                              <span>{(item.buildTime / 1000).toFixed(0)}s construction</span>
+                            </div>
+                          </div>
+                          <p className="build-compact-tooltip-description">{item.description}</p>
+                          <div className="build-compact-tooltip-grid">
+                            <section className="build-compact-tooltip-section build-cost-spec">
+                              <span className="build-spec-label">Build cost</span>
+                              <div className="build-recipe">
+                                {removeBuildCosts ? (
+                                  <span className="build-cost ready free-build-cost">
+                                    <Minus aria-hidden="true" />
+                                    <b>Free</b>
+                                    No materials deducted
+                                  </span>
+                                ) : item.recipe.map((ingredient) => {
+                                  const availability = buildMaterialAvailability[ingredient.type];
+                                  const ready = availability.total >= ingredient.amount;
+                                  return (
+                                    <span
+                                      className={`build-cost ${ready ? "ready" : "missing"}`}
+                                      key={ingredient.type}
+                                    >
+                                      <i style={{ background: RESOURCE_COLORS[ingredient.type] }} />
+                                      <b>{ready ? ingredient.amount : `${availability.total}/${ingredient.amount}`}</b>
+                                      {formatResourceType(ingredient.type)}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            </section>
+                            <section className="build-compact-tooltip-section build-ports-spec">
+                              <span className="build-spec-label">Connection ports</span>
+                              <div className="build-port-list">
+                                {previewNode.inputs.map((port) => (
+                                  <span className="build-port input" key={port.id}>
+                                    <em>IN</em>
+                                    <i style={{ background: RESOURCE_COLORS[port.type] }} />
+                                    <PortLabel label={port.label} />
+                                  </span>
+                                ))}
+                                {previewNode.outputs.map((port) => (
+                                  <span className="build-port output" key={port.id}>
+                                    <em>OUT</em>
+                                    <i style={{ background: RESOURCE_COLORS[port.type] }} />
+                                    <PortLabel label={port.label} />
+                                  </span>
+                                ))}
+                                {previewNode.inputs.length === 0 && previewNode.outputs.length === 0 ? (
+                                  <span className="build-detail-empty">No connection ports</span>
+                                ) : null}
+                              </div>
+                            </section>
+                            <section className="build-compact-tooltip-section build-inputs-spec">
+                              <span className="build-spec-label">Required inputs</span>
+                              <div className="build-flow-list">
+                                {requiredInputs.length > 0 ? requiredInputs.map((input) => (
+                                  <span className="build-flow-item input" key={`${input.label}-${input.amount}`}>
+                                    {input.type ? <i style={{ background: RESOURCE_COLORS[input.type] }} /> : null}
+                                    {input.amount ? <b>{input.amount}</b> : null}
+                                    {input.label}
+                                  </span>
+                                )) : <span className="build-detail-empty">None</span>}
+                              </div>
+                            </section>
+                            <section className="build-compact-tooltip-section build-output-spec">
+                              <span className="build-spec-label">Production output</span>
+                              <div className="build-flow-list">
+                                {productionOutputs.length > 0 ? productionOutputs.map((output) => (
+                                  <span className="build-flow-item output" key={`${output.label}-${output.amount ?? "port"}`}>
+                                    {output.type ? <i style={{ background: RESOURCE_COLORS[output.type] }} /> : null}
+                                    {output.amount ? <b>{output.amount}</b> : null}
+                                    <PortLabel label={output.label} />
+                                  </span>
+                                )) : <span className="build-detail-empty">None</span>}
+                              </div>
+                            </section>
+                            {showAllBuildNodes ? (
+                              <section className="build-compact-tooltip-section build-unlock-spec build-compact-unlock-spec">
+                                <span className="build-spec-label">Unlock trigger</span>
+                                <span className={`build-unlock-state ${unlocked ? "unlocked" : "locked"}`}>
+                                  {unlocked ? "Unlocked" : "Locked"}
+                                </span>
+                                <p>{getBuildUnlockRequirement(item.kind)}</p>
+                              </section>
+                            ) : null}
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  }
+                  return (
+                    <div
+                      className={`build-card ${canBuild ? "" : "unavailable"} ${unlocked ? "" : "locked"} ${isNewBuild ? "newly-buildable" : ""}`}
+                      key={item.kind}
+                      onPointerEnter={() => acknowledgeBuildKind(item.kind)}
+                      onFocusCapture={() => acknowledgeBuildKind(item.kind)}
+                    >
+                      <span className="build-card-icon"><Icon aria-hidden="true" /></span>
+                      <div className="build-card-copy">
+                        <div className="build-card-heading">
+                          <div className="build-card-title">
+                            <strong>{item.title}</strong>
+                            {isNewBuild ? <span className="new-build-badge">New</span> : null}
+                          </div>
+                          <span>{(item.buildTime / 1000).toFixed(0)}s build</span>
+                        </div>
+                        <span className="build-description">{item.description}</span>
+                        <div className={`build-card-specs ${showAllBuildNodes ? "show-unlock-trigger" : ""}`}>
+                          <section className="build-spec build-cost-spec" aria-label={`Build cost for ${item.title}`}>
+                            <span className="build-spec-label">Build cost</span>
+                            <div className="build-recipe">
+                              {removeBuildCosts ? (
+                                <span className="build-cost ready free-build-cost">
+                                  <Minus aria-hidden="true" />
+                                  <b>Free</b>
+                                  Developer override
+                                </span>
+                              ) : item.recipe.map((ingredient) => {
+                                const availability = buildMaterialAvailability[ingredient.type];
+                                const available = availability.total;
+                                const ready = available >= ingredient.amount;
+                                const sourceSummary = `${availability.storage} in Storage nodes · ${availability.chests} in Wooden Chests · ${availability.production} completed outputs · ${availability.buffers} buffered in nodes`;
+                                return (
+                                  <span
+                                    className={`build-cost ${ready ? "ready" : "missing"}`}
+                                    key={ingredient.type}
+                                    title={ready
+                                      ? `${available} ${formatResourceType(ingredient.type)} available · ${sourceSummary}`
+                                      : `${available} of ${ingredient.amount} ${formatResourceType(ingredient.type)} available · ${sourceSummary}`}
+                                  >
+                                    <i style={{ background: RESOURCE_COLORS[ingredient.type] }} />
+                                    <b>{ready ? ingredient.amount : `${available}/${ingredient.amount}`}</b> {formatResourceType(ingredient.type)}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                            {missingIngredients.length > 0 ? (
+                              <div className="build-shortage" role="status">
+                                <strong>Missing</strong>
+                                <span>
+                                  {missingIngredients
+                                    .map((ingredient) => `${ingredient.missing} ${formatResourceType(ingredient.type)}`)
+                                    .join(" · ")}
+                                </span>
+                              </div>
+                            ) : null}
+                          </section>
+                          <section className="build-spec build-ports-spec" aria-label={`Input and output ports for ${item.title}`}>
+                            <span className="build-spec-label">Node ports</span>
+                            <div className="build-port-list">
+                              {previewNode.inputs.map((port) => (
+                                <span className="build-port input" key={port.id}>
+                                  <em>IN</em>
+                                  <i style={{ background: RESOURCE_COLORS[port.type] }} />
+                                  <PortLabel label={port.label} />
+                                </span>
+                              ))}
+                              {previewNode.outputs.map((port) => (
+                                <span className="build-port output" key={port.id}>
+                                  <em>OUT</em>
+                                  <i style={{ background: RESOURCE_COLORS[port.type] }} />
+                                  <PortLabel label={port.label} />
+                                </span>
+                              ))}
+                              {previewNode.outputs.length === 0 ? (
+                                <span className="build-port none"><em>OUT</em> None</span>
+                              ) : null}
+                            </div>
+                          </section>
+                          {showAllBuildNodes ? (
+                            <section className="build-spec build-category-spec" aria-label={`Category for ${item.title}`}>
+                              <span className="build-spec-label">Category</span>
+                              <span className={`build-category-value ${itemCategory}`}>
+                                <CategoryIcon aria-hidden="true" />
+                                {categoryLabel}
+                              </span>
+                            </section>
+                          ) : null}
+                          {showAllBuildNodes ? (
+                            <section className="build-spec build-unlock-spec" aria-label={`Unlock trigger for ${item.title}`}>
+                              <span className="build-spec-label">Unlock trigger</span>
+                              <span className={`build-unlock-state ${unlocked ? "unlocked" : "locked"}`}>
+                                {unlocked ? "Unlocked" : "Locked"}
+                              </span>
+                              <p>{getBuildUnlockRequirement(item.kind)}</p>
+                            </section>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="build-card-action-column">
+                        <Button
+                          className="build-card-action"
+                          size="sm"
+                          disabled={!canBuild}
+                          onClick={() => buildNode(item.kind, item.recipe)}
+                        >
+                          {canBuild ? <Hammer aria-hidden="true" /> : null}
+                          {canBuild ? "Build" : unlocked ? "Missing items" : "Locked"}
+                        </Button>
+                        {!hasBeenBuilt ? (
+                          <span className="never-built-indicator">Never built</span>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+                {buildCatalog.items.length === 0 ? (
+                  <div className="build-empty-state">
+                    <Hammer aria-hidden="true" />
+                    <strong>
+                      {showBuildableOnly
+                        ? "Nothing in this category is buildable yet"
+                        : showNeverBuiltOnly
+                          ? "Every unlocked node type in this category has been placed"
+                        : `No ${buildCategory === "all" ? "available" : buildCategory} machines yet`}
+                    </strong>
+                    <span>
+                      {showBuildableOnly
+                        ? "Produce or route more construction materials into node storage, then check again."
+                        : showNeverBuiltOnly
+                          ? "Disable Never Built to see building types you have already placed."
+                        : "New machines will appear here as you progress."}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog
+            open={journalOpen}
+            onOpenChange={(open) => {
+              setJournalOpen(open);
+              if (open) setJournalAttention(false);
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button
+                className={`journal-trigger ${journalAttention ? "attention" : ""}`}
+                size="sm"
+                variant="outline"
+                aria-label={journalAttention
+                  ? `Journal, new discovery, ${journalEntries.length} nodes unlocked`
+                  : `Journal, ${journalEntries.length} nodes unlocked`}
+                title={journalAttention ? "New discovery recorded" : undefined}
+              >
+                <span className="journal-trigger-icon"><BookOpenText aria-hidden="true" /></span>
+                <span className="journal-trigger-label">Journal</span>
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="journal-dialog">
+              <DialogHeader className="journal-header">
+                <div className="journal-title-mark"><BookOpenText aria-hidden="true" /></div>
+                <div>
+                  <DialogTitle>Discovery Journal</DialogTitle>
+                  <DialogDescription>
+                    Blueprint unlocks recorded from the start of this game.
+                  </DialogDescription>
+                </div>
+              </DialogHeader>
+              <div className="journal-summary" aria-live="polite">
+                <span>Discovered blueprints</span>
+                <strong>{journalEntries.length} / {VISIBLE_BUILD_CATALOG.length}</strong>
+              </div>
+              <div className="journal-category-filters" role="group" aria-label="Filter journal by category">
+                <Button
+                  className={`journal-category-filter production ${journalCategory === "production" ? "active" : ""}`}
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  aria-pressed={journalCategory === "production"}
+                  onClick={() => setJournalCategory((current) => current === "production" ? "all" : "production")}
+                >
+                  <Factory aria-hidden="true" />
+                  <span>Production</span>
+                  <span className="journal-category-count">{journalCategoryCounts.production}</span>
+                </Button>
+                <Button
+                  className={`journal-category-filter logistics ${journalCategory === "logistics" ? "active" : ""}`}
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  aria-pressed={journalCategory === "logistics"}
+                  onClick={() => setJournalCategory((current) => current === "logistics" ? "all" : "logistics")}
+                >
+                  <GitMerge aria-hidden="true" />
+                  <span>Logistics</span>
+                  <span className="journal-category-count">{journalCategoryCounts.logistics}</span>
+                </Button>
+                <Button
+                  className={`journal-category-filter storage ${journalCategory === "storage" ? "active" : ""}`}
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  aria-pressed={journalCategory === "storage"}
+                  onClick={() => setJournalCategory((current) => current === "storage" ? "all" : "storage")}
+                >
+                  <Archive aria-hidden="true" />
+                  <span>Storage</span>
+                  <span className="journal-category-count">{journalCategoryCounts.storage}</span>
+                </Button>
+              </div>
+              <div className="journal-list" aria-label="Unlocked node timeline">
+                {visibleJournalEntries.map(({ item, unlockedAt }) => {
+                  const Icon = item.icon;
+                  const category = getBuildCategory(item.kind);
+                  const discoveryIndex = journalEntries.findIndex(
+                    (entry) => entry.item.kind === item.kind,
+                  );
+                  return (
+                    <article className="journal-entry" key={item.kind}>
+                      <div className="journal-timeline" aria-hidden="true">
+                        <span>{journalEntries.length - discoveryIndex}</span>
+                      </div>
+                      <span className={`journal-entry-icon ${category}`}>
+                        <Icon aria-hidden="true" />
+                      </span>
+                      <div className="journal-entry-copy">
+                        <span>{category}</span>
+                        <strong>{item.title}</strong>
+                        <small>{getBuildUnlockRequirement(item.kind)}</small>
+                      </div>
+                      <time
+                        className="journal-entry-time"
+                        dateTime={`PT${Math.floor(unlockedAt / 1000)}S`}
+                        title={`${Math.floor(unlockedAt / 1000)} seconds after game start`}
+                      >
+                        <span>Unlocked</span>
+                        <strong>+{formatUnlockTime(unlockedAt)}</strong>
+                      </time>
+                    </article>
+                  );
+                })}
+                {visibleJournalEntries.length === 0 ? (
+                  <div className="journal-empty-state">
+                    <BookOpenText aria-hidden="true" />
+                    <strong>No {journalCategory} discoveries yet</strong>
+                    <span>New blueprints will be recorded here as they unlock.</span>
+                  </div>
+                ) : null}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={optionsOpen} onOpenChange={setOptionsOpen}>
+            <DialogTrigger asChild>
+              <Button
+                className="options-trigger"
+                size="sm"
+                variant="outline"
+                aria-label="Options"
+              >
+                <Menu aria-hidden="true" />
+                <span className="options-trigger-label">Options</span>
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="options-dialog">
+              <DialogHeader className="options-dialog-header">
+                <div className="options-title-mark"><Menu aria-hidden="true" /></div>
+                <div>
+                  <DialogTitle>Options</DialogTitle>
+                  <DialogDescription>
+                    Manage local saves, shortcut bars, and visual preferences.
+                  </DialogDescription>
+                </div>
+              </DialogHeader>
+              <div className="options-menu" role="group" aria-label="Game options">
+                <button
+                  type="button"
+                  className="options-menu-item save-option"
+                  onClick={() => {
+                    setOptionsOpen(false);
+                    setSaveOpen(true);
+                  }}
+                >
+                  <span className="options-menu-icon"><HardDrive aria-hidden="true" /></span>
+                  <span className="options-menu-copy">
+                    <strong>Save / Load</strong>
+                    <small>Open the existing local save slots.</small>
+                  </span>
+                  <span className="options-menu-action">Open</span>
+                </button>
+                <button
+                  type="button"
+                  className={`options-menu-item wire-animation-option ${wireAnimationsEnabled ? "enabled" : "disabled"}`}
+                  aria-pressed={wireAnimationsEnabled}
+                  aria-label={`Wire animations, ${wireAnimationsEnabled ? "enabled" : "disabled"}`}
+                  onClick={toggleWireAnimations}
+                >
+                  <span className="options-menu-icon"><Cable aria-hidden="true" /></span>
+                  <span className="options-menu-copy">
+                    <strong>Wire Animations</strong>
+                    <small>Show transfer glows without changing item or power flow.</small>
+                  </span>
+                  <span className="options-toggle-state">
+                    <i aria-hidden="true" />
+                    {wireAnimationsEnabled ? "Enabled" : "Disabled"}
+                  </span>
+                </button>
+                {(["shortcutBar1", "shortcutBar2"] as const).map((barId, index) => {
+                  const bar = shortcutBars[barId];
+                  const label = `Shortcut Bar ${index + 1}`;
+                  return (
+                    <button
+                      type="button"
+                      className={`options-menu-item shortcut-bar-option ${bar.visible ? "enabled" : "disabled"}`}
+                      aria-pressed={bar.visible}
+                      aria-label={`${label}, ${bar.visible ? "visible" : "hidden"}`}
+                      key={barId}
+                      onClick={() => toggleShortcutBarVisibility(barId)}
+                    >
+                      <span className="options-menu-icon"><Menu aria-hidden="true" /></span>
+                      <span className="options-menu-copy">
+                        <strong>{label}</strong>
+                        <small>Show or hide this independently configured node shortcut bar.</small>
+                      </span>
+                      <span className="options-toggle-state">
+                        <i aria-hidden="true" />
+                        {bar.visible ? "Visible" : "Hidden"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={saveOpen} onOpenChange={setSaveOpen}>
+            <DialogContent className="save-dialog">
+              <DialogHeader className="save-dialog-header">
+                <div className="save-title-mark"><HardDrive aria-hidden="true" /></div>
+                <div>
+                  <DialogTitle>Save / Load</DialogTitle>
+                  <DialogDescription>
+                    Keep up to three local foundry saves in this browser.
+                  </DialogDescription>
+                </div>
+              </DialogHeader>
+              <div className="save-local-note">
+                <HardDrive aria-hidden="true" />
+                <span>Saves stay on this device and browser. They are not uploaded.</span>
+              </div>
+              <div className="save-slot-list" aria-label="Save game slots">
+                {saveSlots.map((slot, slotIndex) => (
+                  <article
+                    className={`save-slot-card ${slot ? "occupied" : "empty"}`}
+                    key={`save-slot-${slotIndex}`}
+                  >
+                    <div className="save-slot-index" aria-hidden="true">
+                      <span>Slot</span>
+                      <strong>{slotIndex + 1}</strong>
+                    </div>
+                    <div className="save-slot-copy">
+                      <label htmlFor={`save-name-${slotIndex}`}>Save name</label>
+                      <input
+                        id={`save-name-${slotIndex}`}
+                        className="save-name-input"
+                        value={saveNames[slotIndex] ?? ""}
+                        maxLength={40}
+                        spellCheck="false"
+                        placeholder={`Save ${slotIndex + 1}`}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setSaveNames((current) => current.map(
+                            (name, index) => index === slotIndex ? value : name,
+                          ));
+                        }}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      />
+                      {slot ? (
+                        <p>
+                          <span className="save-slot-status">Saved</span>
+                          <time dateTime={slot.savedAt}>{formatSaveDate(slot.savedAt)}</time>
+                        </p>
+                      ) : (
+                        <p><span className="save-slot-status empty">Empty</span>No saved game in this slot</p>
+                      )}
+                    </div>
+                    <div className="save-slot-actions">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => saveGameToSlot(slotIndex)}
+                      >
+                        <Save aria-hidden="true" />
+                        {slot ? "Overwrite" : "Save"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={!slot}
+                        onClick={() => {
+                          setPendingLoadSlot(slotIndex);
+                          setLoadConfirmOpen(true);
+                        }}
+                      >
+                        <FolderOpen aria-hidden="true" />
+                        Load
+                      </Button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={devOpen} onOpenChange={setDevOpen}>
+            <DialogTrigger asChild>
+              <Button
+                className="dev-trigger"
+                size="sm"
+                variant="outline"
+                aria-label="Developer tools"
+              >
+                <Atom aria-hidden="true" />
+                <span className="dev-trigger-label">Dev</span>
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="dev-dialog">
+              <DialogHeader className="dev-dialog-header">
+                <div className="dev-title-mark"><Atom aria-hidden="true" /></div>
+                <div>
+                  <DialogTitle>Developer tools</DialogTitle>
+                  <DialogDescription>
+                    Temporary controls for testing progression and construction.
+                  </DialogDescription>
+                </div>
+              </DialogHeader>
+              <div className="dev-note">
+                <Atom aria-hidden="true" />
+                <span>Changes apply to the current game and are included in new saves.</span>
+              </div>
+              <div className="dev-controls">
+                <Button
+                  className={`build-inspector-toggle ${showAllBuildNodes ? "active" : ""}`}
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  aria-pressed={showAllBuildNodes}
+                  onClick={() => {
+                    setShowAllBuildNodes((current) => {
+                      const next = !current;
+                      if (next) {
+                        setBuildCategory("all");
+                        setShowBuildableOnly(false);
+                      }
+                      return next;
+                    });
+                  }}
+                >
+                  <Eye aria-hidden="true" />
+                  <span>
+                    <strong>Show all nodes</strong>
+                    <small>Show locked nodes and unlock triggers</small>
+                  </span>
+                  <em>{showAllBuildNodes ? "Active" : "Temporary"}</em>
+                </Button>
+                <Button
+                  className="build-unlock-all"
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  disabled={allBuildNodesUnlocked}
+                  onClick={unlockAllNodesForDevelopment}
+                >
+                  <LockOpen aria-hidden="true" />
+                  <span>
+                    <strong>{allBuildNodesUnlocked ? "All nodes unlocked" : "Unlock all nodes"}</strong>
+                    <small>Reveal every node blueprint for this game</small>
+                  </span>
+                  <em>{allBuildNodesUnlocked ? "Unlocked" : "Developer"}</em>
+                </Button>
+                <Button
+                  className="build-unlock-all research-unlock-all"
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  disabled={allResearchUnlocked}
+                  onClick={unlockAllResearchForDevelopment}
+                >
+                  <FlaskConical aria-hidden="true" />
+                  <span>
+                    <strong>{allResearchUnlocked ? "All research unlocked" : "Unlock all research"}</strong>
+                    <small>Complete every research technology instantly</small>
+                  </span>
+                  <em>{allResearchUnlocked ? "Unlocked" : "Developer"}</em>
+                </Button>
+                <Button
+                  className={`build-cost-toggle ${removeBuildCosts ? "active" : ""}`}
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  aria-pressed={removeBuildCosts}
+                  onClick={() => setRemoveBuildCosts((current) => !current)}
+                >
+                  <Minus aria-hidden="true" />
+                  <span>
+                    <strong>Remove Build Costs</strong>
+                    <small>Build unlocked nodes without consuming stored materials</small>
+                  </span>
+                  <em>{removeBuildCosts ? "Enabled" : "Disabled"}</em>
+                </Button>
+                <Button
+                  className="build-inventory-enable"
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  disabled={revealedBuildKinds.has("inventorySource")}
+                  onClick={() => enableTemporaryBlueprint("inventorySource")}
+                >
+                  <Plus aria-hidden="true" />
+                  <span>
+                    <strong>{revealedBuildKinds.has("inventorySource") ? "Inventory enabled" : "Enable Inventory node"}</strong>
+                    <small>Reveal for this game</small>
+                  </span>
+                  <em>{revealedBuildKinds.has("inventorySource") ? "Enabled" : "Temporary"}</em>
+                </Button>
+                <Button
+                  className="build-storage-enable"
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  disabled={revealedBuildKinds.has("storage")}
+                  onClick={() => enableTemporaryBlueprint("storage")}
+                >
+                  <HardDrive aria-hidden="true" />
+                  <span>
+                    <strong>{revealedBuildKinds.has("storage") ? "Storage enabled" : "Enable Storage node"}</strong>
+                    <small>Reveal for this game</small>
+                  </span>
+                  <em>{revealedBuildKinds.has("storage") ? "Enabled" : "Temporary"}</em>
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </header>
+
+      <div className="shortcut-bar-layer" aria-label="Node shortcut bars">
+        <NodeShortcutBar
+          name="Shortcut Bar 1"
+          config={shortcutBars.shortcutBar1}
+          options={shortcutNodeOptions}
+          placementActive={Boolean(placingNodeId)}
+          onBuild={buildFromShortcut}
+          onChange={(updater) => updateShortcutBar("shortcutBar1", updater)}
+        />
+        <NodeShortcutBar
+          name="Shortcut Bar 2"
+          config={shortcutBars.shortcutBar2}
+          options={shortcutNodeOptions}
+          placementActive={Boolean(placingNodeId)}
+          onBuild={buildFromShortcut}
+          onChange={(updater) => updateShortcutBar("shortcutBar2", updater)}
+        />
+      </div>
+
+      <AlertDialog
+        open={loadConfirmOpen}
+        onOpenChange={(open) => {
+          setLoadConfirmOpen(open);
+          if (!open) setPendingLoadSlot(null);
+        }}
+      >
+        <AlertDialogContent className="load-save-dialog">
+          <AlertDialogHeader>
+            <AlertDialogMedia className="load-save-dialog-icon">
+              <FolderOpen aria-hidden="true" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>
+              Load {pendingLoadSave?.name ?? "this save"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Your current unsaved progress will be replaced
+              {pendingLoadSave ? ` by the game saved ${formatSaveDate(pendingLoadSave.savedAt)}` : ""}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep current game</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={pendingLoadSlot === null || !pendingLoadSave}
+              onClick={() => {
+                if (pendingLoadSlot !== null) loadGameFromSlot(pendingLoadSlot);
+              }}
+            >
+              <FolderOpen aria-hidden="true" />
+              Load game
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={controlGroupOnboardingOpen} onOpenChange={setControlGroupOnboardingOpen}>
+        <DialogContent className="control-group-color-dialog control-group-onboarding-dialog">
+          <DialogHeader>
+            <div className="control-group-dialog-icon" aria-hidden="true">
+              <Palette />
+            </div>
+            <DialogTitle>Create a Control Group</DialogTitle>
+            <DialogDescription>
+              You can create a control group by right-clicking while multiple nodes are selected.
+            </DialogDescription>
+          </DialogHeader>
+          <label className="inventory-overflow-suppression">
+            <Checkbox
+              checked={suppressControlGroupTutorial}
+              onCheckedChange={(checked) => {
+                const shouldSuppress = checked === true;
+                setSuppressControlGroupTutorial(shouldSuppress);
+                controlGroupTutorialSuppressedRef.current = shouldSuppress;
+              }}
+            />
+            <span><strong>Don&apos;t show this again</strong></span>
+          </label>
+          <DialogFooter>
+            <Button
+              type="button"
+              onClick={() => setControlGroupOnboardingOpen(false)}
+            >
+              Got it
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={controlGroupColorOpen}
+        onOpenChange={(open) => {
+          setControlGroupColorOpen(open);
+          if (!open) setPendingControlGroupNodeIds([]);
+        }}
+      >
+        <DialogContent className="control-group-color-dialog">
+          <DialogHeader>
+            <div className="control-group-dialog-icon" aria-hidden="true">
+              <Palette />
+            </div>
+            <DialogTitle>Choose a control group color</DialogTitle>
+            <DialogDescription>
+              {pendingControlGroupNodeIds.length} nodes will select and move together. Choose one of ten colorblind-friendly identifiers.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="control-group-palette" role="group" aria-label="Control group colors">
+            {CONTROL_GROUP_COLORS.map((color) => (
+              <button
+                type="button"
+                className="control-group-color-option"
+                key={color.name}
+                style={{ "--control-group-choice": color.value } as React.CSSProperties}
+                aria-label={`Create ${color.name} control group`}
+                onClick={() => createControlGroup(color)}
+              >
+                <span aria-hidden="true" />
+                <strong>{color.name}</strong>
+              </button>
+            ))}
+          </div>
+          <div className="control-group-shortcuts" aria-label="Control group controls">
+            <span><kbd>Click</kbd> select and move group</span>
+            <span><kbd>Double-click</kbd> control one node</span>
+            <span><kbd>Right-click</kbd> disband</span>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setControlGroupColorOpen(false);
+                setPendingControlGroupNodeIds([]);
+              }}
+            >
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={disbandControlGroupOpen}
+        onOpenChange={(open) => {
+          setDisbandControlGroupOpen(open);
+          if (!open) setPendingDisbandControlGroupId(null);
+        }}
+      >
+        <AlertDialogContent
+          className="destroy-dialog control-group-disband-dialog"
+          style={{
+            "--control-group-color": pendingDisbandControlGroup?.color ?? "#bab0ac",
+          } as React.CSSProperties}
+        >
+          <AlertDialogHeader>
+            <AlertDialogMedia className="destroy-dialog-icon control-group-disband-icon">
+              <Unplug aria-hidden="true" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>Disband this control group?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The {pendingDisbandControlGroup?.colorName ?? "selected"} group contains {pendingDisbandControlGroup?.nodeIds.length ?? 0} nodes. Its nodes, cables, and positions will not be changed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="control-group-disband-summary">
+            <span aria-hidden="true" />
+            <strong>{pendingDisbandControlGroup?.colorName ?? "Control"} group</strong>
+            <small>{pendingDisbandControlGroup?.nodeIds.length ?? 0} nodes</small>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep group</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                if (!pendingDisbandControlGroupId) {
+                  event.preventDefault();
+                  return;
+                }
+                disbandControlGroup(pendingDisbandControlGroupId);
+              }}
+            >
+              <Unplug aria-hidden="true" />
+              Disband group
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={inventoryOverflowDialogOpen}
+        onOpenChange={(open) => {
+          setInventoryOverflowDialogOpen(open);
+          if (!open) {
+            inventoryOverflowActionRef.current = null;
+            setInventoryOverflowPrompt(null);
+            setSuppressFutureInventoryOverflowWarnings(false);
+          }
+        }}
+      >
+        <AlertDialogContent className="destroy-dialog material-loss inventory-overflow-dialog">
+          <AlertDialogHeader>
+            <AlertDialogMedia className="destroy-dialog-icon">
+              <TriangleAlert aria-hidden="true" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>
+              {inventoryOverflowPrompt?.title ?? "Storage capacity exceeded"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {inventoryOverflowPrompt?.description ??
+                "Available storage nodes cannot hold all materials from this action. Overflow will be permanently destroyed if you proceed."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="destroy-loss" role="alert" aria-label="Materials that will be destroyed">
+            <span className="destroy-loss-heading">
+              <TriangleAlert aria-hidden="true" />
+              Materials permanently lost
+            </span>
+            <div className="destroy-refund-list">
+              {inventoryOverflowPrompt?.loss.map(([type, amount]) => (
+                <span className="destroy-refund-item lost" key={type}>
+                  <i style={{ background: RESOURCE_COLORS[type] }} />
+                  <strong>{amount}</strong> {formatResourceType(type)}
+                </span>
+              ))}
+            </div>
+            <p>This cannot be undone.</p>
+          </div>
+          <label className="inventory-overflow-suppression">
+            <Checkbox
+              checked={suppressFutureInventoryOverflowWarnings}
+              onCheckedChange={(checked) =>
+                setSuppressFutureInventoryOverflowWarnings(checked === true)
+              }
+            />
+            <span>
+              <strong>
+                {inventoryOverflowPrompt?.suppressionLabel ??
+                  "Don’t show this warning again and automatically destroy excess materials"}
+              </strong>
+              <small>
+                {inventoryOverflowPrompt?.suppressionDescription ??
+                  "Future overflow actions will transfer everything that fits and permanently destroy only the excess."}
+              </small>
+            </span>
+          </label>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {inventoryOverflowPrompt?.cancelLabel ?? "Cancel action"}
+            </AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmInventoryOverflow}>
+              <TriangleAlert aria-hidden="true" />
+              {inventoryOverflowPrompt?.confirmLabel ?? "Proceed & destroy overflow"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={destroyDialogOpen}
+        onOpenChange={(open) => {
+          setDestroyDialogOpen(open);
+          if (!open) {
+            setPendingDeletionIsHighlightedGroup(false);
+            setSuppressFutureNodeDestructionWarnings(false);
+          }
+        }}
+      >
+        <AlertDialogContent
+          className="destroy-dialog"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            destroyConfirmButtonRef.current?.focus();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogMedia className="destroy-dialog-icon">
+              <Trash2 aria-hidden="true" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>
+              {pendingDeletionIsHighlightedGroup
+                ? `Delete all ${pendingDeletionDetails?.count ?? 0} highlighted nodes?`
+                : pendingDeletionDetails?.count === 1
+                ? `Destroy ${pendingDeletionDetails.title}?`
+                : `Destroy ${pendingDeletionDetails?.title ?? "selected nodes"}?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDeletionIsHighlightedGroup
+                ? "Every highlighted node and its attached cables will be removed."
+                : `This removes the ${pendingDeletionDetails?.count === 1 ? "node" : "selected nodes"} and attached cables.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <label className="inventory-overflow-suppression node-destruction-suppression">
+            <Checkbox
+              checked={suppressFutureNodeDestructionWarnings}
+              onCheckedChange={(checked) =>
+                setSuppressFutureNodeDestructionWarnings(checked === true)
+              }
+            />
+            <span>
+              <strong>Never show again</strong>
+              <small>Future node destructions will be approved automatically.</small>
+            </span>
+          </label>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="node-delete-cancel" variant="ghost">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              ref={destroyConfirmButtonRef}
+              className="node-delete-confirm"
+              variant="destructive"
+              onClick={(event) => {
+                const deleted = destroyNodes(pendingDeletionNodeIds);
+                if (!deleted) {
+                  event.preventDefault();
+                  return;
+                }
+                if (suppressFutureNodeDestructionWarnings) {
+                  setAlwaysApproveNodeDestruction(true);
+                }
+              }}
+            >
+              <Trash2 aria-hidden="true" />
+              {pendingDeletionIsHighlightedGroup
+                ? "Delete All"
+                : "Continue"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={connectionDeleteDialogOpen}
+        onOpenChange={(open) => {
+          setConnectionDeleteDialogOpen(open);
+          if (!open) {
+            setPendingDeletionConnectionId(null);
+            setSelectedConnection(null);
+            setSuppressFutureConnectionDeleteWarnings(false);
+          }
+        }}
+      >
+        <AlertDialogContent
+          className="destroy-dialog material-loss connection-delete-dialog"
+          style={{
+            "--connection-color": pendingDeletionConnection
+              ? RESOURCE_COLORS[pendingDeletionConnection.type]
+              : "#d9b968",
+          } as React.CSSProperties}
+        >
+          <AlertDialogHeader>
+            <AlertDialogMedia className="destroy-dialog-icon connection-delete-dialog-icon">
+              <Cable aria-hidden="true" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>Delete this connection?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes only the selected cable. Completed output waiting in the source machine is moved into available storage nodes first.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="connection-delete-route" aria-label="Selected connection">
+            <span className="connection-delete-endpoint source">
+              <small>FROM</small>
+              <strong>{pendingConnectionSourceNode?.title ?? "Source node"}</strong>
+              <span>{pendingConnectionSourcePort?.label ?? "Output"}</span>
+            </span>
+            <span className="connection-delete-link" aria-hidden="true">
+              <i />
+              <Cable />
+              <i />
+            </span>
+            <span className="connection-delete-endpoint target">
+              <small>TO</small>
+              <strong>{pendingConnectionTargetNode?.title ?? "Target node"}</strong>
+              <span>{pendingConnectionTargetPort?.label ?? "Input"}</span>
+            </span>
+          </div>
+          <label className="inventory-overflow-suppression connection-delete-suppression">
+            <Checkbox
+              checked={suppressFutureConnectionDeleteWarnings}
+              onCheckedChange={(checked) =>
+                setSuppressFutureConnectionDeleteWarnings(checked === true)
+              }
+            />
+            <span>
+              <strong>Never show again</strong>
+              <small>Future connection deletions will happen immediately without this confirmation.</small>
+            </span>
+          </label>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="connection-delete-cancel" variant="ghost">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="connection-delete-confirm"
+              variant="destructive"
+              onClick={(event) => {
+                if (!pendingDeletionConnectionId || !deleteConnection(pendingDeletionConnectionId)) {
+                  event.preventDefault();
+                  return;
+                }
+                if (suppressFutureConnectionDeleteWarnings) {
+                  rememberAlwaysDeleteConnections();
+                }
+              }}
+            >
+              <Trash2 aria-hidden="true" />
+              Yes, Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog
+        open={multiConnectionManagerOpen}
+        onOpenChange={(open) => {
+          setMultiConnectionManagerOpen(open);
+          if (!open) setManagedMultiPort(null);
+        }}
+      >
+        <DialogContent className="connection-manager-dialog">
+          <DialogHeader>
+            <DialogTitle>Manage connections</DialogTitle>
+            <DialogDescription>
+              This star socket supports multiple cables. Disconnect only the route you want to remove.
+            </DialogDescription>
+          </DialogHeader>
+          <div
+            className="connection-manager-summary"
+            style={{
+              "--manager-port-color": managedMultiPortSpec
+                ? RESOURCE_COLORS[managedMultiPortSpec.type]
+                : "#d9b968",
+            } as React.CSSProperties}
+          >
+            <span className="connection-manager-star" aria-hidden="true" />
+            <span className="connection-manager-summary-copy">
+              <small>MULTI-CONNECTION SOCKET</small>
+              <strong>{managedMultiPortNode?.title ?? "Node"} · {managedMultiPortSpec?.label ?? "Socket"}</strong>
+            </span>
+            <span className="connection-manager-count">
+              {managedMultiConnections.length} connected
+            </span>
+          </div>
+          <div className="connection-manager-list" aria-live="polite">
+            {managedMultiConnections.map((connection) => {
+              const outbound = managedMultiPort?.direction === "output";
+              const otherNodeId = outbound ? connection.targetNode : connection.sourceNode;
+              const otherPortId = outbound ? connection.targetPort : connection.sourcePort;
+              const otherNode = nodes.find((node) => node.id === otherNodeId);
+              const otherPort = otherNode
+                ? (outbound ? otherNode.inputs : otherNode.outputs).find((port) => port.id === otherPortId)
+                : null;
+              return (
+                <article className="connection-manager-row" key={connection.id}>
+                  <span
+                    className="connection-manager-type"
+                    style={{ "--connection-type-color": RESOURCE_COLORS[connection.type] } as React.CSSProperties}
+                    aria-hidden="true"
+                  />
+                  <span className="connection-manager-route">
+                    <small>{outbound ? "TO" : "FROM"}</small>
+                    <strong>{otherNode?.title ?? "Connected node"}</strong>
+                    <span>{otherPort?.label ?? (outbound ? "Input" : "Output")} · {formatResourceType(connection.type)}</span>
+                  </span>
+                  <Button
+                    className="connection-manager-disconnect"
+                    size="sm"
+                    variant="outline"
+                    aria-label={`Disconnect ${otherNode?.title ?? "connected node"}`}
+                    onClick={() => deleteConnection(connection.id)}
+                  >
+                    <Unplug aria-hidden="true" />
+                    Disconnect
+                  </Button>
+                </article>
+              );
+            })}
+            {managedMultiConnections.length === 0 ? (
+              <div className="connection-manager-empty">
+                <Cable aria-hidden="true" />
+                <strong>No active connections</strong>
+                <span>Drag from this star socket to create a new cable.</span>
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter showCloseButton />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(configuringFilterId)}
+        onOpenChange={(open) => {
+          if (!open) setConfiguringFilterId(null);
+        }}
+      >
+        <DialogContent className="filter-dialog">
+          <DialogHeader>
+            <DialogTitle>Choose filter item</DialogTitle>
+            <DialogDescription>
+              Only this item can pass through. When connected after an Inventory node, it also chooses what that node retrieves from physical storage.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="filter-choice-grid" role="listbox" aria-label="Filter item type">
+            {INVENTORY_ITEMS.map((item) => {
+              const selected = configuringFilter?.selectedType === item.type;
+              return (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  className={`filter-choice ${selected ? "selected" : ""}`}
+                  key={item.type}
+                  style={{ "--item-color": RESOURCE_COLORS[item.type] } as React.CSSProperties}
+                  onClick={() => {
+                    if (configuringFilterId) configureFilter(configuringFilterId, item.type);
+                  }}
+                >
+                  <span className="filter-choice-swatch" />
+                  <span className="filter-choice-copy">
+                    <strong>{item.label}</strong>
+                    <small>{buildMaterialAvailability[item.type].total} stored in nodes</small>
+                  </span>
+                  {selected ? <span className="filter-choice-current">ACTIVE</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(configuringMiningDrillId)}
+        onOpenChange={(open) => {
+          if (!open) setConfiguringMiningDrillId(null);
+        }}
+      >
+        <DialogContent className="filter-dialog mining-drill-dialog">
+          <DialogHeader>
+            <DialogTitle>Choose ore deposit</DialogTitle>
+            <DialogDescription>
+              The Mining Drill completes one powered cycle every three seconds. After twenty cycles it becomes a 1,000-unit deposit of the selected resource.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="filter-choice-grid mining-drill-choice-grid" role="listbox" aria-label="Mining Drill ore resource">
+            {MINING_DRILL_TARGETS.map((target) => {
+              const selected = configuringMiningDrill?.selectedType === target.type;
+              return (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  className={`filter-choice ${selected ? "selected" : ""}`}
+                  key={target.type}
+                  style={{ "--item-color": RESOURCE_COLORS[target.type] } as React.CSSProperties}
+                  onClick={() => {
+                    if (configuringMiningDrillId) {
+                      configureMiningDrill(configuringMiningDrillId, target.type);
+                    }
+                  }}
+                >
+                  <span className="filter-choice-swatch" />
+                  <span className="filter-choice-copy">
+                    <strong>{target.title}</strong>
+                    <small>{MINED_DEPOSIT_CAPACITY.toLocaleString()} unit deposit</small>
+                  </span>
+                  {selected ? <span className="filter-choice-current">ACTIVE</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={assemblerRecipeChangeDialogOpen}
+        onOpenChange={(open) => {
+          setAssemblerRecipeChangeDialogOpen(open);
+          if (!open) {
+            setPendingAssemblerRecipeChange(null);
+            setSuppressFutureAssemblerRecipeWarnings(false);
+          }
+        }}
+      >
+        <AlertDialogContent className="destroy-dialog assembler-recipe-change-dialog">
+          <AlertDialogHeader>
+            <AlertDialogMedia className="destroy-dialog-icon assembler-recipe-change-icon">
+              {pendingAssemblerRecipeChange?.kind === "refiner"
+                ? <Cog aria-hidden="true" />
+                : <Hammer aria-hidden="true" />}
+            </AlertDialogMedia>
+            <AlertDialogTitle>Change {pendingRecipeMachineTitle} recipe?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Changing recipes will destroy all materials stored in this {pendingRecipeMachineTitle}, including inputs and outputs. Continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <label className="inventory-overflow-suppression assembler-recipe-suppression">
+            <Checkbox
+              checked={suppressFutureAssemblerRecipeWarnings}
+              onCheckedChange={(checked) =>
+                setSuppressFutureAssemblerRecipeWarnings(checked === true)
+              }
+            />
+            <span>
+              <strong>Never show again</strong>
+              <small>Future recipe changes will immediately clear this machine and apply the selected recipe.</small>
+            </span>
+          </label>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                if (pendingAssemblerRecipeChange) {
+                  setConfiguringAssemblerId(pendingAssemblerRecipeChange.nodeId);
+                }
+              }}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="outline"
+              className="assembler-recipe-change-action"
+              onClick={(event) => {
+                if (!pendingAssemblerRecipeChange) {
+                  event.preventDefault();
+                  return;
+                }
+                if (suppressFutureAssemblerRecipeWarnings) {
+                  setAlwaysApproveAssemblerRecipeChanges(true);
+                }
+                applyAssemblerRecipe(
+                  pendingAssemblerRecipeChange.nodeId,
+                  pendingAssemblerRecipeChange.recipeId,
+                );
+                setPendingAssemblerRecipeChange(null);
+              }}
+            >
+              {pendingAssemblerRecipeChange?.kind === "refiner"
+                ? <Cog aria-hidden="true" />
+                : <Hammer aria-hidden="true" />}
+              Change Recipe
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog
+        open={Boolean(configuringAssemblerId)}
+        onOpenChange={(open) => {
+          if (!open) setConfiguringAssemblerId(null);
+        }}
+      >
+        <DialogContent className="filter-dialog assembler-recipe-dialog">
+          <DialogHeader>
+            <DialogTitle>Choose {configuringRecipeTitle} recipe</DialogTitle>
+            <DialogDescription>
+              Configure this {configuringRecipeTitle} with an existing production recipe.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="filter-choice-grid assembler-recipe-grid" role="listbox" aria-label={`${configuringRecipeTitle} recipe`}>
+            {configuringRecipeOptions.map((option) => {
+              const recipe = option.recipe;
+              const RecipeIcon = recipe.icon;
+              const selected = option.selected;
+              const ingredientTotals = getRecipeIngredientTotals(recipe);
+              return (
+                <Tooltip key={option.id}>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      className={`filter-choice assembler-recipe-choice ${selected ? "selected" : ""}`}
+                      style={{ "--item-color": recipe.color } as React.CSSProperties}
+                      onClick={() => {
+                        if (configuringAssemblerId) {
+                          requestAssemblerRecipeChange(configuringAssemblerId, option.id);
+                        }
+                      }}
+                    >
+                      <span className="assembler-recipe-icon"><RecipeIcon aria-hidden="true" /></span>
+                      <span className="filter-choice-copy">
+                        <strong>{option.label}</strong>
+                        <small>{recipe.summary} · {formatCycleDuration(recipe.duration)}</small>
+                      </span>
+                      {selected ? <span className="filter-choice-current">ACTIVE</span> : null}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    className="recipe-choice-tooltip"
+                    side="right"
+                    sideOffset={10}
+                    style={{ "--item-color": recipe.color } as React.CSSProperties}
+                  >
+                    <div className="recipe-choice-tooltip-heading">
+                      <RecipeIcon aria-hidden="true" />
+                      <strong>{recipe.title}</strong>
+                      <span>Per cycle</span>
+                    </div>
+                    <section>
+                      <span>Required inputs</span>
+                      <ul>
+                        {ingredientTotals.map((ingredient) => (
+                          <li key={ingredient.type}>
+                            <i style={{ background: RESOURCE_COLORS[ingredient.type] }} />
+                            <span>{ingredient.label}</span>
+                            <b>{ingredient.amount}&times;</b>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                    <section>
+                      <span>Output</span>
+                      <ul>
+                        <li>
+                          <i style={{ background: RESOURCE_COLORS[recipe.output.type] }} />
+                          <span>{recipe.output.label}</span>
+                          <b>1&times;</b>
+                        </li>
+                      </ul>
+                    </section>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <div
+        className={`workspace-viewport ${isPanning ? "panning" : ""} ${placingNodeId ? "placing-node" : ""} ${placingNodeId && placementBlocked ? "placement-blocked" : ""}`}
+        ref={workspaceRef}
+        onScroll={handleWorkspaceScroll}
+        style={{
+          "--grid-size": `${24 * zoom}px`,
+          "--major-grid-size": `${120 * zoom}px`,
+          "--port-zoom-scale": getPortZoomScale(zoom),
+        } as React.CSSProperties}
+      >
+        <div
+          className="node-canvas-sizer"
+          style={{ width: worldSize.width * zoom, height: worldSize.height * zoom }}
+        >
+        <div
+          className="node-canvas"
+          ref={canvasRef}
+          style={{ width: worldSize.width, height: worldSize.height, transform: `scale(${zoom})` }}
+          onPointerDown={beginCanvasPan}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <svg className="cable-layer" aria-hidden="true">
+            {renderedConnections.map((connection) => {
+              const path = getCurve(connection.start, connection.end, connection.sourcePort);
+              const isSelected = selectedConnection === connection.id;
+              const activeFlowTimestamp = activeFlows[connection.id];
+              const isActive = wireAnimationsEnabled && Boolean(activeFlowTimestamp);
+              const storageItemType =
+                connection.targetPort === "storage-in" &&
+                isInventoryItemType(connection.type)
+                  ? connection.type
+                  : null;
+              const storageState = runtime.storages[connection.targetNode];
+              const isStorageFull = Boolean(
+                connection.targetPort === "storage-in" &&
+                storageItemType &&
+                storageState &&
+                (storageState.items[storageItemType] ?? 0) >= storageState.capacityPerItem,
+              );
+              const isResourceDepleted =
+                connection.targetPort === "resource-in" &&
+                getResourceRemaining(
+                  runtime,
+                  connection.sourceNode,
+                  connection.type,
+                  connections,
+                ) <= 0;
+              const cableAlert = isStorageFull
+                ? { label: "[STORAGE FULL]", width: 122 }
+                : isResourceDepleted
+                  ? { label: "[DEPLETED]", width: 88 }
+                  : null;
+              const cableMidpoint = getCurveMidpoint(
+                connection.start,
+                connection.end,
+                connection.sourcePort,
+              );
+              return (
+                <g
+                  key={connection.id}
+                  className={`cable-group ${isSelected ? "selected" : ""} ${isActive ? "flowing" : ""} ${insertionTarget === connection.id ? "insert-target" : ""}`}
+                  onPointerDown={(event) => {
+                    if (placingNodeRef.current) return;
+                    if (event.button === 1 || event.button === 2 || spacePressedRef.current) return;
+                    event.stopPropagation();
+                    setSelectedConnection(connection.id);
+                    setSelectedNodes([]);
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                  }}
+                >
+                  <path className="cable-underlay" d={path} />
+                  {isActive ? (
+                    <path
+                      key={`${connection.id}-transfer-${activeFlowTimestamp}`}
+                      className={`cable-transfer-glow ${connection.type === ResourceType.POWER ? "power" : "material"}`}
+                      d={path}
+                    />
+                  ) : null}
+                  <path
+                    ref={(element) => { pathRefs.current[connection.id] = element; }}
+                    className="cable-main"
+                    d={path}
+                    style={{ stroke: RESOURCE_COLORS[connection.type] }}
+                  />
+                  <path className="cable-hitbox" d={path} />
+                  {cableAlert ? (
+                    <g
+                      className="cable-alert-label"
+                      transform={`translate(${cableMidpoint.x} ${cableMidpoint.y + (isSelected ? 21 / zoom : 0)}) scale(${1 / zoom})`}
+                    >
+                      <rect x={-cableAlert.width / 2} y="-11" width={cableAlert.width} height="22" rx="5" />
+                      <text textAnchor="middle" dominantBaseline="central">{cableAlert.label}</text>
+                    </g>
+                  ) : null}
+                </g>
+              );
+            })}
+            {previewPath && connecting ? <path className="cable-preview" d={previewPath} style={{ stroke: RESOURCE_COLORS[connecting.port.type] }} /> : null}
+          </svg>
+
+          {selectedRenderedConnection && selectedConnectionMidpoint ? (
+            <span
+              className="cable-delete-anchor"
+              style={{
+                left: selectedConnectionMidpoint.x,
+                top: selectedConnectionMidpoint.y,
+                "--cable-delete-scale": 1 / zoom,
+              } as React.CSSProperties}
+            >
+              <button
+                type="button"
+                className="cable-inline-delete"
+                aria-label="Delete selected connection"
+                title="Delete connection"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  requestConnectionDeletion(selectedRenderedConnection.id);
+                }}
+              >
+                <Trash2 aria-hidden="true" />
+              </button>
+            </span>
+          ) : null}
+
+          {selectionBoxStyle ? <div className="selection-marquee" style={selectionBoxStyle} aria-hidden="true" /> : null}
+
+          {selectedNodeBounds && selectedNodeRects.length >= 2 ? (
+            <div
+              className="selected-nodes-actions"
+              style={{
+                left: selectedNodeBounds.left - 8,
+                top: selectedNodeBounds.top - 8,
+                width: selectedNodeBounds.right - selectedNodeBounds.left + 16,
+                height: selectedNodeBounds.bottom - selectedNodeBounds.top + 16,
+                "--selection-control-scale": 1 / zoom,
+              } as React.CSSProperties}
+            >
+              <button
+                type="button"
+                className="node-destroy-button selection-delete-button"
+                disabled={selectedDestroyableNodeIds.length === 0}
+                aria-label={selectedDestroyableNodeIds.length === 1
+                  ? "Delete selected node"
+                  : `Delete ${selectedDestroyableNodeIds.length} selected nodes`}
+                title={selectedDestroyableNodeIds.length > 0
+                  ? "Delete selected nodes"
+                  : "This selection cannot be deleted"}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const isHighlightedGroup = selectedDestroyableNodeIds.length > 1;
+                  requestNodeDeletion(selectedDestroyableNodeIds, {
+                    highlightedControlGroup: isHighlightedGroup,
+                  });
+                }}
+              >
+                <Trash2 aria-hidden="true" />
+              </button>
+            </div>
+          ) : null}
+
+          {nodes.map((node) => {
+            const isIronOreDeposit = node.kind === "ironOre";
+            const isCopperOreDeposit = node.kind === "copperOre";
+            const isStoneDeposit = node.kind === "stone";
+            const isForest = node.kind === "forest";
+            const isFiniteResource = isIronOreDeposit || isCopperOreDeposit || isStoneDeposit || isForest;
+            const minedDeposit = runtime.minedDeposits[node.id];
+            const resourceRemaining = minedDeposit?.remaining ?? (
+              isForest
+                ? runtime.forest.remaining
+                : isStoneDeposit
+                  ? runtime.stone.remaining
+                  : isCopperOreDeposit
+                    ? runtime.copperOre.remaining
+                    : runtime.ironOre.remaining
+            );
+            const resourceCapacity = minedDeposit?.capacity ?? (
+              isForest
+                ? RESOURCE_CAPACITIES.forest
+                : isStoneDeposit
+                  ? RESOURCE_CAPACITIES.stone
+                  : isCopperOreDeposit
+                    ? RESOURCE_CAPACITIES.copperOre
+                    : RESOURCE_CAPACITIES.ironOre
+            );
+            const isExtractor = isExtractorKind(node.kind);
+            const isGenerator = node.kind === "generator";
+            const isResearchFoundry = node.kind === "researchFoundry";
+            const isTreePlanter = node.kind === "treePlanter";
+            const isMiningDrill = node.kind === "miningDrill";
+            const isSplitter = node.kind === "splitter";
+            const isMerger = node.kind === "merger";
+            const isJoint = node.kind === "joint";
+            const isPowerSplitter = node.kind === "powerSplitter";
+            const isInventorySource = node.kind === "inventorySource";
+            const isFilter = node.kind === "filter";
+            const isStorage = node.kind === "storage";
+            const isWoodenChest = node.kind === "woodenChest";
+            const isAssembler = node.kind === "assembler";
+            const isRefiner = node.kind === "refiner";
+            const isConfigurableProcessor = isAssembler || isRefiner;
+            const woodenChestState = isWoodenChest ? runtime.woodenChests[node.id] : null;
+            const woodenChestItemType = woodenChestState?.itemType ?? null;
+            const woodenChestStored = woodenChestState?.stored ?? 0;
+            const isLogisticsNode = isLogisticsNodeKind(node.kind);
+            const canDestroy = isDestroyableNode(node);
+            const canPauseOutput = canPauseNodeOutput(node);
+            const outputPaused = Boolean(runtime.pausedOutputs?.[node.id]);
+            const processorKind = isProcessorKind(node.kind) ? node.kind : null;
+            const processorState = processorKind ? runtime.processors[node.id] : null;
+            const processorRecipe = processorKind
+              ? getProcessorRecipe(processorKind, processorState)
+              : null;
+            const processorStored = processorKind ? getProcessorStored(processorState ?? undefined) : 0;
+            const processorPowerCost = processorKind ? POWER_COSTS[processorKind] ?? 0 : 0;
+            const processorPowerConnection = processorKind && processorPowerCost
+              ? getPowerConnection(node.id)
+              : null;
+            const processorAvailablePower = processorKind && processorPowerCost
+              ? getAvailablePower(node.id)
+              : 0;
+            const smartProcessorInputType = processorKind
+              ? smartProcessorInputTypes.get(node.id) ?? null
+              : null;
+            const smartProcessorOutput = processorKind
+              ? getSmartProcessorOutput(node.id, smartProcessorInputType, processorState)
+              : null;
+            const construction = runtime.construction[node.id];
+            const isBuilding = Boolean(construction && !construction.complete);
+            const buildDuration = isPurchasableKind(node.kind) ? BUILD_TIMES[node.kind] : 0;
+            const extractorId = isExtractor ? node.id as ExtractorNodeId : null;
+            const extractorRecipe = extractorId ? extractorRecipes[extractorId] : null;
+            const extractorResourceEdge = extractorId
+              ? connectionIndex.incomingByPort.get(`${extractorId}:resource-in`)
+              : null;
+            const extractorResourceSourceId = extractorResourceEdge
+              ? resolveResourceSourceNode(
+                  runtime,
+                  extractorResourceEdge.sourceNode,
+                  extractorResourceEdge.type,
+                  connections,
+                )
+              : null;
+            const extractorResourceNode = extractorResourceSourceId
+              ? nodeById.get(extractorResourceSourceId) ?? null
+              : null;
+            const extractorResourceColor = extractorResourceNode?.color ?? null;
+            const Icon = extractorResourceNode?.icon ?? processorRecipe?.icon ?? node.icon;
+            const extractorState = extractorId ? runtime.extractors[extractorId] : null;
+            const extractorStored = extractorState?.stored ?? 0;
+            const generatorPower = isGenerator ? runtime.generators[node.id]?.power ?? 0 : 0;
+            const generatorCharcoal = isGenerator ? runtime.generators[node.id]?.charcoal ?? 0 : 0;
+            const generatorCharcoalConnection = isGenerator
+              ? connectionIndex.incomingByPort.get(`${node.id}:generator-charcoal-in`)
+              : null;
+            const researchFoundryState = isResearchFoundry
+              ? runtime.researchFoundries[node.id]
+              : null;
+            const researchFoundryCores = getResearchFoundryCores(researchFoundryState ?? undefined);
+            const researchIsProducing = Boolean(
+              isResearchFoundry &&
+              !isBuilding &&
+              isRunning &&
+              researchFoundryCores > 0 &&
+              activeResearchProject &&
+              !isResearchProjectUnlocked(runtime.research, activeResearchProject.id),
+            );
+            const researchCoreConnection = isResearchFoundry
+              ? connectionIndex.incomingByPort.get(`${node.id}:research-core-in`)
+              : null;
+            const treePlanterPowerConnection = isTreePlanter ? getPowerConnection(node.id) : null;
+            const treePlanterAvailablePower = isTreePlanter ? getAvailablePower(node.id) : 0;
+            const treePlanterForestConnection = isTreePlanter
+              ? connectionIndex.outgoingByPort.get(`${node.id}:forest-growth-out`)?.[0]
+              : null;
+            const miningDrillState = isMiningDrill ? runtime.miningDrills[node.id] : null;
+            const miningDrillPowerConnection = isMiningDrill ? getPowerConnection(node.id) : null;
+            const miningDrillAvailablePower = isMiningDrill ? getAvailablePower(node.id) : 0;
+            const miningDrillTarget = getMiningTarget(miningDrillState?.selectedType ?? null);
+            const splitterType = isSplitter ? getSplitterInputType(node.id, connections) : null;
+            const mergerType = isMerger ? getMergerInputType(node.id, connections) : null;
+            const jointState = isJoint ? runtime.joints[node.id] : null;
+            const jointType = isJoint ? getJointInputType(node.id, connections) : null;
+            const powerSplitterGeneratorId = isPowerSplitter
+              ? findPowerGeneratorId(
+                  node.id,
+                  connections,
+                  runtime.generators,
+                  runtime.pausedOutputs,
+                )
+              : null;
+            const powerSplitterPowered = Boolean(
+              powerSplitterGeneratorId &&
+              (runtime.generators[powerSplitterGeneratorId]?.power ?? 0) > 0,
+            );
+            const inventorySourceFilterEdges = isInventorySource
+              ? (connectionIndex.outgoingByPort.get(`${node.id}:inventory-out`) ?? []).filter(
+                  (connection) =>
+                    connection.targetPort === "filter-in" &&
+                    nodeById.get(connection.targetNode)?.kind === "filter",
+                )
+              : [];
+            const inventorySourceTypes = Array.from(new Set(
+              inventorySourceFilterEdges.flatMap((connection) => {
+                const selectedType = runtime.filters[connection.targetNode]?.selectedType;
+                return selectedType ? [selectedType] : [];
+              }),
+            ));
+            const inventorySourceHasStock = inventorySourceTypes.some(
+              (type) => getStoredItemAmount(
+                runtime,
+                nodes,
+                connections,
+                type,
+                new Set([node.id]),
+              ) > 0,
+            );
+            const filterState = isFilter ? runtime.filters[node.id] : null;
+            const nodeProgress = isBuilding
+              ? construction?.progress ?? 0
+              : isResearchFoundry && !researchIsProducing
+                ? 0
+                : getNodeProgress(node);
+            const nodeFull = !isBuilding && getNodeFull(node);
+            const displayedNodeProgress =
+              nodeFull && isPurchasableKind(node.kind) && !isLogisticsNode
+                ? 100
+                : nodeProgress;
+            const extractorSourceDepleted =
+              Boolean(extractorResourceEdge) && getResourceRemaining(
+                runtime,
+                extractorResourceEdge!.sourceNode,
+                extractorResourceEdge!.type,
+                connections,
+              ) <= 0;
+            const extractorEffectiveCycleDuration = extractorId
+              ? EXTRACTOR_BASE_CYCLE_DURATION * (
+                  runtime.research.extractor2Unlocked
+                    ? EXTRACTOR_RESEARCH_CYCLE_MULTIPLIER
+                    : 1
+                )
+              : null;
+            const effectiveProductionCycleDuration = extractorEffectiveCycleDuration ?? (
+              processorKind
+                ? processorRecipe?.duration ?? PROCESSOR_RECIPES[processorKind].duration
+                : isResearchFoundry
+                  ? RESEARCH_CYCLE_DURATION
+                  : isTreePlanter
+                    ? TREE_PLANTER_CYCLE_DURATION
+                    : isMiningDrill
+                      ? MINING_DRILL_CYCLE_DURATION
+                      : isGenerator
+                        ? 0
+                        : null
+            );
+            const isIdle =
+              isBuilding ||
+              (extractorId ? extractorIsWaiting(extractorId) : false) ||
+              (isResearchFoundry
+                ? researchFoundryCores <= 0 || !activeResearchProject || isAllResearchComplete(runtime.research)
+                : false) ||
+              (isTreePlanter
+                ? !treePlanterPowerConnection ||
+                  !treePlanterForestConnection ||
+                  treePlanterAvailablePower < TREE_PLANTER_POWER_COST ||
+                  runtime.forest.remaining >= RESOURCE_CAPACITIES.forest
+                : false) ||
+              (isMiningDrill
+                ? !miningDrillTarget ||
+                  (!miningDrillState?.powerCommitted && (
+                    !miningDrillPowerConnection ||
+                    miningDrillAvailablePower < MINING_DRILL_POWER_COST
+                  ))
+                : false) ||
+              (isInventorySource
+                ? inventorySourceTypes.length === 0 || !inventorySourceHasStock
+                : false) ||
+              (isFilter ? !filterState?.selectedType : false) ||
+              (processorKind ? processorIsWaiting(node.id, processorKind) : false);
+            const extractorProductionActive = Boolean(
+              extractorId &&
+              extractorRecipe &&
+              extractorResourceEdge &&
+              !extractorSourceDepleted &&
+              extractorStored < EXTRACTOR_CAPACITY &&
+              !(
+                extractorStored > 0 &&
+                extractorState?.materialType &&
+                extractorState.materialType !== extractorRecipe.product
+              ),
+            );
+            const processorProductionActive = Boolean(
+              processorKind &&
+              processorRecipe &&
+              processorState &&
+              processorStored < PROCESSOR_CAPACITY &&
+              !processorNeedsInputs(node.id, processorKind) &&
+              !processorNeedsPower(node.id, processorKind) &&
+              (
+                !getSmartProcessorOutputPortId(node.id, processorState) ||
+                smartProcessorOutput
+              ),
+            );
+            const smoothProgressDuration = isBuilding
+              ? buildDuration
+              : extractorRecipe
+                ? extractorEffectiveCycleDuration
+                : processorRecipe
+                  ? processorRecipe.duration
+                  : isResearchFoundry
+                    ? RESEARCH_CYCLE_DURATION
+                    : isTreePlanter
+                      ? TREE_PLANTER_CYCLE_DURATION
+                      : isMiningDrill
+                        ? MINING_DRILL_CYCLE_DURATION * MINING_DRILL_ITERATIONS
+                        : null;
+            const smoothProgressActive = Boolean(
+              isRunning &&
+              (
+                isBuilding ||
+                extractorProductionActive ||
+                processorProductionActive ||
+                researchIsProducing ||
+                (isTreePlanter && !isIdle) ||
+                (isMiningDrill && !isIdle)
+              ),
+            );
+            const progressStatus = isBuilding
+              ? "Building"
+              : nodeFull
+                ? isExtractor
+                  ? `Output full · ${extractorStored} / ${EXTRACTOR_CAPACITY}`
+                  : processorKind
+                    ? `Output full · ${processorStored} / ${PROCESSOR_CAPACITY}`
+                    : "Output full"
+                : isExtractor && extractorStored > 0
+                  ? !extractorRecipe
+                    ? `Stored ${extractorStored} / ${EXTRACTOR_CAPACITY} · input disconnected`
+                    : extractorSourceDepleted
+                      ? `Stored ${extractorStored} / ${EXTRACTOR_CAPACITY} · resource depleted`
+                      : `Stored ${extractorStored} / ${EXTRACTOR_CAPACITY} · extracting ${extractorRecipe.label.toLowerCase()}`
+                : isExtractor && !extractorRecipe
+                ? "Connect a Resource"
+                : isExtractor && extractorSourceDepleted
+                  ? "Resource depleted"
+                  : isExtractor && extractorRecipe
+                    ? `Extracting ${extractorRecipe.label.toLowerCase()}`
+                    : processorKind && processorStored > 0
+                      ? `Stored ${processorStored} / ${PROCESSOR_CAPACITY} · ${
+                          processorNeedsInputs(node.id, processorKind)
+                            ? "waiting for inputs"
+                            : processorNeedsPower(node.id, processorKind)
+                              ? `waiting for ${processorPowerCost}W`
+                              : processorRecipe?.activeLabel.toLowerCase() ?? "producing"
+                        }`
+                    : isTreePlanter
+                      ? runtime.forest.remaining >= RESOURCE_CAPACITIES.forest
+                        ? "Forest deposit full"
+                        : !treePlanterForestConnection
+                          ? "Connect to Forest"
+                          : !treePlanterPowerConnection
+                            ? "Connect Power"
+                            : treePlanterAvailablePower < TREE_PLANTER_POWER_COST
+                              ? `Waiting for ${TREE_PLANTER_POWER_COST}W`
+                              : "Planting trees"
+                    : isMiningDrill
+                      ? !miningDrillTarget
+                        ? "Choose an ore resource"
+                        : !miningDrillPowerConnection
+                          ? "Connect Power"
+                          : !miningDrillState?.powerCommitted && miningDrillAvailablePower < MINING_DRILL_POWER_COST
+                            ? `Waiting for ${MINING_DRILL_POWER_COST}W`
+                            : `Drilling ${miningDrillTarget.title.toLowerCase()} · ${miningDrillState?.iterations ?? 0}/${MINING_DRILL_ITERATIONS}`
+                    : isResearchFoundry
+                      ? isAllResearchComplete(runtime.research)
+                        ? "All research complete"
+                        : researchFoundryCores > 0
+                          ? activeResearchProject
+                            ? `Researching ${activeResearchProject.title}`
+                            : "Choose a research project"
+                          : researchCoreConnection
+                            ? "Waiting for Automata Core"
+                            : "Connect Automata Cores"
+                    : isInventorySource
+                      ? inventorySourceFilterEdges.length === 0
+                        ? "Connect Filters"
+                        : inventorySourceTypes.length === 0
+                          ? "Configure connected Filters"
+                          : !inventorySourceHasStock
+                            ? inventorySourceTypes.length === 1
+                              ? `No ${formatResourceType(inventorySourceTypes[0])} stored`
+                              : "No selected items stored"
+                            : inventorySourceTypes.length === 1
+                              ? `Withdrawing ${formatResourceType(inventorySourceTypes[0])}`
+                              : `Supplying ${inventorySourceFilterEdges.length} Filters`
+                    : isConfigurableProcessor && !processorRecipe
+                      ? "Choose a recipe"
+                    : processorKind && processorNeedsInputs(node.id, processorKind)
+                          ? smartProcessorOutput ||
+                            processorKind === "kiln" ||
+                            !getSmartProcessorOutputPortId(node.id, processorState)
+                            ? "Waiting for inputs"
+                            : processorKind === "furnace"
+                              ? "Connect Iron or Copper"
+                              : "Connect a Plate"
+                          : processorKind && processorNeedsPower(node.id, processorKind)
+                            ? processorPowerConnection
+                              ? `Waiting for ${processorPowerCost}W`
+                              : "Connect Power"
+                          : processorRecipe
+                            ? processorRecipe.activeLabel
+                        : "Producing";
+            const nodeMetaLabel = effectiveProductionCycleDuration !== null
+              ? formatCycleDuration(effectiveProductionCycleDuration)
+              : isInventorySource
+                ? "1 item per Filter · 4.0s withdrawal"
+                : "";
+            const effectiveInputs = node.inputs.map((port) =>
+              getRuntimeAwarePort(node.id, port, connections, runtime)
+            );
+            const effectiveOutputs = node.outputs.map((port) =>
+              getRuntimeAwarePort(node.id, port, connections, runtime)
+            );
+            const hoveredNodePort = hoveredPort?.nodeId === node.id ? hoveredPort.port : null;
+            const isProductionNode = isPurchasableKind(node.kind) && !isLogisticsNode;
+            const productionStoredItems = !isBuilding && isExtractor
+              ? extractorStored
+              : !isBuilding && processorKind
+                ? processorStored
+                : null;
+            const productionStoredCapacity = !isBuilding && isExtractor
+              ? EXTRACTOR_CAPACITY
+              : !isBuilding && processorKind
+                ? PROCESSOR_CAPACITY
+                : null;
+            const nodeManualIngredientSlots = getManualIngredientSlots(node, processorState);
+            const assemblerIngredientRows = isConfigurableProcessor && processorRecipe
+              ? getRecipeIngredientTotals(processorRecipe)
+              : [];
+            const hasBufferedSmartIngredient = Boolean(
+              processorKind &&
+              processorState &&
+              processorRecipe?.inputs.some(
+                (input) =>
+                  isSmartProcessorTypingPort(node.id, input.id, processorState) &&
+                  (processorState.inputs[input.id] ?? 0) > 0,
+              ),
+            );
+            const processorMaterialLocked = Boolean(
+              processorState && (
+                hasBufferedSmartIngredient ||
+                processorState.progress > 0 ||
+                processorStored > 0
+              ),
+            );
+            const manualLockedIngredientType = smartProcessorInputType ?? (
+              processorMaterialLocked ? processorState?.materialType ?? null : null
+            );
+            const hoveredPortIsMulti = Boolean(
+              hoveredNodePort && (
+                hoveredNodePort.direction === "input"
+                  ? isMultiInputPort(node.id, hoveredNodePort.id)
+                  : isMultiOutputPort(node.id, hoveredNodePort.id)
+              ),
+            );
+            const showSocketGuide = Boolean(
+              isProductionNode && hoveredNodePort && !hoveredPortIsMulti && !connecting,
+            );
+            const connectionOptions = showSocketGuide ? hoveredPortConnectionOptions : [];
+            const visibleConnectionOptions = connectionOptions.slice(0, 8);
+            const hoveredPortIndex = hoveredNodePort
+              ? (hoveredNodePort.direction === "input" ? effectiveInputs : effectiveOutputs)
+                  .findIndex((port) => port.id === hoveredNodePort.id)
+              : -1;
+            const socketGuideId = hoveredNodePort
+              ? `connections-${node.id}-${hoveredNodePort.id}`
+              : undefined;
+            const rows = Math.max(effectiveInputs.length, effectiveOutputs.length, 1);
+            const nodeControlGroup = controlGroupByNodeId.get(node.id);
+            const entireControlGroupSelected = Boolean(
+              nodeControlGroup &&
+              nodeControlGroup.nodeIds.every((groupNodeId) => selectedNodes.includes(groupNodeId)),
+            );
+            const isActiveControlGroup = Boolean(
+              nodeControlGroup &&
+              selectedNodes.includes(node.id) &&
+              (
+                nodeControlGroup.id === activeControlGroupId ||
+                entireControlGroupSelected
+              ),
+            );
+            return (
+              <section
+                key={node.id}
+                ref={(element) => { nodeRefs.current[node.id] = element; }}
+                className={`node-card ${isFiniteResource ? "resource-node" : ""} ${isJoint || isPowerSplitter ? "joint-node" : ""} ${isPowerSplitter ? "power-splitter-node" : ""} ${isSplitter || isMerger || isFilter ? "compact-routing-node routing-node" : ""} ${isSplitter ? "splitter-node" : ""} ${isMerger ? "merger-node" : ""} ${isFilter ? "filter-node" : ""} ${isStorage ? "storage-node" : ""} ${isWoodenChest ? "wooden-chest-node" : ""} ${isConfigurableProcessor ? "assembler-node" : ""} ${nodeControlGroup ? "control-group-member" : ""} ${isActiveControlGroup ? "control-group-active" : ""} ${nodeControlGroup && individualControlNodeId === node.id && selectedNodes.includes(node.id) ? "individual-control" : ""} ${selectedNodes.includes(node.id) ? "selected" : ""} ${draggingNode && selectedNodes.includes(node.id) ? "dragging" : ""} ${(draggingNode === node.id || placingNodeId === node.id) && insertionTarget ? "insert-ready" : ""} ${placingNodeId === node.id ? "placing" : ""} ${placingNodeId === node.id && placementBlocked ? "placement-blocked" : ""} ${draggingNode === node.id && dragCollisionBlocked ? "collision-blocked" : ""} ${isBuilding ? "building" : ""} ${outputPaused ? "output-paused" : ""}`}
+                style={{
+                  transform: `translate3d(${positions[node.id]?.x ?? 0}px, ${positions[node.id]?.y ?? 0}px, 0)`,
+                  "--control-group-color": nodeControlGroup?.color ?? "transparent",
+                  "--node-color": extractorResourceColor
+                    ? extractorResourceColor
+                    : splitterType
+                      ? RESOURCE_COLORS[splitterType]
+                    : mergerType
+                      ? RESOURCE_COLORS[mergerType]
+                    : jointType
+                      ? RESOURCE_COLORS[jointType]
+                    : woodenChestItemType
+                      ? RESOURCE_COLORS[woodenChestItemType]
+                    : smartProcessorOutput
+                      ? RESOURCE_COLORS[smartProcessorOutput.type]
+                    : isConfigurableProcessor && processorRecipe
+                      ? processorRecipe.color
+                      : node.color,
+                } as React.CSSProperties}
+                aria-label={isExtractor ? `${node.eyebrow} ${node.title} node` : `${node.title} node`}
+                onPointerDown={(event) => {
+                  if (event.button === 2 && nodeControlGroup) {
+                    if (!selectedNodesRef.current.includes(node.id)) {
+                      event.stopPropagation();
+                      beginCanvasPan(event, node.id);
+                      return;
+                    }
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                  }
+                  beginNodeDrag(event, node.id);
+                }}
+                onDoubleClick={(event) => {
+                  if ((event.target as HTMLElement).closest("button, input, select, textarea, a")) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  selectedNodesRef.current = [node.id];
+                  setSelectedNodes([node.id]);
+                  setSelectedConnection(null);
+                  setActiveControlGroupId(null);
+                  individualControlNodeRef.current = node.id;
+                  setIndividualControlNodeId(node.id);
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  const activeNodePan =
+                    panRef.current?.nodeId === node.id && panRef.current.moved;
+                  const suppressedNodePan =
+                    suppressedNodeContextMenuRef.current?.nodeId === node.id &&
+                    performance.now() <= suppressedNodeContextMenuRef.current.until;
+                  if (activeNodePan || suppressedNodePan) {
+                    if (panRef.current?.nodeId === node.id) {
+                      panRef.current.contextMenuHandled = true;
+                    }
+                    suppressedNodeContextMenuRef.current = null;
+                    event.stopPropagation();
+                    return;
+                  }
+                  suppressedNodeContextMenuRef.current = null;
+                  if (nodeControlGroup) {
+                    event.stopPropagation();
+                    setPendingDisbandControlGroupId(nodeControlGroup.id);
+                    setDisbandControlGroupOpen(true);
+                    return;
+                  }
+                  const highlightedNodeIds = selectedNodesRef.current;
+                  if (
+                    highlightedNodeIds.length >= 2 &&
+                    highlightedNodeIds.includes(node.id)
+                  ) {
+                    event.stopPropagation();
+                    requestControlGroupCreation(highlightedNodeIds);
+                  }
+                }}
+              >
+                {nodeControlGroup ? (
+                  <span
+                    className="control-group-marker"
+                    title={`${nodeControlGroup.colorName} control group`}
+                    aria-hidden="true"
+                  />
+                ) : null}
+                <div className="node-header">
+                  {isConfigurableProcessor ? (
+                    <button
+                      type="button"
+                      className={`node-icon assembler-config-button ${!processorRecipe && !isBuilding ? "needs-recipe" : ""}`}
+                      disabled={isBuilding}
+                      aria-label={isBuilding ? `${node.title} recipe available after construction` : `Choose ${node.title} recipe`}
+                      title={isBuilding ? "Finish construction to choose a recipe" : "Choose recipe"}
+                      onPointerDown={(event) => {
+                        if (event.button === 0) event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setConfiguringAssemblerId(node.id);
+                      }}
+                    >
+                      <Icon aria-hidden="true" />
+                    </button>
+                  ) : (
+                    <div className="node-icon"><Icon aria-hidden="true" /></div>
+                  )}
+                  <div className="node-title"><strong>{node.title}</strong></div>
+                  {canPauseOutput ? (
+                    <div className="node-header-actions">
+                      <button
+                        type="button"
+                        className={`node-pause-button ${outputPaused ? "active" : ""}`}
+                        aria-label={`${outputPaused ? "Resume" : "Pause"} ${node.title} output`}
+                        aria-pressed={outputPaused}
+                        title={`${outputPaused ? "Resume" : "Pause"} output`}
+                        onPointerDown={(event) => {
+                          if (event.button === 0) event.stopPropagation();
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleNodeOutputPause(node.id);
+                        }}
+                      >
+                        {outputPaused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
+                      </button>
+                      {canDestroy ? (
+                        <button
+                          type="button"
+                          className="node-destroy-button"
+                          aria-label={`Destroy ${node.title}`}
+                          title={`Destroy ${node.title}`}
+                          onPointerDown={(event) => {
+                            if (event.button === 0) event.stopPropagation();
+                          }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            requestNodeDeletion([node.id]);
+                          }}
+                        >
+                          <Trash2 aria-hidden="true" />
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : canDestroy ? (
+                    <button
+                      type="button"
+                      className="node-destroy-button"
+                      aria-label={`Destroy ${node.title}`}
+                      title={`Destroy ${node.title}`}
+                      onPointerDown={(event) => {
+                        if (event.button === 0) event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        requestNodeDeletion([node.id]);
+                      }}
+                    >
+                      <Trash2 aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </div>
+
+                {isPowerSplitter ? (
+                  <div className="power-splitter-ports">
+                    {effectiveInputs.map((port) => {
+                      const connected = connections.some(
+                        (connection) =>
+                          connection.targetNode === node.id && connection.targetPort === port.id,
+                      );
+                      return (
+                        <span className="power-splitter-port side-left input-port" key={port.id}>
+                          <button
+                            ref={(element) => { portRefs.current[`${node.id}:${port.id}`] = element; }}
+                            type="button"
+                            className={`port-socket ${getPortConnectionClass(node.id, port)} ${connected ? "filled" : ""}`}
+                            style={{ "--port-color": RESOURCE_COLORS[port.type] } as React.CSSProperties}
+                            data-port-node={node.id}
+                            data-port-id={port.id}
+                            aria-label={`${node.title} ${port.label} input, Power type`}
+                            onPointerEnter={() => setHoveredPort({ nodeId: node.id, port })}
+                            onPointerLeave={() => clearHoveredPort(node.id, port.id)}
+                            onFocus={() => setHoveredPort({ nodeId: node.id, port })}
+                            onBlur={() => clearHoveredPort(node.id, port.id)}
+                            onPointerDown={(event) => beginConnection(event, node.id, port)}
+                            onKeyDown={(event) => handlePortKeyboard(event, node.id, port)}
+                          />
+                          <span className="power-splitter-flow-label input-flow" aria-hidden="true">→</span>
+                        </span>
+                      );
+                    })}
+                    {effectiveOutputs.map((port, index) => {
+                      const side = index === 0 ? "side-top" : index === 1 ? "side-right" : "side-bottom";
+                      return (
+                        <span className={`power-splitter-port ${side} output-port`} key={port.id}>
+                          <button
+                            ref={(element) => { portRefs.current[`${node.id}:${port.id}`] = element; }}
+                            type="button"
+                            className={`port-socket ${getPortConnectionClass(node.id, port)} ${powerSplitterPowered ? "filled" : ""}`}
+                            style={{ "--port-color": RESOURCE_COLORS[port.type] } as React.CSSProperties}
+                            data-port-node={node.id}
+                            data-port-id={port.id}
+                            aria-label={`${node.title} ${port.label} output, Power type`}
+                            onPointerEnter={() => setHoveredPort({ nodeId: node.id, port })}
+                            onPointerLeave={() => clearHoveredPort(node.id, port.id)}
+                            onFocus={() => setHoveredPort({ nodeId: node.id, port })}
+                            onBlur={() => clearHoveredPort(node.id, port.id)}
+                            onPointerDown={(event) => beginConnection(event, node.id, port)}
+                            onKeyDown={(event) => handlePortKeyboard(event, node.id, port)}
+                          />
+                          <span className="power-splitter-flow-label output-flow" aria-hidden="true">
+                            {index === 0 ? "↑" : index === 1 ? "→" : "↓"}
+                          </span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                ) : (
+                <div className="port-list">
+                  {Array.from({ length: rows }).map((_, index) => {
+                    const input = effectiveInputs[index];
+                    const output = effectiveOutputs[index];
+                    const inputDisabled = Boolean(
+                      input && isAssemblerPortDisabled(node.id, input.id, runtime),
+                    );
+                    const outputDisabled = Boolean(
+                      output && isAssemblerPortDisabled(node.id, output.id, runtime),
+                    );
+                    const processorInput = input && processorRecipe
+                      ? processorRecipe.inputs.find((requirement) => requirement.id === input.id)
+                      : null;
+                    const processorInputCount = processorInput
+                      ? processorState?.inputs[processorInput.id] ?? 0
+                      : 0;
+                    const manualIngredientSlot = !isBuilding && input
+                      ? nodeManualIngredientSlots.find((slot) => slot.portId === input.id) ?? null
+                      : null;
+                    const manualIngredientStored = processorInput
+                      ? processorInputCount
+                      : isGenerator && input?.id === "generator-charcoal-in"
+                        ? generatorCharcoal
+                        : isResearchFoundry && input?.id === "research-core-in"
+                          ? researchFoundryCores
+                          : 0;
+                    const manualIngredientChoices = manualIngredientSlot
+                      ? manualIngredientSlot.choices.filter((choice) => (
+                          !isSmartProcessorTypingPort(
+                            node.id,
+                            manualIngredientSlot.portId,
+                            processorState,
+                          ) ||
+                          !manualLockedIngredientType ||
+                          manualLockedIngredientType === choice
+                        ))
+                      : [];
+                    const isPowerInput = input?.id === "power-in" && processorPowerCost > 0;
+                    const isTreePlanterPowerInput = Boolean(isTreePlanter && input?.id === "power-in");
+                    const isMiningDrillPowerInput = Boolean(isMiningDrill && input?.id === "power-in");
+                    const processorPowerReady = Boolean(
+                      processorState?.powerCommitted || processorAvailablePower >= processorPowerCost,
+                    );
+                    const inputFilled = Boolean(
+                      (isExtractor && input?.type === ResourceType.RESOURCE && extractorRecipe && !extractorSourceDepleted) ||
+                      (isGenerator && input?.id === "generator-charcoal-in" && (
+                        generatorCharcoal > 0 || (
+                          generatorCharcoalConnection &&
+                          generatorCharcoal < PRODUCTION_INGREDIENT_CAPACITY
+                        )
+                      )) ||
+                      (isResearchFoundry && input?.id === "research-core-in" && researchFoundryCores > 0) ||
+                      (isTreePlanterPowerInput && treePlanterPowerConnection && treePlanterAvailablePower >= TREE_PLANTER_POWER_COST) ||
+                      (isMiningDrillPowerInput && miningDrillPowerConnection && (
+                        miningDrillState?.powerCommitted || miningDrillAvailablePower >= MINING_DRILL_POWER_COST
+                      )) ||
+                      (isForest && input?.id === "forest-growth-in" && connections.some(
+                        (connection) => connection.targetNode === node.id && connection.targetPort === input.id,
+                      )) ||
+                      (isSplitter && input?.id === "split-in" && splitterType) ||
+                      (isMerger && input && connections.some(
+                        (connection) =>
+                          connection.targetNode === node.id && connection.targetPort === input.id,
+                      )) ||
+                      (isJoint && input?.id === "joint-in" && jointType) ||
+                      (isFilter && input?.id === "filter-in" && filterState?.bufferedType) ||
+                      (isWoodenChest && input?.id === "chest-in" && (
+                        woodenChestItemType || connections.some(
+                          (connection) => connection.targetNode === node.id && connection.targetPort === input.id,
+                        )
+                      )) ||
+                      (isPowerInput && processorPowerConnection && processorPowerReady) ||
+                      (processorInput && processorInputCount >= processorInput.amount) ||
+                      (isStorage && input && connections.some(
+                        (connection) => connection.targetNode === node.id && connection.targetPort === input.id,
+                      )),
+                    );
+                    const inputStatus = inputFilled
+                        ? "READY"
+                      : isPowerInput && processorPowerConnection
+                        ? `${processorAvailablePower}W`
+                        : isTreePlanterPowerInput && treePlanterPowerConnection
+                          ? `${treePlanterAvailablePower}W`
+                        : isMiningDrillPowerInput && miningDrillPowerConnection
+                          ? `${miningDrillAvailablePower}W`
+                        : null;
+                    const outputFilled =
+                      nodeFull ||
+                      Boolean(isExtractor && extractorStored > 0) ||
+                      Boolean(processorKind && processorStored > 0) ||
+                      Boolean(isTreePlanter && treePlanterForestConnection) ||
+                      (isFiniteResource && resourceRemaining > 0) ||
+                      Boolean(isSplitter && splitterType) ||
+                      Boolean(isMerger && mergerType) ||
+                      Boolean(isJoint && (jointState?.bufferedType || jointType)) ||
+                      Boolean(isFilter && filterState?.selectedType) ||
+                      Boolean(isWoodenChest && woodenChestItemType && woodenChestStored > 0) ||
+                      Boolean(isGenerator && generatorPower > 0) ||
+                      Boolean(smartProcessorOutput);
+                    return (
+                      <div className="port-row" key={`${node.id}-row-${index}`}>
+                        <div className="port-slot input-slot">
+                          {input ? (
+                            <>
+                              <MultiConnectionSocketTooltip
+                                enabled={isMultiInputPort(node.id, input.id)}
+                                direction="input"
+                                options={hoveredNodePort?.id === input.id ? hoveredPortConnectionOptions : []}
+                              >
+                              <button
+                                ref={(element) => { portRefs.current[`${node.id}:${input.id}`] = element; }}
+                                type="button"
+                                disabled={inputDisabled}
+                                className={`port-socket ${inputDisabled ? "disabled" : ""} ${isMultiInputPort(node.id, input.id) ? "multi-connection" : ""} ${getPortConnectionClass(node.id, input)} ${inputFilled ? "filled" : ""}`}
+                                style={{ "--port-color": RESOURCE_COLORS[input.type] } as React.CSSProperties}
+                                data-port-node={node.id}
+                                data-port-id={input.id}
+                                aria-label={`${node.title} ${input.label} input, ${input.type} type${isMultiInputPort(node.id, input.id) ? ", supports multiple connections" : ""}`}
+                                aria-describedby={showSocketGuide && hoveredNodePort?.id === input.id ? socketGuideId : undefined}
+                                onPointerEnter={() => setHoveredPort({ nodeId: node.id, port: input })}
+                                onPointerLeave={() => clearHoveredPort(node.id, input.id)}
+                                onFocus={() => setHoveredPort({ nodeId: node.id, port: input })}
+                                onBlur={() => clearHoveredPort(node.id, input.id)}
+                                onPointerDown={(event) => beginConnection(event, node.id, input)}
+                                onKeyDown={(event) => handlePortKeyboard(event, node.id, input)}
+                              >
+                                {isMultiInputPort(node.id, input.id) ? <span className="multi-port-star" aria-hidden="true" /> : null}
+                              </button>
+                              </MultiConnectionSocketTooltip>
+                              <PortLabel label={input.label} />
+                              {manualIngredientSlot ? (
+                                <span className="ingredient-quantity-control">
+                                  <span className="input-check">
+                                    {manualIngredientStored}/{manualIngredientSlot.capacity}
+                                  </span>
+                                  <span className="ingredient-add-actions">
+                                    {manualIngredientChoices.map((choice) => {
+                                      const available = getStoredItemAmount(
+                                        runtime,
+                                        nodes,
+                                        connections,
+                                        choice,
+                                        new Set([node.id]),
+                                      );
+                                      const remainingCapacity = Math.max(
+                                        0,
+                                        manualIngredientSlot.capacity - manualIngredientStored,
+                                      );
+                                      const disabled =
+                                        available <= 0 ||
+                                        remainingCapacity <= 0 ||
+                                        (isResearchFoundry && isAllResearchComplete(runtime.research));
+                                      return (
+                                        <button
+                                          type="button"
+                                          className="ingredient-add-button"
+                                          key={choice}
+                                          disabled={disabled}
+                                          title={`Add ${formatResourceType(choice)} · ${available} stored in other nodes`}
+                                          aria-label={`Add ${formatResourceType(choice)} to ${node.title}, ${available} stored in other nodes`}
+                                          style={{ "--ingredient-color": RESOURCE_COLORS[choice] } as React.CSSProperties}
+                                          onPointerDown={(event) => {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                          }}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            manuallyFillIngredient(node.id, manualIngredientSlot.portId, choice);
+                                          }}
+                                        >
+                                          +
+                                        </button>
+                                      );
+                                    })}
+                                  </span>
+                                </span>
+                              ) : inputStatus ? (
+                                <span className="input-check">{inputStatus}</span>
+                              ) : null}
+                            </>
+                          ) : null}
+                        </div>
+                        <div className="port-slot output-slot">
+                          {output ? (
+                            <>
+                              {isFilter && output.id === "filter-out" ? (
+                                <button
+                                  type="button"
+                                  className="filter-output-select"
+                                  title={filterState?.selectedType ? `Change ${formatResourceType(filterState.selectedType)} filter` : "Choose filtered item"}
+                                  aria-label={`Configure Filter${filterState?.selectedType ? `, currently ${formatResourceType(filterState.selectedType)}` : ""}`}
+                                  disabled={isBuilding}
+                                  onPointerDown={(event) => {
+                                    if (event.button === 0) event.stopPropagation();
+                                  }}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setConfiguringFilterId(node.id);
+                                  }}
+                                >
+                                  {output.label}
+                                </button>
+                              ) : (
+                                <PortLabel label={output.label} />
+                              )}
+                              <MultiConnectionSocketTooltip
+                                enabled={isMultiOutputPort(node.id, output.id)}
+                                direction="output"
+                                options={hoveredNodePort?.id === output.id ? hoveredPortConnectionOptions : []}
+                              >
+                              <button
+                                ref={(element) => { portRefs.current[`${node.id}:${output.id}`] = element; }}
+                                type="button"
+                                disabled={outputDisabled}
+                                className={`port-socket ${outputDisabled ? "disabled" : ""} ${isMultiOutputPort(node.id, output.id) ? "multi-connection" : ""} ${getPortConnectionClass(node.id, output)} ${outputFilled ? "filled" : ""}`}
+                                style={{ "--port-color": RESOURCE_COLORS[output.type] } as React.CSSProperties}
+                                data-port-node={node.id}
+                                data-port-id={output.id}
+                                aria-label={`${node.title} ${output.label} output, ${output.type} type${isMultiOutputPort(node.id, output.id) ? ", supports multiple connections" : ""}`}
+                                aria-describedby={showSocketGuide && hoveredNodePort?.id === output.id ? socketGuideId : undefined}
+                                onPointerEnter={() => setHoveredPort({ nodeId: node.id, port: output })}
+                                onPointerLeave={() => clearHoveredPort(node.id, output.id)}
+                                onFocus={() => setHoveredPort({ nodeId: node.id, port: output })}
+                                onBlur={() => clearHoveredPort(node.id, output.id)}
+                                onPointerDown={(event) => beginConnection(event, node.id, output)}
+                                onKeyDown={(event) => handlePortKeyboard(event, node.id, output)}
+                              >
+                                {isMultiOutputPort(node.id, output.id) ? <span className="multi-port-star" aria-hidden="true" /> : null}
+                              </button>
+                              </MultiConnectionSocketTooltip>
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                )}
+
+                <div className="node-body">
+                  {isJoint || isPowerSplitter ? (
+                    isBuilding ? (
+                      <>
+                        <div className="progress-label joint-progress-label">
+                          <span>Building</span>
+                          <strong>{Math.round(nodeProgress)}%</strong>
+                        </div>
+                        <SmoothProgress
+                          className="machine-progress"
+                          value={nodeProgress}
+                          active={smoothProgressActive}
+                          cycleDuration={smoothProgressDuration ?? buildDuration}
+                          aria-label={`${node.title} construction progress`}
+                        />
+                      </>
+                    ) : null
+                  ) : isStorage && !isBuilding ? null : isWoodenChest && !isBuilding ? (
+                    <div className="wooden-chest-status">
+                      <strong>{woodenChestItemType ? formatResourceType(woodenChestItemType) : "Awaiting item"}</strong>
+                      <span>
+                        {woodenChestItemType
+                          ? `${woodenChestStored} / ${WOODEN_CHEST_CAPACITY} stored`
+                          : `${WOODEN_CHEST_CAPACITY} item capacity`}
+                      </span>
+                    </div>
+                  ) : isMiningDrill && !isBuilding ? (
+                    <button
+                      type="button"
+                      className="mining-drill-config-button"
+                      aria-label={`Choose Mining Drill ore resource${miningDrillTarget ? `, currently ${miningDrillTarget.title}` : ""}`}
+                      onPointerDown={(event) => {
+                        if (event.button === 0) event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setConfiguringMiningDrillId(node.id);
+                      }}
+                    >
+                      <span className="mining-drill-config-heading">
+                        <span className="filter-config-icon"><Pickaxe aria-hidden="true" /></span>
+                        <span className="filter-config-copy">
+                          <small>ORE TARGET · CLICK TO CHANGE</small>
+                          <strong>{miningDrillTarget?.title ?? "Choose ore resource"}</strong>
+                        </span>
+                        <span className="mining-drill-iterations">
+                          {miningDrillState?.iterations ?? 0}/{MINING_DRILL_ITERATIONS}
+                        </span>
+                      </span>
+                      <SmoothProgress
+                        className="machine-progress mining-drill-progress"
+                        value={nodeProgress}
+                        active={smoothProgressActive}
+                        cycleDuration={smoothProgressDuration ?? MINING_DRILL_CYCLE_DURATION * MINING_DRILL_ITERATIONS}
+                        aria-label={`Mining Drill, ${miningDrillState?.iterations ?? 0} of ${MINING_DRILL_ITERATIONS} cycles complete`}
+                      />
+                      <span className="mining-drill-status">{progressStatus} · {nodeMetaLabel}</span>
+                    </button>
+                  ) : isFiniteResource ? (
+                    <>
+                      <div className="progress-label">
+                        <span>{resourceRemaining > 0 ? `${node.title} remaining` : "Deposit exhausted"}</span>
+                        <strong>{resourceRemaining} / {resourceCapacity}</strong>
+                      </div>
+                      <Progress className="machine-progress" value={nodeProgress} aria-label={`${node.title} remaining`} />
+                      <div className="node-meta">
+                        <span>{isForest ? "Regenerates 1 Log / 30s" : "Finite source"}</span>
+                        <span className={resourceRemaining > 0 ? "ready-pill full" : "ready-pill"}>{resourceRemaining > 0 ? "AVAILABLE" : "EMPTY"}</span>
+                      </div>
+                    </>
+                  ) : isGenerator && !isBuilding ? (
+                    <>
+                      <div className="production-progress-value">
+                        <strong>{generatorPower}W / {GENERATOR_MAX_POWER}W</strong>
+                      </div>
+                      <Progress className="machine-progress" value={displayedNodeProgress} aria-label={`${generatorPower} watts stored`} />
+                      <div className="production-progress-percent">{Math.round(displayedNodeProgress)}%</div>
+                      <div className="node-meta">
+                        <span>{formatCycleDuration(effectiveProductionCycleDuration ?? 0)}</span>
+                        <span className="node-meta-actions">
+                          <span className={generatorPower > 0 ? "ready-pill full" : "ready-pill"}>
+                            {generatorPower >= GENERATOR_MAX_POWER ? "FULL" : generatorPower > 0 ? "CHARGED" : "EMPTY"}
+                          </span>
+                        </span>
+                      </div>
+                    </>
+                  ) : (isSplitter || isMerger || isFilter) && !isBuilding ? null
+                  : (
+                    <>
+                      {productionStoredItems !== null && productionStoredCapacity !== null ? (
+                        <div className="production-progress-value">
+                          <strong>{productionStoredItems} / {productionStoredCapacity}</strong>
+                        </div>
+                      ) : isResearchFoundry && !isBuilding ? (
+                        <div className="research-production-state">
+                          {researchIsProducing ? (
+                            <span className="research-state-indicator active" role="status">
+                              ACTIVE
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="research-state-indicator inactive"
+                              aria-label="Open Research, currently inactive"
+                              onPointerDown={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setResearchOpen(true);
+                              }}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setResearchOpen(true);
+                              }}
+                            >
+                              INACTIVE
+                            </button>
+                          )}
+                        </div>
+                      ) : isProductionNode ? (
+                        <div className="production-progress-value">
+                          <strong>{Math.round(displayedNodeProgress)} / 100</strong>
+                        </div>
+                      ) : (
+                        <div className="progress-label">
+                          <span>{progressStatus}</span>
+                          <strong>{Math.round(nodeProgress)}%</strong>
+                        </div>
+                      )}
+                      {smoothProgressDuration && !(
+                        isResearchFoundry && !isBuilding && !researchIsProducing
+                      ) ? (
+                        <SmoothProgress
+                          className="machine-progress"
+                          value={displayedNodeProgress}
+                          active={smoothProgressActive}
+                          cycleDuration={smoothProgressDuration}
+                          aria-label={isBuilding
+                            ? `${node.title} construction progress`
+                            : productionStoredItems !== null && productionStoredCapacity !== null
+                              ? `${node.title} production progress, ${productionStoredItems} of ${productionStoredCapacity} items stored`
+                              : `${node.title} progress`}
+                        />
+                      ) : (
+                        <Progress
+                          className="machine-progress"
+                          value={displayedNodeProgress}
+                          aria-label={`${node.title} progress`}
+                        />
+                      )}
+                      {isProductionNode ? (
+                        <div className="production-progress-percent">{Math.round(displayedNodeProgress)}%</div>
+                      ) : null}
+                      <div className={`node-meta ${isConfigurableProcessor ? "assembler-node-meta" : ""}`}>
+                        <span>{isBuilding ? `${(buildDuration / 1000).toFixed(0)}s build` : nodeMetaLabel}</span>
+                        {isConfigurableProcessor ? (
+                          <span className="assembler-selected-recipe">
+                            {processorRecipe?.title ?? "No recipe selected"}
+                          </span>
+                        ) : null}
+                        <span className="node-meta-actions">
+                          <span className={nodeFull || (isResearchFoundry && isAllResearchComplete(runtime.research)) ? "ready-pill full" : `ready-pill ${isBuilding ? "building" : ""}`}>
+                            {isBuilding
+                              ? "BUILDING"
+                              : isResearchFoundry && isAllResearchComplete(runtime.research)
+                                ? "COMPLETE"
+                                : nodeFull
+                                  ? "FULL"
+                                  : isIdle ? "IDLE" : "ACTIVE"}
+                          </span>
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+                {isConfigurableProcessor ? (
+                  <aside
+                    className="assembler-recipe-tooltip"
+                    role="tooltip"
+                    aria-label={processorRecipe
+                      ? `${processorRecipe.title} recipe: ${processorRecipe.summary}`
+                      : "No recipe selected."}
+                  >
+                    {processorRecipe ? (
+                      <>
+                        <div className="assembler-recipe-tooltip-heading">
+                          <span>Selected recipe</span>
+                          <strong>{processorRecipe.title}</strong>
+                        </div>
+                        <div className="assembler-recipe-tooltip-section">
+                          <span>Required ingredients</span>
+                          <ul>
+                            {assemblerIngredientRows.map((ingredient) => (
+                              <li key={ingredient.type}>
+                                <i style={{ background: RESOURCE_COLORS[ingredient.type] }} />
+                                <strong>{ingredient.amount}&times;</strong>
+                                <span>{ingredient.label}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div className="assembler-recipe-tooltip-output">
+                          <span>Output</span>
+                          <div>
+                            <i style={{ background: RESOURCE_COLORS[processorRecipe.output.type] }} />
+                            <strong>1&times;</strong>
+                            <span>{processorRecipe.output.label}</span>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="assembler-recipe-tooltip-empty">No recipe selected.</div>
+                    )}
+                  </aside>
+                ) : null}
+                {showSocketGuide && hoveredNodePort ? (
+                  <aside
+                    id={socketGuideId}
+                    className={`node-connect-tooltip visible ${hoveredNodePort.direction}-guide`}
+                    role="tooltip"
+                    aria-label={`${hoveredNodePort.direction === "input" ? "Acceptable sources" : "Acceptable destinations"} for ${node.title} ${hoveredNodePort.label}`}
+                    style={{
+                      "--tooltip-top": `${67 + Math.max(0, hoveredPortIndex) * 30}px`,
+                    } as React.CSSProperties}
+                  >
+                    <div className="node-connect-tooltip-heading">
+                      <span>
+                        {hoveredNodePort.direction === "input" ? "Acceptable sources" : "Acceptable destinations"}
+                      </span>
+                      <strong>{connectionOptions.length}</strong>
+                    </div>
+                    {visibleConnectionOptions.length > 0 ? (
+                      <ul>
+                        {visibleConnectionOptions.map((option) => (
+                          <li key={`${node.id}-${option.nodeId}-${option.mode}`}>
+                            <i style={{ background: option.color, color: option.color }} />
+                            <div className="node-connect-tooltip-copy">
+                              <div>
+                                <em className={option.mode}>
+                                  {option.mode === "send" ? "Send to" : "Receive from"}
+                                </em>
+                                <strong>{option.title}</strong>
+                                {option.connected ? <b>Connected</b> : null}
+                              </div>
+                              <small>{option.eyebrow} · {option.routes.join(" · ")}</small>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="node-connect-tooltip-empty">
+                        No compatible open {hoveredNodePort.direction === "input" ? "outputs" : "inputs"}
+                      </div>
+                    )}
+                    {connectionOptions.length > visibleConnectionOptions.length ? (
+                      <div className="node-connect-tooltip-more">
+                        +{connectionOptions.length - visibleConnectionOptions.length} more available
+                      </div>
+                    ) : null}
+                  </aside>
+                ) : null}
+              </section>
+            );
+          })}
+
+        </div>
+        </div>
+
+        <div className="zoom-controls" aria-label="Canvas zoom controls">
+          <Button
+            className="zoom-button"
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Zoom out"
+            title="Zoom out"
+            onClick={() => zoomAtPoint(zoomRef.current - 0.1)}
+          >
+            <Minus />
+          </Button>
+          <Button
+            className="zoom-level"
+            size="sm"
+            variant="ghost"
+            aria-label={`Reset zoom, currently ${Math.round(zoom * 100)} percent`}
+            title="Reset zoom"
+            onClick={() => zoomAtPoint(1)}
+          >
+            {Math.round(zoom * 100)}%
+          </Button>
+          <Button
+            className="zoom-button"
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Zoom in"
+            title="Zoom in"
+            onClick={() => zoomAtPoint(zoomRef.current + 0.1)}
+          >
+            <Plus />
+          </Button>
+        </div>
+      </div>
+
+      <Toaster
+        position="bottom-center"
+        expand
+        gap={12}
+        visibleToasts={10}
+      />
+    </main>
+    </TooltipProvider>
+  );
+}
