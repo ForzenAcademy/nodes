@@ -7,8 +7,11 @@ import {
   Archive,
   Atom,
   BookOpenText,
+  BrickWall,
   CircuitBoard,
   Cog,
+  Compass,
+  createLucideIcon,
   Cable,
   Eye,
   Factory,
@@ -20,6 +23,7 @@ import {
   GitMerge,
   Hammer,
   HardDrive,
+  Keyboard,
   Lock,
   LockOpen,
   Map as MapIcon,
@@ -80,10 +84,45 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuLabel,
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+
+const AreaExpansionIcon = createLucideIcon("area-expansion", [
+  ["path", { d: "M10 10 4 4", key: "northwest-shaft" }],
+  ["path", { d: "M4 9V4h5", key: "northwest-head" }],
+  ["path", { d: "m14 10 6-6", key: "northeast-shaft" }],
+  ["path", { d: "M15 4h5v5", key: "northeast-head" }],
+  ["path", { d: "m10 14-6 6", key: "southwest-shaft" }],
+  ["path", { d: "M4 15v5h5", key: "southwest-head" }],
+  ["path", { d: "m14 14 6 6", key: "southeast-shaft" }],
+  ["path", { d: "M15 20h5v-5", key: "southeast-head" }],
+]);
+
+const MiningDrillIcon = createLucideIcon("mining-drill", [
+  ["rect", { x: "1", y: "6.5", width: "7", height: "11", rx: "1", key: "drive-housing" }],
+  ["path", { d: "M8 4v16l12-8Z", strokeWidth: "1.25", key: "conical-bit" }],
+  ["path", { d: "m9 6.5 2.5 10.5", strokeWidth: "1.25", key: "rear-flute" }],
+  ["path", { d: "m12 8 2 7.5", strokeWidth: "1.25", key: "middle-flute" }],
+  ["path", { d: "m15 9.8 1.3 4.2", strokeWidth: "1.25", key: "front-flute" }],
+  ["path", { d: "M23 3v18", key: "rock-wall" }],
+]);
+
+const RoadIcon = createLucideIcon("road", [
+  [
+    "path",
+    {
+      d: "M9.5 2h5L21 22H3L9.5 2Z",
+      fill: "currentColor",
+      fillOpacity: "0.18",
+      strokeLinejoin: "round",
+      key: "paved-road",
+    },
+  ],
+  ["path", { d: "M12 4v2", strokeWidth: "1.8", key: "center-dash-far" }],
+  ["path", { d: "M12 9v3", strokeWidth: "1.8", key: "center-dash-middle" }],
+  ["path", { d: "M12 16v5", strokeWidth: "1.8", key: "center-dash-near" }],
+]);
 
 enum ResourceType {
   RESOURCE = "RESOURCE",
@@ -95,6 +134,7 @@ enum ResourceType {
   IRON = "IRON",
   COPPER = "COPPER",
   STONE = "STONE",
+  BRICK = "BRICK",
   WOOD = "WOOD",
   CHARCOAL = "CHARCOAL",
   PLATE = "PLATE",
@@ -108,9 +148,12 @@ enum ResourceType {
   COPPER_WIRE = "COPPER_WIRE",
   MOTOR = "MOTOR",
   CIRCUIT_A = "CIRCUIT_A",
+  CORE = "CORE",
+  BASIC_CORE = "BASIC_CORE",
   AUTOMATA_CORE = "AUTOMATA_CORE",
   FOREST_GROWTH = "FOREST_GROWTH",
   POWER = "POWER",
+  WATER = "WATER",
   ANY = "ANY",
 }
 
@@ -128,24 +171,22 @@ const PortLabel = ({ label }: { label: string }) =>
 type NodeId = string;
 type ProcessorKind =
   | "furnace"
-  | "gearPress"
   | "kiln"
-  | "wireMill"
-  | "motorFactory"
-  | "circuitAConduit"
   | "automataCoreAssembler"
   | "refiner"
   | "assembler";
-type AssemblerRecipeId = "motor" | "circuitA";
-type RefinerRecipeId = "gear" | "wire";
+type AssemblerRecipeId = "motor" | "circuitA" | "basicCore" | "automataCore";
+type RefinerRecipeId = "gear" | "wire" | "brick";
 type ExtractorKind = "extractor";
-type PurchasableKind = ExtractorKind | "generator" | "powerSplitter" | "researchFoundry" | "treePlanter" | "miningDrill" | "splitter" | "merger" | "joint" | "inventorySource" | "filter" | "storage" | "woodenChest" | ProcessorKind;
+type PurchasableKind = ExtractorKind | "generator" | "powerSplitter" | "researchFoundry" | "treePlanter" | "miningDrill" | "splitter" | "merger" | "joint" | "road" | "inventorySource" | "filter" | "storage" | "woodenChest" | ProcessorKind;
 type NodeKind = "ironOre" | "copperOre" | "stone" | "forest" | PurchasableKind;
 type BuildCategory = "all" | "production" | "logistics" | "storage";
 type PortDirection = "input" | "output";
 type UnlockTimes = Partial<Record<PurchasableKind, number>>;
-type ResearchProjectId = "extractor2" | "treePlanter" | "miningDrill" | "exploration";
+type ResearchProjectId = "logistics" | "kiln" | "charcoalGenerator" | "furnace" | "refiner" | "assembler" | "researchCenter" | "road" | "areaExpansion1" | "extractor2" | "extractor3" | "treePlanter" | "miningDrill" | "exploration";
 type MiningDrillTarget = ResourceType.IRON_ORE | ResourceType.COPPER_ORE | ResourceType.STONE_CHUNKS;
+type CoreType = ResourceType.BASIC_CORE | ResourceType.AUTOMATA_CORE;
+type MapEdge = "north" | "east" | "south" | "west";
 
 type ControlGroup = {
   id: string;
@@ -164,8 +205,6 @@ type MapNodeProgressBySector = Record<string, MapNodeProgress>;
 type InventoryOverflowPrompt = {
   title: string;
   description: string;
-  confirmLabel: string;
-  cancelLabel?: string;
   suppressionLabel?: string;
   suppressionDescription?: string;
   loss: Array<[InventoryItemType, number]>;
@@ -201,6 +240,31 @@ type Connection = {
 type Position = { x: number; y: number };
 type Positions = Record<NodeId, Position>;
 type NodeSize = { width: number; height: number };
+type BlackHoleObstacle = {
+  id: string;
+  x: number;
+  y: number;
+  radius: number;
+  rotation: number;
+  shape: number[];
+  stoneFilled: number;
+};
+type LakeObstacle = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  shape: number[];
+  productionElapsed: number;
+  nextOutputIndex: number;
+};
+type ObstructionTooltipState = {
+  kind: "blackHole" | "lake";
+  nodeId: NodeId;
+  clientX: number;
+  clientY: number;
+};
 type SelectionBox = { start: Position; end: Position };
 type PortHandle = { nodeId: NodeId; port: Port };
 type InsertionPlan = { connection: Connection; input: Port; output: Port };
@@ -247,7 +311,6 @@ type Runtime = {
     full: boolean;
     inputs: Record<string, number>;
     materialType: ResourceType | null;
-    powerCommitted: boolean;
     assemblerRecipe?: AssemblerRecipeId | null;
     refinerRecipe?: RefinerRecipeId | null;
   }>;
@@ -255,6 +318,7 @@ type Runtime = {
   researchFoundries: Record<NodeId, {
     progress: number;
     cores: number;
+    coreItems?: CoreType[];
     /** Retained only so older version-1 saves can be migrated on load. */
     coreLoaded?: boolean;
   }>;
@@ -263,18 +327,30 @@ type Runtime = {
     progress: number;
     iterations: number;
     selectedType: MiningDrillTarget | null;
-    powerCommitted: boolean;
   }>;
   minedDeposits: Record<NodeId, {
     type: MiningDrillTarget;
     remaining: number;
     capacity: number;
   }>;
+  blackHoles: Record<NodeId, BlackHoleObstacle>;
+  lakes: Record<NodeId, LakeObstacle>;
+  mapPoints: number;
   research: {
     available: boolean;
     activeProject: ResearchProjectId | null;
     progress: Record<ResearchProjectId, number>;
+    logisticsUnlocked: boolean;
+    kilnUnlocked: boolean;
+    charcoalGeneratorUnlocked: boolean;
+    furnaceUnlocked: boolean;
+    refinerUnlocked: boolean;
+    assemblerUnlocked: boolean;
+    researchCenterUnlocked: boolean;
+    roadUnlocked: boolean;
+    areaExpansion1Unlocked: boolean;
     extractor2Unlocked: boolean;
+    extractor3Unlocked: boolean;
     treePlanterUnlocked: boolean;
     miningDrillUnlocked: boolean;
     explorationUnlocked: boolean;
@@ -284,6 +360,13 @@ type Runtime = {
   }>;
   joints: Record<NodeId, {
     bufferedType: ResourceType | null;
+  }>;
+  roads: Record<NodeId, {
+    outboundType: InventoryItemType | null;
+    inboundType: InventoryItemType | null;
+    pairedSector: string | null;
+    pairedRoadId: NodeId | null;
+    edge: MapEdge | null;
   }>;
   inventorySources: Record<NodeId, {
     progress: number;
@@ -320,6 +403,7 @@ type InventoryItemType =
   | ResourceType.IRON
   | ResourceType.COPPER
   | ResourceType.STONE
+  | ResourceType.BRICK
   | ResourceType.WOOD
   | ResourceType.CHARCOAL
   | ResourceType.IRON_PLATE
@@ -330,11 +414,21 @@ type InventoryItemType =
   | ResourceType.COPPER_WIRE
   | ResourceType.MOTOR
   | ResourceType.CIRCUIT_A
-  | ResourceType.AUTOMATA_CORE;
+  | ResourceType.BASIC_CORE
+  | ResourceType.AUTOMATA_CORE
+  | ResourceType.WATER;
 
 type BuildSequence = Record<PurchasableKind, number>;
 type SerializedNode = Omit<NodeSpec, "icon">;
-type ShortcutBarId = "shortcutBar1" | "shortcutBar2";
+type RetiredProductionNodeKind =
+  | "gearPress"
+  | "wireMill"
+  | "motorFactory"
+  | "circuitAConduit";
+type SaveSerializedNode = Omit<SerializedNode, "kind"> & {
+  kind: NodeKind | RetiredProductionNodeKind;
+};
+type ShortcutBarId = "shortcutBar1" | "shortcutBar2" | "shortcutBar3";
 type ShortcutBarConfig = {
   visible: boolean;
   position: { x: number; y: number };
@@ -344,6 +438,23 @@ type ShortcutBarConfig = {
   assignments: Array<PurchasableKind | null>;
 };
 type ShortcutBarsState = Record<ShortcutBarId, ShortcutBarConfig>;
+type ShortcutBarGroupAxis = "horizontal" | "vertical";
+type ShortcutBarGroup = {
+  axis: ShortcutBarGroupAxis;
+  barIds: ShortcutBarId[];
+};
+type ShortcutBarSnapCandidate = {
+  movingBarId: ShortcutBarId;
+  targetBarId: ShortcutBarId;
+  axis: ShortcutBarGroupAxis;
+  movingBeforeTarget: boolean;
+};
+type ShortcutBarScreenRect = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
 type PromptPreferences = {
   skipConnectionDeleteConfirmation: boolean;
   automaticallyDestroyInventoryOverflow: boolean;
@@ -351,7 +462,25 @@ type PromptPreferences = {
   skipHighlightedGroupDeleteConfirmation: boolean;
   skipControlGroupTutorial: boolean;
   skipAssemblerRecipeChangeConfirmation: boolean;
+  skipMiningDrillCompletionWarning: boolean;
+  skipMultiConnectionTooltip: boolean;
+  skipShortcutBarGroupTooltip: boolean;
 };
+
+type MapFactoryState = {
+  nodes: SaveSerializedNode[];
+  positions: Positions;
+  connections: Connection[];
+  runtime: Runtime;
+  controlGroups: ControlGroup[];
+  buildSequence: BuildSequence;
+  zoom: number;
+  viewport: { scrollLeft: number; scrollTop: number };
+  lastSimulatedAt: number;
+  producedBaseline: Record<InventoryItemType, number>;
+};
+
+type MapFactoriesBySector = Record<string, MapFactoryState>;
 
 const normalizePromptPreferences = (
   preferences?: Partial<PromptPreferences> | null,
@@ -368,11 +497,17 @@ const normalizePromptPreferences = (
   skipControlGroupTutorial: preferences?.skipControlGroupTutorial === true,
   skipAssemblerRecipeChangeConfirmation:
     preferences?.skipAssemblerRecipeChangeConfirmation === true,
+  skipMiningDrillCompletionWarning:
+    preferences?.skipMiningDrillCompletionWarning === true,
+  skipMultiConnectionTooltip:
+    preferences?.skipMultiConnectionTooltip === true,
+  skipShortcutBarGroupTooltip:
+    preferences?.skipShortcutBarGroupTooltip === true,
 });
 
 type SaveGamePayload = {
   version: 1;
-  nodes: SerializedNode[];
+  nodes: SaveSerializedNode[];
   positions: Positions;
   connections: Connection[];
   runtime: Runtime;
@@ -385,6 +520,8 @@ type SaveGamePayload = {
   logisticsUnlocked: boolean;
   selectedMapSector: string | null;
   mapNodeProgress?: MapNodeProgressBySector;
+  activeMapSector?: string;
+  mapFactories?: MapFactoriesBySector;
   gameElapsedMs: number;
   zoom: number;
   viewport: { scrollLeft: number; scrollTop: number };
@@ -395,6 +532,7 @@ type SaveGamePayload = {
   journalAttention: boolean;
   promptPreferences?: PromptPreferences;
   shortcutBars?: ShortcutBarsState;
+  shortcutBarGroups?: ShortcutBarGroup[];
   removeBuildCosts?: boolean;
 };
 type SaveGameSlot = {
@@ -409,13 +547,181 @@ type GraphUndoSnapshot = {
   connections: Connection[];
   runtime: Runtime;
   controlGroups: ControlGroup[];
+  mapFactoryRuntimes?: Record<string, Runtime>;
+  mapFactoryStates?: Record<string, MapFactoryState>;
 };
 
 type UndoEntry =
   | { kind: "graph"; snapshot: GraphUndoSnapshot }
   | { kind: "movement"; positions: Partial<Positions> };
 
+type RapidClickAnimationVariant = 0 | 1 | 2 | 3 | 4;
+type RapidClickAnimation = {
+  token: number;
+  variant: RapidClickAnimationVariant;
+};
+
 const MAX_UNDO_HISTORY = 50;
+const RAPID_CLICK_TARGET = 6;
+const RAPID_CLICK_WINDOW_MS = 2500;
+const RAPID_CLICK_SEQUENCE_WINDOW_MS = 12000;
+const RAPID_CLICK_ANIMATION_DURATION_MS = 1400;
+const BLACK_HOLE_RADIUS = 38;
+const BLACK_HOLE_CLEARANCE = 10;
+const BLACK_HOLE_CLICK_CLUSTER_RADIUS = 24;
+const BLACK_HOLE_SHAPE_POINTS = 11;
+const BLACK_HOLE_GENERATION_CENTER_SPACING = 1.7;
+const BLACK_HOLE_GENERATION_RANDOMIZATION_PASSES = 3;
+const BLACK_HOLE_GENERATION_RANDOMIZATION_ATTEMPTS = 160;
+const RESOURCE_DEPLETION_BLACK_HOLE_RADIUS = BLACK_HOLE_RADIUS * Math.sqrt(10);
+const BLACK_HOLE_INPUT_PORT: Port = {
+  id: "black-hole-stone-in",
+  label: "Stone",
+  type: ResourceType.STONE,
+  direction: "input",
+};
+const LAKE_SHAPE_POINTS = 18;
+const LAKE_PRODUCTION_DURATION = 1000;
+type LakeOutputDirection = "north" | "east" | "south" | "west";
+const LAKE_WATER_OUTPUT_PORTS: Array<Port & { side: LakeOutputDirection }> = [
+  { id: "lake-water-out-north", label: "Water", type: ResourceType.WATER, direction: "output", side: "north" },
+  { id: "lake-water-out", label: "Water", type: ResourceType.WATER, direction: "output", side: "east" },
+  { id: "lake-water-out-south", label: "Water", type: ResourceType.WATER, direction: "output", side: "south" },
+  { id: "lake-water-out-west", label: "Water", type: ResourceType.WATER, direction: "output", side: "west" },
+];
+const getLakeWaterOutputPort = (portId: string) =>
+  LAKE_WATER_OUTPUT_PORTS.find((port) => port.id === portId) ?? null;
+
+const createBlackHoleObstacle = (
+  center: Position,
+  radius = BLACK_HOLE_RADIUS,
+  id = `black-hole-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+): BlackHoleObstacle => ({
+  id,
+  x: center.x,
+  y: center.y,
+  radius,
+  rotation: Math.random() * 360,
+  shape: Array.from(
+    { length: BLACK_HOLE_SHAPE_POINTS },
+    () => 0.76 + Math.random() * 0.24,
+  ),
+  stoneFilled: 0,
+});
+
+const normalizeBlackHoles = (value: unknown): Record<NodeId, BlackHoleObstacle> => {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, Partial<BlackHoleObstacle>>).flatMap(([id, hole]) => {
+      const x = Number(hole?.x);
+      const y = Number(hole?.y);
+      const radius = Number(hole?.radius);
+      if (!id || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(radius) || radius <= 0) {
+        return [];
+      }
+      const shape = Array.isArray(hole.shape) && hole.shape.length >= 7
+        ? hole.shape.map((point) => Math.min(1.15, Math.max(0.55, Number(point) || 0.8)))
+        : Array.from({ length: BLACK_HOLE_SHAPE_POINTS }, () => 0.82);
+      return [[id, {
+        id,
+        x,
+        y,
+        radius,
+        rotation: Number(hole.rotation) || 0,
+        shape,
+        stoneFilled: Math.max(0, Math.floor(Number(hole.stoneFilled) || 0)),
+      } satisfies BlackHoleObstacle]];
+    }),
+  );
+};
+
+const getPolygonArea = (points: Position[]) => Math.abs(points.reduce(
+  (area, point, index) => {
+    const next = points[(index + 1) % points.length];
+    return area + point.x * next.y - next.x * point.y;
+  },
+  0,
+)) / 2;
+
+const createLakeObstacle = (
+  playAreaSize: NodeSize,
+  targetAreaRatio: number,
+  margin: number,
+  id = `lake-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+): LakeObstacle => {
+  const shape = Array.from({ length: LAKE_SHAPE_POINTS }, (_, index) => {
+    const wave = Math.sin(index * 1.9) * 0.07 + Math.cos(index * 2.7) * 0.05;
+    return Math.min(0.98, Math.max(0.68, 0.86 + wave + (Math.random() - 0.5) * 0.18));
+  });
+  const aspectRatio = 1.25 + Math.random() * 0.5;
+  const unitPoints = shape.map((scale, index) => {
+    const angle = (Math.PI * 2 * index) / shape.length;
+    return {
+      x: Math.cos(angle) * aspectRatio * scale,
+      y: Math.sin(angle) * scale,
+    };
+  });
+  const targetArea = playAreaSize.width * playAreaSize.height * targetAreaRatio;
+  const scale = Math.sqrt(targetArea / Math.max(0.001, getPolygonArea(unitPoints)));
+  const halfWidth = aspectRatio * scale;
+  const halfHeight = scale;
+  const availableWidth = Math.max(0, playAreaSize.width - halfWidth * 2 - margin * 2);
+  const availableHeight = Math.max(0, playAreaSize.height - halfHeight * 2 - margin * 2);
+  return {
+    id,
+    x: margin + halfWidth + Math.random() * availableWidth,
+    y: margin + halfHeight + Math.random() * availableHeight,
+    width: halfWidth * 2,
+    height: halfHeight * 2,
+    shape,
+    productionElapsed: 0,
+    nextOutputIndex: 0,
+  };
+};
+
+const getLakeObstacleArea = (lake: LakeObstacle) => getPolygonArea(
+  lake.shape.map((scale, index) => {
+    const angle = (Math.PI * 2 * index) / lake.shape.length;
+    return {
+      x: Math.cos(angle) * (lake.width / 2) * scale,
+      y: Math.sin(angle) * (lake.height / 2) * scale,
+    };
+  }),
+);
+
+const normalizeLakes = (value: unknown): Record<NodeId, LakeObstacle> => {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, Partial<LakeObstacle>>).flatMap(([id, lake]) => {
+      const x = Number(lake?.x);
+      const y = Number(lake?.y);
+      const width = Number(lake?.width);
+      const height = Number(lake?.height);
+      if (
+        !id ||
+        !Number.isFinite(x) ||
+        !Number.isFinite(y) ||
+        !Number.isFinite(width) ||
+        !Number.isFinite(height) ||
+        width <= 0 ||
+        height <= 0
+      ) return [];
+      const shape = Array.isArray(lake.shape) && lake.shape.length >= 8
+        ? lake.shape.map((scale) => Math.min(1, Math.max(0.55, Number(scale) || 0.82)))
+        : Array.from({ length: LAKE_SHAPE_POINTS }, () => 0.84);
+      return [[id, {
+        id,
+        x,
+        y,
+        width,
+        height,
+        shape,
+        productionElapsed: Math.max(0, Number(lake.productionElapsed) || 0) % LAKE_PRODUCTION_DURATION,
+        nextOutputIndex: Math.max(0, Math.floor(Number(lake.nextOutputIndex) || 0)),
+      } satisfies LakeObstacle]];
+    }),
+  );
+};
 
 const IRON_RESOURCE_COLOR = "#8296a6";
 
@@ -429,6 +735,7 @@ const RESOURCE_COLORS: Record<ResourceType, string> = {
   [ResourceType.IRON]: IRON_RESOURCE_COLOR,
   [ResourceType.COPPER]: "#d98a62",
   [ResourceType.STONE]: "#a6aaa7",
+  [ResourceType.BRICK]: "#b86f50",
   [ResourceType.WOOD]: "#d29a5a",
   [ResourceType.CHARCOAL]: "#6f7782",
   [ResourceType.PLATE]: "#b5a69d",
@@ -442,9 +749,12 @@ const RESOURCE_COLORS: Record<ResourceType, string> = {
   [ResourceType.COPPER_WIRE]: "#e79a70",
   [ResourceType.MOTOR]: "#d9a54a",
   [ResourceType.CIRCUIT_A]: "#6fcf9b",
+  [ResourceType.CORE]: "#8baadf",
+  [ResourceType.BASIC_CORE]: "#70b9d6",
   [ResourceType.AUTOMATA_CORE]: "#c28cff",
   [ResourceType.FOREST_GROWTH]: "#82d982",
   [ResourceType.POWER]: "#f2d45c",
+  [ResourceType.WATER]: "#55bde8",
   [ResourceType.ANY]: "#d5b666",
 };
 
@@ -464,6 +774,7 @@ const INVENTORY_ITEMS: Array<{ type: InventoryItemType; label: string }> = [
   { type: ResourceType.IRON, label: "Iron" },
   { type: ResourceType.COPPER, label: "Copper" },
   { type: ResourceType.STONE, label: "Stone" },
+  { type: ResourceType.BRICK, label: "Brick" },
   { type: ResourceType.WOOD, label: "Wood" },
   { type: ResourceType.CHARCOAL, label: "Charcoal" },
   { type: ResourceType.IRON_PLATE, label: "Iron Plate" },
@@ -474,7 +785,9 @@ const INVENTORY_ITEMS: Array<{ type: InventoryItemType; label: string }> = [
   { type: ResourceType.COPPER_WIRE, label: "Copper Wire" },
   { type: ResourceType.MOTOR, label: "Motor" },
   { type: ResourceType.CIRCUIT_A, label: "Circuit A" },
+  { type: ResourceType.BASIC_CORE, label: "Basic Core" },
   { type: ResourceType.AUTOMATA_CORE, label: "Automata Core" },
+  { type: ResourceType.WATER, label: "Water" },
 ];
 
 const STARTING_INVENTORY_ITEM_TYPES = new Set<InventoryItemType>([
@@ -487,20 +800,19 @@ const STARTING_INVENTORY_ITEM_TYPES = new Set<InventoryItemType>([
 const PRODUCIBLE_INVENTORY_TYPES_BY_KIND: Partial<Record<NodeKind, readonly InventoryItemType[]>> = {
   kiln: [ResourceType.CHARCOAL],
   furnace: [ResourceType.IRON_PLATE, ResourceType.COPPER_PLATE],
-  gearPress: [ResourceType.IRON_GEAR, ResourceType.COPPER_GEAR],
-  wireMill: [ResourceType.IRON_WIRE, ResourceType.COPPER_WIRE],
   assembler: [
     ResourceType.MOTOR,
     ResourceType.CIRCUIT_A,
+    ResourceType.BASIC_CORE,
+    ResourceType.AUTOMATA_CORE,
   ],
   refiner: [
     ResourceType.IRON_GEAR,
     ResourceType.COPPER_GEAR,
     ResourceType.IRON_WIRE,
     ResourceType.COPPER_WIRE,
+    ResourceType.BRICK,
   ],
-  motorFactory: [ResourceType.MOTOR],
-  circuitAConduit: [ResourceType.CIRCUIT_A],
   automataCoreAssembler: [ResourceType.AUTOMATA_CORE],
 };
 
@@ -613,6 +925,9 @@ const INITIAL_NODES: NodeSpec[] = [
 
 const HOME_OFFSET = { x: 0, y: 0 };
 const WORLD_SIZE = { width: 3600, height: 2400 };
+const AREA_EXPANSION_1_MULTIPLIER = 1.25;
+const MAP_NODE_MAX_SIZE_MULTIPLIER = 2;
+const BASIC_CORE_RESEARCH_COST = 5;
 const CONNECTION_AUTO_SCROLL_EDGE = 72;
 const CONNECTION_AUTO_SCROLL_MAX_SPEED = 880;
 const PORT_SNAP_PADDING = 14;
@@ -622,7 +937,7 @@ const COMPACT_ROUTING_NODE_SIZE = JOINT_NODE_SIZE * 1.25;
 const WOODEN_CHEST_NODE_SIZE = { width: 129, height: 101 };
 const RESOURCE_NODE_SIZE = { width: 310, height: 242 };
 const STARTING_RESOURCE_X = 96 + RESOURCE_NODE_SIZE.width / 2;
-const STARTING_RESOURCE_STEP = RESOURCE_NODE_SIZE.height * 2;
+const STARTING_RESOURCE_STEP = (RESOURCE_NODE_SIZE.height + NODE_CLEARANCE) * 2;
 
 const isResourceNodeKind = (kind: NodeKind) =>
   kind === "ironOre" ||
@@ -635,7 +950,7 @@ const getEstimatedNodeSize = (node: NodeSpec): NodeSize => {
   if (node.kind === "joint" || node.kind === "powerSplitter") {
     return { width: JOINT_NODE_SIZE, height: JOINT_NODE_SIZE };
   }
-  if (node.kind === "splitter" || node.kind === "merger" || node.kind === "filter") {
+  if (node.kind === "splitter" || node.kind === "merger" || node.kind === "filter" || node.kind === "road") {
     return { width: COMPACT_ROUTING_NODE_SIZE, height: COMPACT_ROUTING_NODE_SIZE };
   }
   if (node.kind === "woodenChest") return WOODEN_CHEST_NODE_SIZE;
@@ -663,13 +978,20 @@ const INITIAL_POSITIONS: Positions = {
   "extractor-2": { x: 960, y: 120 + STARTING_RESOURCE_STEP - 60 },
 };
 
+const STARTING_RESOURCE_BOUNDS = {
+  left: STARTING_RESOURCE_X,
+  top: INITIAL_POSITIONS.stone.y,
+  right: STARTING_RESOURCE_X + RESOURCE_NODE_SIZE.width,
+  bottom: INITIAL_POSITIONS.ironOre.y + RESOURCE_NODE_SIZE.height,
+};
+
 const INITIAL_CONNECTIONS: Connection[] = [];
 
 const RESOURCE_CAPACITIES = {
-  ironOre: 1000,
-  copperOre: 1000,
-  stone: 1000,
-  forest: 1000,
+  ironOre: 2000,
+  copperOre: 2000,
+  stone: 2000,
+  forest: 2000,
 } as const;
 const FOREST_BASE_REGENERATION_DURATION = 30_000;
 const SIMULATION_TICK_INTERVAL = 100;
@@ -678,8 +1000,6 @@ const MAX_SIMULATION_ELAPSED = 1000;
 
 const MINED_DEPOSIT_CAPACITY = 1000;
 const MINING_DRILL_ITERATIONS = 20;
-const MINING_DRILL_CYCLE_DURATION = 3000;
-const MINING_DRILL_POWER_COST = 10;
 
 const MINING_DRILL_TARGETS: Array<{
   type: MiningDrillTarget;
@@ -820,8 +1140,33 @@ const consumeResource = (
 const makeResearchState = (): Runtime["research"] => ({
   available: false,
   activeProject: null,
-  progress: { extractor2: 0, treePlanter: 0, miningDrill: 0, exploration: 0 },
+  progress: {
+    logistics: 0,
+    kiln: 0,
+    charcoalGenerator: 0,
+    furnace: 0,
+    refiner: 0,
+    assembler: 0,
+    researchCenter: 0,
+    road: 0,
+    areaExpansion1: 0,
+    extractor2: 0,
+    extractor3: 0,
+    treePlanter: 0,
+    miningDrill: 0,
+    exploration: 0,
+  },
+  logisticsUnlocked: false,
+  kilnUnlocked: false,
+  charcoalGeneratorUnlocked: false,
+  furnaceUnlocked: false,
+  refinerUnlocked: false,
+  assemblerUnlocked: false,
+  researchCenterUnlocked: false,
+  roadUnlocked: false,
+  areaExpansion1Unlocked: false,
   extractor2Unlocked: false,
+  extractor3Unlocked: false,
   treePlanterUnlocked: false,
   miningDrillUnlocked: false,
   explorationUnlocked: false,
@@ -842,9 +1187,13 @@ const makeRuntime = (): Runtime => ({
   treePlanters: {},
   miningDrills: {},
   minedDeposits: {},
+  blackHoles: {},
+  lakes: {},
+  mapPoints: 0,
   research: makeResearchState(),
   splitters: {},
   joints: {},
+  roads: {},
   inventorySources: {},
   filters: {},
   woodenChests: {
@@ -893,21 +1242,18 @@ const BUILD_TIMES = {
   treePlanter: PRODUCTION_BUILD_TIME,
   miningDrill: PRODUCTION_BUILD_TIME,
   furnace: PRODUCTION_BUILD_TIME,
-  gearPress: PRODUCTION_BUILD_TIME,
-  wireMill: PRODUCTION_BUILD_TIME,
-  motorFactory: PRODUCTION_BUILD_TIME,
-  circuitAConduit: PRODUCTION_BUILD_TIME,
   automataCoreAssembler: PRODUCTION_BUILD_TIME,
   refiner: PRODUCTION_BUILD_TIME,
   assembler: PRODUCTION_BUILD_TIME,
   kiln: PRODUCTION_BUILD_TIME,
-  splitter: 10000,
-  merger: 10000,
-  joint: 4000,
+  splitter: 2000,
+  merger: 2000,
+  joint: 2000,
+  road: 2000,
   inventorySource: 12000,
   filter: 10000,
   storage: 12000,
-  woodenChest: 8000,
+  woodenChest: 2000,
 } as const;
 
 const makeBuildSequence = (): BuildSequence => ({
@@ -918,17 +1264,14 @@ const makeBuildSequence = (): BuildSequence => ({
   treePlanter: 0,
   miningDrill: 0,
   furnace: 0,
-  gearPress: 0,
   kiln: 0,
-  wireMill: 0,
-  motorFactory: 0,
-  circuitAConduit: 0,
   automataCoreAssembler: 0,
   refiner: 0,
   assembler: 0,
   splitter: 0,
   merger: 0,
   joint: 0,
+  road: 0,
   inventorySource: 0,
   filter: 0,
   storage: 0,
@@ -936,17 +1279,25 @@ const makeBuildSequence = (): BuildSequence => ({
 });
 
 const SAVE_STORAGE_KEY = "factorinode.save-slots.v1";
+const TEMPORARY_SAVE_STORAGE_KEY = "factorinode.temporary-save.v1";
+const TEMPORARY_SAVE_FREQUENCY_STORAGE_KEY = "factorinode.temporary-save-frequency.v1";
 const WIRE_ANIMATION_STORAGE_KEY = "factorinode.wire-animations.v1";
 const SAVE_SLOT_COUNT = 3;
+const DEFAULT_TEMPORARY_SAVE_FREQUENCY_MINUTES = 5;
+const MIN_TEMPORARY_SAVE_FREQUENCY_MINUTES = 1;
+const MAX_TEMPORARY_SAVE_FREQUENCY_MINUTES = 60;
 const SHORTCUT_SLOT_COUNT = 5;
 const SHORTCUT_BAR_SCALE_MIN = 0.72;
 const SHORTCUT_BAR_SCALE_MAX = 1.55;
+const SHORTCUT_BAR_GROUP_GAP = 6;
+const SHORTCUT_BAR_SNAP_DISTANCE = 32;
+const SHORTCUT_BAR_IDS: ShortcutBarId[] = ["shortcutBar1", "shortcutBar2", "shortcutBar3"];
 const makeShortcutAssignments = (): Array<PurchasableKind | null> =>
   Array.from({ length: SHORTCUT_SLOT_COUNT }, () => null);
 const makeDefaultShortcutBars = (): ShortcutBarsState => ({
   shortcutBar1: {
     visible: true,
-    position: { x: 50, y: 78 },
+    position: { x: 80, y: 78 },
     scale: 1,
     rotation: 0,
     locked: false,
@@ -955,6 +1306,14 @@ const makeDefaultShortcutBars = (): ShortcutBarsState => ({
   shortcutBar2: {
     visible: false,
     position: { x: 50, y: 162 },
+    scale: 1,
+    rotation: 0,
+    locked: false,
+    assignments: makeShortcutAssignments(),
+  },
+  shortcutBar3: {
+    visible: false,
+    position: { x: 50, y: 246 },
     scale: 1,
     rotation: 0,
     locked: false,
@@ -990,7 +1349,43 @@ const normalizeShortcutBars = (
   return {
     shortcutBar1: normalizeShortcutBarConfig(value?.shortcutBar1, defaults.shortcutBar1),
     shortcutBar2: normalizeShortcutBarConfig(value?.shortcutBar2, defaults.shortcutBar2),
+    shortcutBar3: normalizeShortcutBarConfig(value?.shortcutBar3, defaults.shortcutBar3),
   };
+};
+const normalizeShortcutBarGroups = (
+  value: unknown,
+  bars: ShortcutBarsState,
+): ShortcutBarGroup[] => {
+  if (!Array.isArray(value)) return [];
+  const groupedBarIds = new Set<ShortcutBarId>();
+  const groups: ShortcutBarGroup[] = [];
+  value.forEach((candidate) => {
+    if (!candidate || typeof candidate !== "object") return;
+    const serialized = candidate as Partial<ShortcutBarGroup>;
+    const candidateBarIds = new Set<ShortcutBarId>();
+    const barIds = Array.isArray(serialized.barIds)
+      ? serialized.barIds.filter((barId): barId is ShortcutBarId => {
+          const normalizedBarId = barId as ShortcutBarId;
+          if (
+            !SHORTCUT_BAR_IDS.includes(normalizedBarId) ||
+            !bars[normalizedBarId].visible ||
+            groupedBarIds.has(normalizedBarId) ||
+            candidateBarIds.has(normalizedBarId)
+          ) {
+            return false;
+          }
+          candidateBarIds.add(normalizedBarId);
+          return true;
+        })
+      : [];
+    if (barIds.length < 2) return;
+    barIds.forEach((barId) => groupedBarIds.add(barId));
+    groups.push({
+      axis: serialized.axis === "vertical" ? "vertical" : "horizontal",
+      barIds,
+    });
+  });
+  return groups;
 };
 const makeEmptySaveSlots = (): Array<SaveGameSlot | null> =>
   Array.from({ length: SAVE_SLOT_COUNT }, () => null);
@@ -1002,30 +1397,236 @@ const POWER_PER_CHARCOAL = 50;
 const PRODUCTION_INGREDIENT_CAPACITY = 5;
 const RESEARCH_CYCLE_DURATION = 20000;
 const RESEARCH_UNLOCK_COST = 5;
-const MAP_GRID_SIZE = 13;
+const MAP_GRID_SIZE = 11;
 const MAP_HOME_INDEX = Math.floor(MAP_GRID_SIZE / 2);
 const MAP_HOME_SECTOR = `${MAP_HOME_INDEX},${MAP_HOME_INDEX}`;
-const MAP_ADJACENT_SECTORS = new Map([
-  [`${MAP_HOME_INDEX},${MAP_HOME_INDEX - 1}`, "North"],
-  [`${MAP_HOME_INDEX + 1},${MAP_HOME_INDEX}`, "East"],
-  [`${MAP_HOME_INDEX},${MAP_HOME_INDEX + 1}`, "South"],
-  [`${MAP_HOME_INDEX - 1},${MAP_HOME_INDEX}`, "West"],
-]);
+const LEGACY_MAP_GRID_SIZE = 13;
+const LEGACY_MAP_HOME_INDEX = Math.floor(LEGACY_MAP_GRID_SIZE / 2);
+const MAX_MAP_NODE_VALUE = 10;
+const MAP_NODE_MIN_RESOURCE_MULTIPLIER = 0.5;
+const MAP_NODE_RESOURCE_MULTIPLIER_PER_VALUE = 0.05;
+const MAP_NODE_BLACK_HOLE_START_AREA_RATIO = 0.15;
+const MAP_NODE_BLACK_HOLE_MAX_AREA_RATIO = 0.5;
+const MAP_NODE_BLACK_HOLE_MAX_SCALING_TIER = 9;
+const MAP_NODE_MAX_OBSTRUCTION_AREA_RATIO = 0.6;
+const MAP_OBSTRUCTION_MARGIN = 72;
+const BLACK_HOLE_MIN_STONE_REQUIREMENT = 20;
+const BLACK_HOLE_MAX_STONE_REQUIREMENT = 20000;
+const parseMapSectorKeyWithinSize = (sectorKey: string, gridSize: number): Position | null => {
+  const [rawX, rawY, ...rest] = sectorKey.split(",");
+  const x = Number(rawX);
+  const y = Number(rawY);
+  if (
+    rest.length > 0 ||
+    !Number.isInteger(x) ||
+    !Number.isInteger(y) ||
+    x < 0 ||
+    y < 0 ||
+    x >= gridSize ||
+    y >= gridSize
+  ) return null;
+  return { x, y };
+};
+const parseMapSectorKey = (sectorKey: string): Position | null =>
+  parseMapSectorKeyWithinSize(sectorKey, MAP_GRID_SIZE);
+const getMapNodeValue = (sectorKey: string) => {
+  const coordinate = parseMapSectorKey(sectorKey);
+  return coordinate
+    ? Math.abs(coordinate.x - MAP_HOME_INDEX) + Math.abs(coordinate.y - MAP_HOME_INDEX)
+    : 0;
+};
+const isMapNodeInRange = (sectorKey: string) =>
+  Boolean(parseMapSectorKey(sectorKey)) && getMapNodeValue(sectorKey) <= MAX_MAP_NODE_VALUE;
+const normalizeStoredMapSectorKey = (sectorKey: string, migrateLegacyCoordinates: boolean) => {
+  if (!migrateLegacyCoordinates) return isMapNodeInRange(sectorKey) ? sectorKey : null;
+  const coordinate = parseMapSectorKeyWithinSize(sectorKey, LEGACY_MAP_GRID_SIZE);
+  if (!coordinate) return null;
+  const migratedKey = `${coordinate.x - (LEGACY_MAP_HOME_INDEX - MAP_HOME_INDEX)},${
+    coordinate.y - (LEGACY_MAP_HOME_INDEX - MAP_HOME_INDEX)
+  }`;
+  return isMapNodeInRange(migratedKey) ? migratedKey : null;
+};
+const hasLegacyMapCoordinates = (value: unknown) => {
+  if (!value || typeof value !== "object") return false;
+  return Object.keys(value).some((sectorKey) => {
+    const coordinate = parseMapSectorKeyWithinSize(sectorKey, LEGACY_MAP_GRID_SIZE);
+    return Boolean(coordinate && (coordinate.x >= MAP_GRID_SIZE || coordinate.y >= MAP_GRID_SIZE));
+  });
+};
+const getAdjacentMapSectors = (sectorKey: string) => {
+  const coordinate = parseMapSectorKey(sectorKey);
+  if (!coordinate) return [];
+  return [
+    { x: coordinate.x, y: coordinate.y - 1 },
+    { x: coordinate.x + 1, y: coordinate.y },
+    { x: coordinate.x, y: coordinate.y + 1 },
+    { x: coordinate.x - 1, y: coordinate.y },
+  ]
+    .filter(({ x, y }) => x >= 0 && y >= 0 && x < MAP_GRID_SIZE && y < MAP_GRID_SIZE)
+    .map(({ x, y }) => `${x},${y}`)
+    .filter(isMapNodeInRange);
+};
+const ROAD_EDGE_SNAP_DISTANCE = 140;
+const OPPOSITE_MAP_EDGE: Record<MapEdge, MapEdge> = {
+  north: "south",
+  east: "west",
+  south: "north",
+  west: "east",
+};
+const getAdjacentMapSectorForEdge = (sectorKey: string, edge: MapEdge) => {
+  const coordinate = parseMapSectorKey(sectorKey);
+  if (!coordinate) return null;
+  const offset = edge === "north"
+    ? { x: 0, y: -1 }
+    : edge === "east"
+      ? { x: 1, y: 0 }
+      : edge === "south"
+        ? { x: 0, y: 1 }
+        : { x: -1, y: 0 };
+  const adjacent = `${coordinate.x + offset.x},${coordinate.y + offset.y}`;
+  return isMapNodeInRange(adjacent) ? adjacent : null;
+};
+const getRoadEdgePlacement = (
+  position: Position,
+  size: NodeSize,
+  playAreaSize: NodeSize,
+  sectorKey: string,
+  progress: MapNodeProgressBySector,
+) => {
+  const candidates: Array<{ edge: MapEdge; distance: number }> = [
+    { edge: "west", distance: Math.max(0, position.x) },
+    { edge: "east", distance: Math.max(0, playAreaSize.width - position.x - size.width) },
+    { edge: "north", distance: Math.max(0, position.y) },
+    { edge: "south", distance: Math.max(0, playAreaSize.height - position.y - size.height) },
+  ].sort((first, second) => first.distance - second.distance);
+  const candidate = candidates.find(({ edge, distance }) => {
+    if (distance > ROAD_EDGE_SNAP_DISTANCE) return false;
+    const adjacentSector = getAdjacentMapSectorForEdge(sectorKey, edge);
+    return Boolean(adjacentSector && isMapNodeUnlocked(progress, adjacentSector));
+  });
+  if (!candidate) return null;
+  const adjacentSector = getAdjacentMapSectorForEdge(sectorKey, candidate.edge);
+  if (!adjacentSector) return null;
+  const edge = candidate.edge;
+  const snappedPosition = {
+    x: edge === "west"
+      ? 0
+      : edge === "east"
+        ? playAreaSize.width - size.width
+        : Math.max(12, Math.min(playAreaSize.width - size.width - 12, position.x)),
+    y: edge === "north"
+      ? 0
+      : edge === "south"
+        ? playAreaSize.height - size.height
+        : Math.max(12, Math.min(playAreaSize.height - size.height - 12, position.y)),
+  };
+  return { edge, adjacentSector, position: snappedPosition };
+};
+const getPlayAreaWorldSize = (
+  research: Runtime["research"],
+  sectorKey = MAP_HOME_SECTOR,
+) => {
+  const mapNodeValue = getMapNodeValue(sectorKey);
+  const distanceMultiplier = 1 +
+    (MAP_NODE_MAX_SIZE_MULTIPLIER - 1) *
+      (Math.min(MAX_MAP_NODE_VALUE, mapNodeValue) / MAX_MAP_NODE_VALUE);
+  const researchMultiplier = research.areaExpansion1Unlocked
+    ? AREA_EXPANSION_1_MULTIPLIER
+    : 1;
+  const multiplier = distanceMultiplier * researchMultiplier;
+  return {
+    width: Math.round(WORLD_SIZE.width * multiplier),
+    height: Math.round(WORLD_SIZE.height * multiplier),
+  };
+};
+const getMapNodeBlackHoleAreaRatio = (mapNodeValue: number) => {
+  const scalingTier = Math.min(mapNodeValue, MAP_NODE_BLACK_HOLE_MAX_SCALING_TIER);
+  const scalingProgress = Math.max(0, scalingTier - 1) /
+    (MAP_NODE_BLACK_HOLE_MAX_SCALING_TIER - 1);
+  return MAP_NODE_BLACK_HOLE_START_AREA_RATIO +
+    (MAP_NODE_BLACK_HOLE_MAX_AREA_RATIO - MAP_NODE_BLACK_HOLE_START_AREA_RATIO) *
+      scalingProgress;
+};
+const getBlackHoleGenerationLayouts = (
+  playAreaSize: NodeSize,
+  targetBlackHoleArea: number,
+) => {
+  const usableWidth = playAreaSize.width - MAP_OBSTRUCTION_MARGIN * 2;
+  const usableHeight = playAreaSize.height - MAP_OBSTRUCTION_MARGIN * 2;
+  const fieldAspectRatio = usableWidth / usableHeight;
+  return Array.from({ length: 10 }, (_, index) => {
+    const holeCount = index + 1;
+    const rows = Math.max(1, Math.round(Math.sqrt(holeCount / fieldAspectRatio)));
+    const columns = Math.ceil(holeCount / rows);
+    const cellWidth = usableWidth / columns;
+    const cellHeight = usableHeight / rows;
+    const radius = Math.sqrt(targetBlackHoleArea / (Math.PI * holeCount));
+    return { holeCount, rows, columns, cellWidth, cellHeight, radius };
+  }).filter((layout) =>
+    layout.radius * 2 <= Math.min(layout.cellWidth, layout.cellHeight)
+  );
+};
+const MAX_GENERATED_BLACK_HOLE_RADIUS = Math.max(
+  BLACK_HOLE_RADIUS,
+  ...Array.from({ length: MAX_MAP_NODE_VALUE }, (_, index) => {
+    const mapNodeValue = index + 1;
+    const sizeMultiplier = 1 +
+      (MAP_NODE_MAX_SIZE_MULTIPLIER - 1) * (mapNodeValue / MAX_MAP_NODE_VALUE);
+    const playAreaSize = {
+      width: Math.round(WORLD_SIZE.width * sizeMultiplier),
+      height: Math.round(WORLD_SIZE.height * sizeMultiplier),
+    };
+    const targetArea = playAreaSize.width * playAreaSize.height *
+      getMapNodeBlackHoleAreaRatio(mapNodeValue);
+    return Math.max(
+      BLACK_HOLE_RADIUS,
+      ...getBlackHoleGenerationLayouts(playAreaSize, targetArea).map((layout) => layout.radius),
+    );
+  }),
+);
+const getBlackHoleStoneRequirement = (hole: Pick<BlackHoleObstacle, "radius">) => {
+  const sizeProgress = Math.max(0, Math.min(
+    1,
+    (hole.radius - BLACK_HOLE_RADIUS) /
+      (MAX_GENERATED_BLACK_HOLE_RADIUS - BLACK_HOLE_RADIUS),
+  ));
+  return Math.round(
+    BLACK_HOLE_MIN_STONE_REQUIREMENT +
+      (BLACK_HOLE_MAX_STONE_REQUIREMENT - BLACK_HOLE_MIN_STONE_REQUIREMENT) * sizeProgress,
+  );
+};
+const isMapNodeUnlocked = (progress: MapNodeProgressBySector, sectorKey: string) =>
+  isMapNodeInRange(sectorKey) && progress[sectorKey]?.explored === true;
+const canUnlockMapNode = (progress: MapNodeProgressBySector, sectorKey: string) =>
+  Boolean(
+    sectorKey !== MAP_HOME_SECTOR &&
+    isMapNodeInRange(sectorKey) &&
+    !isMapNodeUnlocked(progress, sectorKey) &&
+    getAdjacentMapSectors(sectorKey).some((adjacentKey) => isMapNodeUnlocked(progress, adjacentKey)),
+  );
 const makeInitialMapNodeProgress = (): MapNodeProgressBySector => ({
   [MAP_HOME_SECTOR]: { explored: true, customName: "Home Factory" },
 });
-const normalizeMapNodeProgress = (value: unknown): MapNodeProgressBySector => {
+const normalizeMapNodeProgress = (
+  value: unknown,
+  migrateLegacyCoordinates = false,
+): MapNodeProgressBySector => {
   const normalized = makeInitialMapNodeProgress();
   if (!value || typeof value !== "object") return normalized;
   Object.entries(value).forEach(([sectorKey, rawProgress]) => {
+    const normalizedSectorKey = normalizeStoredMapSectorKey(
+      sectorKey,
+      migrateLegacyCoordinates,
+    );
+    if (!normalizedSectorKey) return;
     if (!rawProgress || typeof rawProgress !== "object") return;
     const progress = rawProgress as Partial<MapNodeProgress>;
     const customName = typeof progress.customName === "string"
       ? progress.customName.trim().slice(0, 80)
       : null;
-    normalized[sectorKey] = {
-      explored: Boolean(progress.explored),
-      customName: customName || null,
+    normalized[normalizedSectorKey] = {
+      explored: normalizedSectorKey === MAP_HOME_SECTOR || Boolean(progress.explored),
+      customName: customName || (normalizedSectorKey === MAP_HOME_SECTOR ? "Home Factory" : null),
     };
   });
   return normalized;
@@ -1033,13 +1634,14 @@ const normalizeMapNodeProgress = (value: unknown): MapNodeProgressBySector => {
 const TREE_PLANTER_CYCLE_DURATION = 1000;
 const TREE_PLANTER_POWER_COST = 5;
 const INVENTORY_SOURCE_CYCLE_DURATION = 4000;
-const EXTRACTOR_RESEARCH_CYCLE_MULTIPLIER = 0.9;
-const POWER_COSTS: Partial<Record<ProcessorKind, number>> = {
-  wireMill: 20,
-  circuitAConduit: 30,
-  motorFactory: 30,
-  automataCoreAssembler: 50,
-};
+const EXTRACTOR_1_CYCLE_MULTIPLIER = 0.9;
+const EXTRACTOR_2_CYCLE_MULTIPLIER = 0.8;
+const getExtractorResearchCycleMultiplier = (research: Runtime["research"]) =>
+  research.extractor3Unlocked
+    ? EXTRACTOR_2_CYCLE_MULTIPLIER
+    : research.extractor2Unlocked
+      ? EXTRACTOR_1_CYCLE_MULTIPLIER
+      : 1;
 
 type ProcessorRecipe = {
   title: string;
@@ -1079,73 +1681,18 @@ const PROCESSOR_RECIPES: Record<ProcessorKind, ProcessorRecipe> = {
     summary: "1 Metal + 1 Charcoal",
     activeLabel: "Smelting plate",
   },
-  gearPress: {
-    title: "Gear Press",
-    eyebrow: "PRESS",
-    color: RESOURCE_COLORS.IRON_GEAR,
-    icon: Cog,
-    inputs: [
-      { id: "plate-a-in", label: "Plate A", type: ResourceType.PLATE, amount: 1 },
-      { id: "plate-b-in", label: "Plate B", type: ResourceType.PLATE, amount: 1 },
-    ],
-    output: { id: "gear-out", label: "Gear", type: ResourceType.GEAR },
-    duration: 4500,
-    summary: "2 matching Plates → 1 Gear",
-    activeLabel: "Pressing gear",
-  },
-  wireMill: {
-    title: "Wire Mill",
-    eyebrow: "MILL",
-    color: RESOURCE_COLORS.WIRE,
-    icon: Cable,
-    inputs: [
-      { id: "wire-plate-in", label: "Plate", type: ResourceType.PLATE, amount: 1 },
-    ],
-    output: { id: "wire-out", label: "Wire", type: ResourceType.WIRE },
-    duration: 3200,
-    summary: "1 Plate → 1 Wire",
-    activeLabel: "Drawing wire",
-  },
-  motorFactory: {
-    title: "Motor Factory",
-    eyebrow: "ASSEMBLER",
-    color: RESOURCE_COLORS.MOTOR,
-    icon: Factory,
-    inputs: [
-      { id: "motor-gear-in", label: "Iron Gears", type: ResourceType.IRON_GEAR, amount: 2 },
-      { id: "motor-wire-in", label: "Copper Wire", type: ResourceType.COPPER_WIRE, amount: 4 },
-    ],
-    output: { id: "motor-out", label: "Motor", type: ResourceType.MOTOR },
-    duration: 6500,
-    summary: "2 Iron Gears + 4 Copper Wire → 1 Motor",
-    activeLabel: "Assembling motor",
-  },
-  circuitAConduit: {
-    title: "Circuit A Conduit",
-    eyebrow: "ELECTRONICS",
-    color: RESOURCE_COLORS.CIRCUIT_A,
-    icon: CircuitBoard,
-    inputs: [
-      { id: "circuit-wire-in", label: "Copper Wire", type: ResourceType.COPPER_WIRE, amount: 2 },
-      { id: "circuit-plate-in", label: "Iron Plate", type: ResourceType.IRON_PLATE, amount: 1 },
-    ],
-    output: { id: "circuit-a-out", label: "Circuit A", type: ResourceType.CIRCUIT_A },
-    duration: 5000,
-    summary: "2 Copper Wire + 1 Iron Plate → 1 Circuit A",
-    activeLabel: "Etching Circuit A",
-  },
   automataCoreAssembler: {
     title: "Automata Core Assembler",
     eyebrow: "CORE ASSEMBLY",
     color: RESOURCE_COLORS.AUTOMATA_CORE,
     icon: Atom,
     inputs: [
-      { id: "core-motor-in", label: "Motor", type: ResourceType.MOTOR, amount: 1 },
-      { id: "core-circuit-in", label: "Circuit A", type: ResourceType.CIRCUIT_A, amount: 2 },
+      { id: "core-circuit-in", label: "Circuit A", type: ResourceType.CIRCUIT_A, amount: 1 },
+      { id: "core-plate-in", label: "Brick", type: ResourceType.BRICK, amount: 1 },
     ],
     output: { id: "automata-core-out", label: "Automata Core", type: ResourceType.AUTOMATA_CORE },
     duration: 8500,
-    summary: "1 Motor + 2 Circuit A → 1 Automata Core",
+    summary: "1 Circuit A + 1 Brick → 1 Automata Core",
     activeLabel: "Synchronizing core",
   },
   refiner: {
@@ -1179,60 +1726,294 @@ const PROCESSOR_RECIPES: Record<ProcessorKind, ProcessorRecipe> = {
 
 const REFINER_RECIPES: Record<RefinerRecipeId, ProcessorRecipe> = {
   gear: {
-    ...PROCESSOR_RECIPES.gearPress,
     title: "Gear",
     eyebrow: "REFINER RECIPE",
+    color: RESOURCE_COLORS.IRON_GEAR,
+    icon: Cog,
     inputs: [
       { id: "refiner-in", label: "Metal Plate", type: ResourceType.PLATE, amount: 1 },
     ],
     output: { id: "refiner-out", label: "Gear", type: ResourceType.GEAR },
+    duration: 3000,
     summary: "1 Metal Plate → 1 Gear",
+    activeLabel: "Refining gear",
   },
   wire: {
-    ...PROCESSOR_RECIPES.wireMill,
     title: "Wire",
     eyebrow: "REFINER RECIPE",
+    color: RESOURCE_COLORS.WIRE,
+    icon: Cable,
     inputs: [
       { id: "refiner-in", label: "Metal Plate", type: ResourceType.PLATE, amount: 1 },
     ],
     output: { id: "refiner-out", label: "Wire", type: ResourceType.WIRE },
+    duration: 3000,
     summary: "1 Metal Plate → 1 Wire",
+    activeLabel: "Refining wire",
+  },
+  brick: {
+    title: "Brick",
+    eyebrow: "REFINER RECIPE",
+    color: RESOURCE_COLORS.BRICK,
+    icon: BrickWall,
+    inputs: [
+      { id: "refiner-in", label: "Stone", type: ResourceType.STONE, amount: 1 },
+    ],
+    output: { id: "refiner-out", label: "Brick", type: ResourceType.BRICK },
+    duration: 4000,
+    summary: "1 Stone → 1 Brick",
+    activeLabel: "Firing brick",
   },
 };
 
 const ASSEMBLER_RECIPES: Record<AssemblerRecipeId, ProcessorRecipe> = {
   motor: {
-    ...PROCESSOR_RECIPES.motorFactory,
     title: "Motor",
     eyebrow: "ASSEMBLER RECIPE",
+    color: RESOURCE_COLORS.MOTOR,
+    icon: Factory,
     inputs: [
-      { id: "assembler-a-in", label: "Iron Plates", type: ResourceType.IRON_PLATE, amount: 2 },
-      { id: "assembler-b-in", label: "Iron Gear", type: ResourceType.IRON_GEAR, amount: 1 },
+      { id: "assembler-a-in", label: "Iron Gear", type: ResourceType.IRON_GEAR, amount: 1 },
+      { id: "assembler-b-in", label: "Copper Wire", type: ResourceType.COPPER_WIRE, amount: 1 },
     ],
     output: { id: "assembler-out", label: "Motor", type: ResourceType.MOTOR },
-    summary: "2 Iron Plates + 1 Iron Gear → 1 Motor",
+    duration: 6500,
+    summary: "1 Iron Gear + 1 Copper Wire → 1 Motor",
+    activeLabel: "Assembling motor",
   },
   circuitA: {
-    ...PROCESSOR_RECIPES.circuitAConduit,
     title: "Circuit A",
     eyebrow: "ASSEMBLER RECIPE",
+    color: RESOURCE_COLORS.CIRCUIT_A,
+    icon: CircuitBoard,
     inputs: [
-      { id: "assembler-a-in", label: "Copper Wire", type: ResourceType.COPPER_WIRE, amount: 2 },
+      { id: "assembler-a-in", label: "Copper Wire", type: ResourceType.COPPER_WIRE, amount: 1 },
       { id: "assembler-b-in", label: "Iron Plate", type: ResourceType.IRON_PLATE, amount: 1 },
     ],
     output: { id: "assembler-out", label: "Circuit A", type: ResourceType.CIRCUIT_A },
+    duration: 5000,
+    summary: "1 Copper Wire + 1 Iron Plate → 1 Circuit A",
+    activeLabel: "Etching Circuit A",
+  },
+  basicCore: {
+    title: "Basic Core",
+    eyebrow: "ASSEMBLER RECIPE",
+    color: RESOURCE_COLORS.BASIC_CORE,
+    icon: Atom,
+    inputs: [
+      { id: "assembler-a-in", label: "Copper Plate", type: ResourceType.COPPER_PLATE, amount: 1 },
+      { id: "assembler-b-in", label: "Iron Wire", type: ResourceType.IRON_WIRE, amount: 1 },
+    ],
+    output: { id: "assembler-out", label: "Basic Core", type: ResourceType.BASIC_CORE },
+    duration: 6000,
+    summary: "1 Copper Plate + 1 Iron Wire → 1 Basic Core",
+    activeLabel: "Assembling basic core",
+  },
+  automataCore: {
+    ...PROCESSOR_RECIPES.automataCoreAssembler,
+    title: "Automata Core",
+    eyebrow: "ASSEMBLER RECIPE",
+    inputs: [
+      { id: "assembler-a-in", label: "Circuit A", type: ResourceType.CIRCUIT_A, amount: 1 },
+      { id: "assembler-b-in", label: "Brick", type: ResourceType.BRICK, amount: 1 },
+    ],
+    output: { id: "assembler-out", label: "Automata Core", type: ResourceType.AUTOMATA_CORE },
+    summary: "1 Circuit A + 1 Brick → 1 Automata Core",
   },
 };
 
 const ASSEMBLER_RECIPE_OPTIONS: Array<{ id: AssemblerRecipeId; label: string }> = [
   { id: "motor", label: "Motor" },
   { id: "circuitA", label: "Circuit A" },
+  { id: "basicCore", label: "Basic Core" },
+  { id: "automataCore", label: "Automata Core" },
 ];
 
 const REFINER_RECIPE_OPTIONS: Array<{ id: RefinerRecipeId; label: string }> = [
   { id: "gear", label: "Gear" },
   { id: "wire", label: "Wire" },
+  { id: "brick", label: "Brick" },
 ];
+
+type RecipeGuideEntry = {
+  id: string;
+  title: string;
+  node: string;
+  icon: NodeSpec["icon"];
+  color: string;
+  inputs: Array<{ type: ResourceType; label: string; amount: string }>;
+  output: { type: ResourceType; label: string; amount: string };
+  duration?: number;
+  summary: string;
+};
+
+const makeProcessorRecipeGuideEntry = (
+  id: string,
+  node: string,
+  recipe: ProcessorRecipe,
+): RecipeGuideEntry => ({
+  id,
+  title: recipe.title,
+  node,
+  icon: recipe.icon,
+  color: recipe.color,
+  inputs: recipe.inputs.map((input) => ({
+    type: input.type,
+    label: input.label,
+    amount: `${input.amount}×`,
+  })),
+  output: {
+    type: recipe.output.type,
+    label: recipe.output.label,
+    amount: "1×",
+  },
+  duration: recipe.duration,
+  summary: recipe.summary,
+});
+
+const makeConcreteMaterialRecipeGuideEntry = (
+  id: string,
+  node: string,
+  recipe: ProcessorRecipe,
+  materialType: ResourceType,
+  outputType: ResourceType,
+): RecipeGuideEntry => {
+  const materialLabel = formatResourceType(materialType);
+  const outputLabel = formatResourceType(outputType);
+  const inputs = recipe.inputs.map((input, index) => ({
+    type: index === 0 ? materialType : input.type,
+    label: index === 0 ? materialLabel : input.label,
+    amount: `${input.amount}×`,
+  }));
+  return {
+    id,
+    title: outputLabel,
+    node,
+    icon: recipe.icon,
+    color: RESOURCE_COLORS[outputType],
+    inputs,
+    output: { type: outputType, label: outputLabel, amount: "1×" },
+    duration: recipe.duration,
+    summary: `${inputs.map((input) => `${input.amount.replace("×", "")} ${input.label}`).join(" + ")} → 1 ${outputLabel}`,
+  };
+};
+
+const RECIPE_GUIDE_ENTRIES: RecipeGuideEntry[] = [
+  ...Object.entries(EXTRACTOR_RECIPES).flatMap(([inputType, recipe]) => recipe ? [{
+    id: `extractor-${inputType.toLowerCase()}`,
+    title: recipe.label,
+    node: "Extractor",
+    icon: Pickaxe,
+    color: RESOURCE_COLORS[recipe.product],
+    inputs: [{
+      type: inputType as ResourceType,
+      label: formatResourceType(inputType as ResourceType),
+      amount: "1×",
+    }],
+    output: { type: recipe.product, label: recipe.label, amount: "1×" },
+    duration: recipe.duration,
+    summary: `1 ${formatResourceType(inputType as ResourceType)} → 1 ${recipe.label}`,
+  }] : []),
+  makeProcessorRecipeGuideEntry("kiln-charcoal", "Kiln", PROCESSOR_RECIPES.kiln),
+  makeConcreteMaterialRecipeGuideEntry(
+    "furnace-iron-plate",
+    "Furnace",
+    PROCESSOR_RECIPES.furnace,
+    ResourceType.IRON,
+    ResourceType.IRON_PLATE,
+  ),
+  makeConcreteMaterialRecipeGuideEntry(
+    "furnace-copper-plate",
+    "Furnace",
+    PROCESSOR_RECIPES.furnace,
+    ResourceType.COPPER,
+    ResourceType.COPPER_PLATE,
+  ),
+  makeConcreteMaterialRecipeGuideEntry(
+    "refiner-iron-gear",
+    "Refiner",
+    REFINER_RECIPES.gear,
+    ResourceType.IRON_PLATE,
+    ResourceType.IRON_GEAR,
+  ),
+  makeConcreteMaterialRecipeGuideEntry(
+    "refiner-copper-gear",
+    "Refiner",
+    REFINER_RECIPES.gear,
+    ResourceType.COPPER_PLATE,
+    ResourceType.COPPER_GEAR,
+  ),
+  makeConcreteMaterialRecipeGuideEntry(
+    "refiner-iron-wire",
+    "Refiner",
+    REFINER_RECIPES.wire,
+    ResourceType.IRON_PLATE,
+    ResourceType.IRON_WIRE,
+  ),
+  makeConcreteMaterialRecipeGuideEntry(
+    "refiner-copper-wire",
+    "Refiner",
+    REFINER_RECIPES.wire,
+    ResourceType.COPPER_PLATE,
+    ResourceType.COPPER_WIRE,
+  ),
+  makeProcessorRecipeGuideEntry("refiner-brick", "Refiner", REFINER_RECIPES.brick),
+  ...Object.entries(ASSEMBLER_RECIPES).map(([id, recipe]) =>
+    makeProcessorRecipeGuideEntry(`assembler-${id}`, "Assembler", recipe),
+  ),
+  {
+    id: "generator-power",
+    title: "Power",
+    node: "Charcoal Generator",
+    icon: Zap,
+    color: RESOURCE_COLORS.POWER,
+    inputs: [{ type: ResourceType.CHARCOAL, label: "Charcoal", amount: "1×" }],
+    output: { type: ResourceType.POWER, label: "Power", amount: `${POWER_PER_CHARCOAL}W` },
+    summary: `1 Charcoal → ${POWER_PER_CHARCOAL}W Power`,
+  },
+  ...([ResourceType.BASIC_CORE, ResourceType.AUTOMATA_CORE] as const).map((coreType) => ({
+    id: `research-center-${coreType.toLowerCase()}`,
+    title: `${formatResourceType(coreType)} Research`,
+    node: "Research Center",
+    icon: FlaskConical,
+    color: RESOURCE_COLORS[coreType],
+    inputs: [{ type: coreType, label: formatResourceType(coreType), amount: "1×" }],
+    output: { type: coreType, label: "Research Progress", amount: "1×" },
+    duration: RESEARCH_CYCLE_DURATION,
+    summary: `1 ${formatResourceType(coreType)} → 1 Research Progress`,
+  })),
+  {
+    id: "tree-planter-forest",
+    title: "Forest Capacity",
+    node: "Tree Planter",
+    icon: Sprout,
+    color: RESOURCE_COLORS.FOREST_GROWTH,
+    inputs: [{ type: ResourceType.POWER, label: "Power", amount: `${TREE_PLANTER_POWER_COST}W` }],
+    output: { type: ResourceType.FOREST_GROWTH, label: "Forest Capacity", amount: "+1" },
+    duration: TREE_PLANTER_CYCLE_DURATION,
+    summary: `${TREE_PLANTER_POWER_COST}W Power → +1 Forest Capacity`,
+  },
+  {
+    id: "mining-drill-deposit",
+    title: "Selected Ore Deposit",
+    node: "Mining Drill",
+    icon: MiningDrillIcon,
+    color: "#d6a44f",
+    inputs: [{ type: ResourceType.MOTOR, label: "Motor", amount: String(MINING_DRILL_ITERATIONS) }],
+    output: { type: ResourceType.RESOURCE, label: "Selected Ore Deposit", amount: `${MINED_DEPOSIT_CAPACITY.toLocaleString()}-unit` },
+    summary: `${MINING_DRILL_ITERATIONS} Motors → ${MINED_DEPOSIT_CAPACITY.toLocaleString()}-unit deposit`,
+  },
+];
+
+const RECIPE_GUIDE_GROUPS = Array.from(
+  RECIPE_GUIDE_ENTRIES.reduce((groups, recipe) => {
+    const existing = groups.get(recipe.node);
+    if (existing) existing.push(recipe);
+    else groups.set(recipe.node, [recipe]);
+    return groups;
+  }, new Map<string, RecipeGuideEntry[]>()),
+  ([node, recipes]) => ({ node, recipes }),
+);
 
 const getRecipeIngredientTotals = (recipe: ProcessorRecipe) => Array.from(
   recipe.inputs.reduce((ingredients, input) => {
@@ -1247,10 +2028,13 @@ const getRecipeIngredientTotals = (recipe: ProcessorRecipe) => Array.from(
 );
 
 const isAssemblerRecipeId = (value: unknown): value is AssemblerRecipeId =>
-  value === "motor" || value === "circuitA";
+  value === "motor" ||
+  value === "circuitA" ||
+  value === "basicCore" ||
+  value === "automataCore";
 
 const isRefinerRecipeId = (value: unknown): value is RefinerRecipeId =>
-  value === "gear" || value === "wire";
+  value === "gear" || value === "wire" || value === "brick";
 
 const getProcessorRecipe = (
   kind: ProcessorKind,
@@ -1267,11 +2051,7 @@ const getProcessorRecipe = (
 
 const isProcessorKind = (kind: NodeKind): kind is ProcessorKind =>
   kind === "furnace" ||
-  kind === "gearPress" ||
   kind === "kiln" ||
-  kind === "wireMill" ||
-  kind === "motorFactory" ||
-  kind === "circuitAConduit" ||
   kind === "automataCoreAssembler" ||
   kind === "refiner" ||
   kind === "assembler";
@@ -1286,6 +2066,7 @@ const isPurchasableKind = (kind: NodeKind): kind is PurchasableKind =>
   kind === "splitter" ||
   kind === "merger" ||
   kind === "joint" ||
+  kind === "road" ||
   kind === "inventorySource" ||
   kind === "filter" ||
   kind === "storage" ||
@@ -1301,17 +2082,27 @@ const isNodeKind = (value: unknown): value is NodeKind =>
     isPurchasableKind(value as NodeKind)
   );
 
+const isRetiredProductionNodeKind = (
+  value: unknown,
+): value is RetiredProductionNodeKind =>
+  value === "gearPress" ||
+  value === "wireMill" ||
+  value === "motorFactory" ||
+  value === "circuitAConduit";
+
 const getNodeIcon = (kind: NodeKind): NodeSpec["icon"] => {
   if (kind === "ironOre" || kind === "copperOre") return Gem;
   if (kind === "stone") return Mountain;
   if (kind === "forest") return TreePine;
-  if (kind === "extractor" || kind === "miningDrill") return Pickaxe;
+  if (kind === "extractor") return Pickaxe;
+  if (kind === "miningDrill") return MiningDrillIcon;
   if (kind === "generator" || kind === "powerSplitter") return Zap;
   if (kind === "researchFoundry") return FlaskConical;
   if (kind === "treePlanter") return Sprout;
   if (kind === "splitter") return Split;
   if (kind === "merger") return GitMerge;
   if (kind === "joint") return Cable;
+  if (kind === "road") return RoadIcon;
   if (kind === "filter") return FilterIcon;
   if (kind === "woodenChest") return Archive;
   if (kind === "inventorySource" || kind === "storage") return PackageOpen;
@@ -1331,7 +2122,15 @@ const serializeNode = ({ id, kind, title, eyebrow, color, inputs, outputs }: Nod
 });
 const hydrateNode = (node: SerializedNode): NodeSpec => ({
   ...node,
+  title: node.kind === "researchFoundry" ? "Research Center" : node.title,
   icon: getNodeIcon(node.kind),
+  inputs: node.kind === "researchFoundry"
+    ? [{ id: "research-core-in", label: "All Cores", type: ResourceType.CORE, direction: "input" }]
+    : node.kind === "miningDrill"
+    ? [{ id: "motor-in", label: "Motor", type: ResourceType.MOTOR, direction: "input" }]
+    : isProcessorKind(node.kind)
+      ? node.inputs.filter((port) => port.id !== "power-in")
+      : node.inputs,
   outputs: node.kind === "woodenChest"
     ? [{
         id: "chest-out",
@@ -1341,6 +2140,230 @@ const hydrateNode = (node: SerializedNode): NodeSpec => ({
       }]
     : node.outputs,
 });
+
+type TierTwoObstruction = "lake" | "blackHoles";
+
+const makeRemoteMapFactoryState = (
+  globalRuntime: Runtime,
+  zoom: number,
+  sectorKey: string,
+  tierTwoObstruction?: TierTwoObstruction,
+): MapFactoryState => {
+  const runtime = makeRuntime();
+  runtime.extractors = {};
+  runtime.processors = {};
+  runtime.generators = {};
+  runtime.researchFoundries = {};
+  runtime.treePlanters = {};
+  runtime.miningDrills = {};
+  runtime.minedDeposits = {};
+  runtime.splitters = {};
+  runtime.joints = {};
+  runtime.roads = {};
+  runtime.inventorySources = {};
+  runtime.filters = {};
+  runtime.woodenChests = {};
+  runtime.storages = {};
+  runtime.pausedOutputs = {};
+  runtime.construction = {};
+  runtime.research = {
+    ...globalRuntime.research,
+    progress: { ...globalRuntime.research.progress },
+  };
+  runtime.mapPoints = globalRuntime.mapPoints;
+  runtime.produced = { ...globalRuntime.produced };
+  const mapNodeValue = getMapNodeValue(sectorKey);
+  const resourceMultiplier = Math.min(
+    1,
+    MAP_NODE_MIN_RESOURCE_MULTIPLIER +
+      mapNodeValue * MAP_NODE_RESOURCE_MULTIPLIER_PER_VALUE,
+  );
+  runtime.ironOre.remaining = Math.round(RESOURCE_CAPACITIES.ironOre * resourceMultiplier);
+  runtime.copperOre.remaining = Math.round(RESOURCE_CAPACITIES.copperOre * resourceMultiplier);
+  runtime.stone.remaining = Math.round(RESOURCE_CAPACITIES.stone * resourceMultiplier);
+  runtime.forest.remaining = Math.round(RESOURCE_CAPACITIES.forest * resourceMultiplier);
+  const resourceNodes = INITIAL_NODES.filter((node) => isResourceNodeKind(node.kind));
+  const playAreaSize = getPlayAreaWorldSize(globalRuntime.research, sectorKey);
+  const mapMargin = MAP_OBSTRUCTION_MARGIN;
+  const holes: BlackHoleObstacle[] = [];
+  const lakes: LakeObstacle[] = [];
+
+  if (mapNodeValue === 2 && tierTwoObstruction === "lake") {
+    const lakeAreaRatio = 0.15 + Math.random() * 0.1;
+    const lake = createLakeObstacle(
+      playAreaSize,
+      lakeAreaRatio,
+      mapMargin,
+      `lake-${sectorKey.replace(",", "-")}`,
+    );
+    lakes.push(lake);
+  } else if (mapNodeValue > 0) {
+    const playArea = playAreaSize.width * playAreaSize.height;
+    const targetBlackHoleAreaRatio = getMapNodeBlackHoleAreaRatio(mapNodeValue);
+    const otherObstructionArea = lakes.reduce(
+      (total, lake) => total + getLakeObstacleArea(lake),
+      0,
+    );
+    const targetBlackHoleArea = Math.max(
+      0,
+      Math.min(
+        playArea * targetBlackHoleAreaRatio,
+        playArea * MAP_NODE_MAX_OBSTRUCTION_AREA_RATIO - otherObstructionArea,
+      ),
+    );
+
+    if (targetBlackHoleArea > 0) {
+      const fittingLayouts = getBlackHoleGenerationLayouts(playAreaSize, targetBlackHoleArea);
+      const layout = fittingLayouts[Math.floor(Math.random() * fittingLayouts.length)] ??
+        fittingLayouts[fittingLayouts.length - 1];
+
+      if (layout) {
+        const { holeCount, rows, columns, cellWidth, cellHeight, radius } = layout;
+        const cells = Array.from({ length: rows * columns }, (_, index) => ({
+          column: index % columns,
+          row: Math.floor(index / columns),
+        })).sort(() => Math.random() - 0.5).slice(0, holeCount);
+        const minimumCenterDistance = radius * BLACK_HOLE_GENERATION_CENTER_SPACING;
+        const maximumCellJitterX = Math.max(0, Math.min(
+          cellWidth / 2 - radius,
+          (cellWidth - minimumCenterDistance) / 2,
+        ));
+        const maximumCellJitterY = Math.max(0, Math.min(
+          cellHeight / 2 - radius,
+          (cellHeight - minimumCenterDistance) / 2,
+        ));
+        const centers = cells.map((cell) => ({
+          x: mapMargin + cellWidth * (cell.column + 0.5) +
+            (Math.random() * 2 - 1) * maximumCellJitterX,
+          y: mapMargin + cellHeight * (cell.row + 0.5) +
+            (Math.random() * 2 - 1) * maximumCellJitterY,
+        }));
+        const minimumX = mapMargin + radius;
+        const maximumX = playAreaSize.width - mapMargin - radius;
+        const minimumY = mapMargin + radius;
+        const maximumY = playAreaSize.height - mapMargin - radius;
+
+        for (let pass = 0; pass < BLACK_HOLE_GENERATION_RANDOMIZATION_PASSES; pass += 1) {
+          const randomizedIndexes = centers.map((_, index) => index).sort(() => Math.random() - 0.5);
+          randomizedIndexes.forEach((centerIndex) => {
+            for (
+              let attempt = 0;
+              attempt < BLACK_HOLE_GENERATION_RANDOMIZATION_ATTEMPTS;
+              attempt += 1
+            ) {
+              const candidate = {
+                x: minimumX + Math.random() * Math.max(0, maximumX - minimumX),
+                y: minimumY + Math.random() * Math.max(0, maximumY - minimumY),
+              };
+              const fits = centers.every((center, otherIndex) =>
+                otherIndex === centerIndex ||
+                Math.hypot(candidate.x - center.x, candidate.y - center.y) >= minimumCenterDistance
+              );
+              if (!fits) continue;
+              centers[centerIndex] = candidate;
+              break;
+            }
+          });
+        }
+
+        centers.forEach((center, index) => {
+          holes.push(createBlackHoleObstacle(
+            center,
+            radius,
+            `black-hole-${sectorKey.replace(",", "-")}-${index + 1}`,
+          ));
+        });
+      }
+    }
+  }
+  runtime.blackHoles = Object.fromEntries(holes.map((hole) => [hole.id, hole]));
+  runtime.lakes = Object.fromEntries(lakes.map((lake) => [lake.id, lake]));
+
+  const resourcePositions: Positions = (() => {
+    const positions: Positions = {};
+    const occupied: Array<Position & NodeSize> = [];
+    resourceNodes.forEach((node, index) => {
+      let position: Position | null = null;
+      for (let attempt = 0; attempt < 300 && !position; attempt += 1) {
+        const candidate = {
+          x: mapMargin + Math.random() * Math.max(
+            0,
+            playAreaSize.width - RESOURCE_NODE_SIZE.width - mapMargin * 2,
+          ),
+          y: mapMargin + Math.random() * Math.max(
+            0,
+            playAreaSize.height - RESOURCE_NODE_SIZE.height - mapMargin * 2,
+          ),
+        };
+        const candidateRect = { ...candidate, ...RESOURCE_NODE_SIZE };
+        const intersectsObstruction = holes.some((hole) =>
+          rectangleIntersectsBlackHole(candidateRect, hole, NODE_CLEARANCE * 2)
+        ) || lakes.some((lake) =>
+          rectangleIntersectsLake(candidateRect, lake, NODE_CLEARANCE * 2)
+        );
+        if (
+          !intersectsObstruction &&
+          !occupied.some((rectangle) => rectanglesOverlap(candidateRect, rectangle))
+        ) {
+          position = candidate;
+          occupied.push(candidateRect);
+        }
+      }
+      const fallback = position ?? {
+        x: mapMargin + (index % 2) * (RESOURCE_NODE_SIZE.width + NODE_CLEARANCE * 3),
+        y: mapMargin + Math.floor(index / 2) * (RESOURCE_NODE_SIZE.height + NODE_CLEARANCE * 3),
+      };
+      positions[node.id] = fallback;
+    });
+    return positions;
+  })();
+
+  return {
+    nodes: resourceNodes.map(serializeNode),
+    positions: resourcePositions,
+    connections: [],
+    runtime,
+    controlGroups: [],
+    buildSequence: makeBuildSequence(),
+    zoom,
+    viewport: { scrollLeft: 0, scrollTop: 0 },
+    lastSimulatedAt: Date.now(),
+    producedBaseline: { ...globalRuntime.produced },
+  };
+};
+
+const generateMapFactoriesAtGameStart = (
+  globalRuntime: Runtime,
+  zoom: number,
+): MapFactoriesBySector => {
+  const sectorKeys = Array.from({ length: MAP_GRID_SIZE * MAP_GRID_SIZE }, (_, index) => {
+    const x = index % MAP_GRID_SIZE;
+    const y = Math.floor(index / MAP_GRID_SIZE);
+    return `${x},${y}`;
+  }).filter((sectorKey) => sectorKey !== MAP_HOME_SECTOR && isMapNodeInRange(sectorKey));
+  const tierTwoSectors = sectorKeys
+    .filter((sectorKey) => getMapNodeValue(sectorKey) === 2)
+    .sort(() => Math.random() - 0.5);
+  const minimumLakeCount = Math.ceil(tierTwoSectors.length * 0.6);
+  const lakeCount = tierTwoSectors.length > minimumLakeCount
+    ? minimumLakeCount + Math.floor(Math.random() * (tierTwoSectors.length - minimumLakeCount))
+    : minimumLakeCount;
+  const lakeSectors = new Set(tierTwoSectors.slice(0, lakeCount));
+
+  return Object.fromEntries(sectorKeys.map((sectorKey) => {
+    const mapNodeValue = getMapNodeValue(sectorKey);
+    const tierTwoObstruction = mapNodeValue === 2
+      ? lakeSectors.has(sectorKey) ? "lake" as const : "blackHoles" as const
+      : undefined;
+    return sectorKey === MAP_HOME_SECTOR || !isMapNodeInRange(sectorKey)
+      ? null
+      : [
+          sectorKey,
+          makeRemoteMapFactoryState(globalRuntime, zoom, sectorKey, tierTwoObstruction),
+        ] as const;
+  }).filter((entry): entry is readonly [string, MapFactoryState] => entry !== null),
+  );
+};
 
 const isSaveGameSlot = (value: unknown): value is SaveGameSlot => {
   if (!value || typeof value !== "object") return false;
@@ -1354,8 +2377,11 @@ const isSaveGameSlot = (value: unknown): value is SaveGameSlot => {
     data.nodes.every((node) =>
       Boolean(node) &&
       typeof node === "object" &&
-      typeof (node as SerializedNode).id === "string" &&
-      isNodeKind((node as SerializedNode).kind),
+      typeof (node as SaveSerializedNode).id === "string" &&
+      (
+        isNodeKind((node as SaveSerializedNode).kind) ||
+        isRetiredProductionNodeKind((node as SaveSerializedNode).kind)
+      ),
     ) &&
     Boolean(data.positions) &&
     Array.isArray(data.connections) &&
@@ -1372,12 +2398,30 @@ const formatSaveDate = (savedAt: string) => {
   }).format(date);
 };
 
+const formatTemporarySaveName = (value: Date | string = new Date()) => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "Temporary Save";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+};
+
+const formatTemporarySaveFrequency = (minutes: number) =>
+  minutes >= 60 ? "1h" : `${minutes}m`;
+
+const describeTemporarySaveFrequency = (minutes: number) =>
+  minutes === 1
+    ? "Every minute"
+    : minutes >= 60
+      ? "Once an hour"
+      : `Every ${minutes} minutes`;
+
 const isDestroyableNode = (node: NodeSpec) =>
   isPurchasableKind(node.kind) && node.id !== "storage";
 
 const isSplitterNode = (nodeId: NodeId) => nodeId.startsWith("splitter-");
 const isMergerNode = (nodeId: NodeId) => nodeId.startsWith("merger-");
 const isJointNode = (nodeId: NodeId) => nodeId.startsWith("joint-");
+const isRoadNode = (nodeId: NodeId) => nodeId.startsWith("road-");
 const isGeneratorNode = (nodeId: NodeId) => nodeId.startsWith("generator-");
 const isPowerSplitterNode = (nodeId: NodeId) => nodeId.startsWith("powerSplitter-");
 const findPowerGeneratorId = (
@@ -1405,6 +2449,7 @@ const findPowerGeneratorId = (
 };
 const isMultiOutputPort = (nodeId: NodeId, portId: string) =>
   (isGeneratorNode(nodeId) && portId === "power-out") ||
+  (nodeId.startsWith("lake-") && Boolean(getLakeWaterOutputPort(portId))) ||
   (nodeId.startsWith("inventorySource-") && portId === "inventory-out") ||
   (nodeId === "ironOre" && portId === "ore-out") ||
   (nodeId === "copperOre" && portId === "copper-ore-out") ||
@@ -1414,10 +2459,9 @@ const isMultiOutputPort = (nodeId: NodeId, portId: string) =>
   )) ||
   (nodeId === "forest" && portId === "forest-out");
 const isMultiInputPort = (nodeId: NodeId, portId: string) =>
-  (nodeId === "storage" || nodeId.startsWith("storage-")) && portId === "storage-in";
+  ((nodeId === "storage" || nodeId.startsWith("storage-")) && portId === "storage-in") ||
+  (nodeId.startsWith("researchFoundry-") && portId === "research-core-in");
 const isFurnaceNode = (nodeId: NodeId) => nodeId.startsWith("furnace-");
-const isGearPressNode = (nodeId: NodeId) => nodeId.startsWith("gearPress-");
-const isWireMillNode = (nodeId: NodeId) => nodeId.startsWith("wireMill-");
 const isAssemblerNode = (nodeId: NodeId) => nodeId.startsWith("assembler-");
 const isRefinerNode = (nodeId: NodeId) => nodeId.startsWith("refiner-");
 const isSmartProcessorTypingPort = (
@@ -1426,8 +2470,6 @@ const isSmartProcessorTypingPort = (
   processor?: Runtime["processors"][NodeId] | null,
 ) =>
   (isFurnaceNode(nodeId) && portId === "metal-in") ||
-  (isGearPressNode(nodeId) && (portId === "plate-a-in" || portId === "plate-b-in")) ||
-  (isWireMillNode(nodeId) && portId === "wire-plate-in") ||
   (isRefinerNode(nodeId) &&
     (processor?.refinerRecipe === "gear" || processor?.refinerRecipe === "wire") &&
     portId === "refiner-in");
@@ -1438,15 +2480,11 @@ const getSmartProcessorOutputPortId = (
 ) =>
   isFurnaceNode(nodeId)
     ? "plate-out"
-    : isGearPressNode(nodeId)
-      ? "gear-out"
-      : isWireMillNode(nodeId)
-        ? "wire-out"
-        : isRefinerNode(nodeId) && (
-          processor?.refinerRecipe === "gear" || processor?.refinerRecipe === "wire"
-        )
-          ? "refiner-out"
-        : null;
+    : isRefinerNode(nodeId) && (
+      processor?.refinerRecipe === "gear" || processor?.refinerRecipe === "wire"
+    )
+      ? "refiner-out"
+      : null;
 
 const makeProcessorState = (
   kind: ProcessorKind,
@@ -1465,7 +2503,6 @@ const makeProcessorState = (
     full: false,
     inputs: Object.fromEntries(recipe.inputs.map((input) => [input.id, 0])),
     materialType,
-    powerCommitted: false,
     ...(kind === "assembler" ? { assemblerRecipe } : {}),
     ...(kind === "refiner" ? { refinerRecipe } : {}),
   };
@@ -1474,12 +2511,32 @@ const makeProcessorState = (
 const getProcessorStored = (processor: Runtime["processors"][NodeId] | undefined) =>
   processor?.stored ?? (processor?.full ? 1 : 0);
 
+const isCoreType = (type: ResourceType): type is CoreType =>
+  type === ResourceType.BASIC_CORE || type === ResourceType.AUTOMATA_CORE;
+
+const getResearchFoundryCoreItems = (
+  foundry: Runtime["researchFoundries"][NodeId] | undefined,
+): CoreType[] => {
+  if (Array.isArray(foundry?.coreItems)) {
+    return foundry.coreItems
+      .filter(isCoreType)
+      .slice(0, PRODUCTION_INGREDIENT_CAPACITY);
+  }
+  const legacyCount = Math.min(
+    PRODUCTION_INGREDIENT_CAPACITY,
+    Math.max(0, Math.floor(Number(foundry?.cores ?? (foundry?.coreLoaded ? 1 : 0)) || 0)),
+  );
+  return Array.from({ length: legacyCount }, (): CoreType => ResourceType.AUTOMATA_CORE);
+};
+
 const getResearchFoundryCores = (
   foundry: Runtime["researchFoundries"][NodeId] | undefined,
-) => Math.min(
-  PRODUCTION_INGREDIENT_CAPACITY,
-  Math.max(0, Math.floor(Number(foundry?.cores ?? (foundry?.coreLoaded ? 1 : 0)) || 0)),
-);
+) => getResearchFoundryCoreItems(foundry).length;
+
+const getResearchFoundryCoreCount = (
+  foundry: Runtime["researchFoundries"][NodeId] | undefined,
+  type: CoreType,
+) => getResearchFoundryCoreItems(foundry).filter((coreType) => coreType === type).length;
 
 const isInventoryItemType = (type: ResourceType): type is InventoryItemType =>
   INVENTORY_ITEMS.some((item) => item.type === type);
@@ -1520,9 +2577,17 @@ const getManualIngredientSlots = (
   if (node.kind === "researchFoundry") {
     return [{
       portId: "research-core-in",
-      label: "Automata Core",
+      label: "All Cores",
       capacity: PRODUCTION_INGREDIENT_CAPACITY,
-      choices: [ResourceType.AUTOMATA_CORE],
+      choices: [ResourceType.BASIC_CORE, ResourceType.AUTOMATA_CORE],
+    }];
+  }
+  if (node.kind === "miningDrill") {
+    return [{
+      portId: "motor-in",
+      label: "Motor",
+      capacity: 1,
+      choices: [ResourceType.MOTOR],
     }];
   }
   return [];
@@ -1540,6 +2605,7 @@ const LOGISTICS_CATEGORY_KINDS = new Set<PurchasableKind>([
   "splitter",
   "merger",
   "joint",
+  "road",
   "powerSplitter",
   "filter",
   "inventorySource",
@@ -1661,6 +2727,17 @@ const BUILD_CATALOG: Array<{
     icon: Cable,
   },
   {
+    kind: "road",
+    title: "Road",
+    description: "Transfers items through a paired Road on the opposite edge of an adjacent map node.",
+    recipe: [
+      { type: ResourceType.STONE, amount: 5 },
+      { type: ResourceType.BRICK, amount: 5 },
+    ],
+    buildTime: BUILD_TIMES.road,
+    icon: RoadIcon,
+  },
+  {
     kind: "powerSplitter",
     title: "Power Splitter",
     description: "Branches one Power cable into three compact directional outputs.",
@@ -1727,31 +2804,9 @@ const BUILD_CATALOG: Array<{
     icon: Anvil,
   },
   {
-    kind: "gearPress",
-    title: "Gear Press",
-    description: "Presses two matching Plates into an Iron or Copper Gear.",
-    recipe: [
-      { type: ResourceType.STONE, amount: 3 },
-      { type: ResourceType.IRON_PLATE, amount: 2 },
-    ],
-    buildTime: BUILD_TIMES.gearPress,
-    icon: Cog,
-  },
-  {
-    kind: "wireMill",
-    title: "Wire Mill",
-    description: "Draws an Iron or Copper Plate into matching Wire.",
-    recipe: [
-      { type: ResourceType.STONE, amount: 2 },
-      { type: ResourceType.IRON_PLATE, amount: 2 },
-    ],
-    buildTime: BUILD_TIMES.wireMill,
-    icon: Cable,
-  },
-  {
     kind: "refiner",
     title: "Refiner",
-    description: "A configurable production node that refines metal Plates into matching Gears or Wire.",
+    description: "Changes one input item into another product.",
     recipe: [
       { type: ResourceType.IRON_PLATE, amount: 1 },
       { type: ResourceType.STONE, amount: 1 },
@@ -1762,7 +2817,7 @@ const BUILD_CATALOG: Array<{
   {
     kind: "assembler",
     title: "Assembler",
-    description: "A configurable production node that can make Motors or Circuit A.",
+    description: "Combines two input items into another product.",
     recipe: [
       { type: ResourceType.WOOD, amount: 4 },
       { type: ResourceType.STONE, amount: 5 },
@@ -1771,33 +2826,9 @@ const BUILD_CATALOG: Array<{
     icon: Hammer,
   },
   {
-    kind: "motorFactory",
-    title: "Motor Factory",
-    description: "Combines two Iron Gears and four Copper Wire into a Motor.",
-    recipe: [
-      { type: ResourceType.STONE, amount: 4 },
-      { type: ResourceType.IRON_GEAR, amount: 2 },
-      { type: ResourceType.COPPER_WIRE, amount: 3 },
-    ],
-    buildTime: BUILD_TIMES.motorFactory,
-    icon: Factory,
-  },
-  {
-    kind: "circuitAConduit",
-    title: "Circuit A Conduit",
-    description: "Builds Circuit A from Copper Wire and an Iron Plate.",
-    recipe: [
-      { type: ResourceType.STONE, amount: 3 },
-      { type: ResourceType.IRON_PLATE, amount: 2 },
-      { type: ResourceType.COPPER_WIRE, amount: 3 },
-    ],
-    buildTime: BUILD_TIMES.circuitAConduit,
-    icon: CircuitBoard,
-  },
-  {
     kind: "automataCoreAssembler",
     title: "Automata Core Assembler",
-    description: "Combines a Motor and two Circuit A units into an Automata Core.",
+    description: "Combines one Circuit A and one Brick into an Automata Core.",
     recipe: [
       { type: ResourceType.STONE, amount: 6 },
       { type: ResourceType.MOTOR, amount: 1 },
@@ -1808,12 +2839,12 @@ const BUILD_CATALOG: Array<{
   },
   {
     kind: "researchFoundry",
-    title: "Research Foundry",
-    description: "Studies Automata Cores for the next generation of machinery.",
+    title: "Research Center",
+    description: "Accepts all Cores and studies them for the next generation of machinery.",
     recipe: [
-      { type: ResourceType.STONE, amount: 10 },
-      { type: ResourceType.CIRCUIT_A, amount: 1 },
-      { type: ResourceType.MOTOR, amount: 1 },
+      { type: ResourceType.STONE, amount: 5 },
+      { type: ResourceType.WOOD, amount: 5 },
+      { type: ResourceType.IRON_PLATE, amount: 5 },
     ],
     buildTime: BUILD_TIMES.researchFoundry,
     icon: FlaskConical,
@@ -1832,18 +2863,20 @@ const BUILD_CATALOG: Array<{
   {
     kind: "miningDrill",
     title: "Mining Drill",
-    description: "Surveys one ore type over twenty powered cycles, then becomes a 1,000-unit deposit.",
+    description: "Consumes twenty Motors, one per progression tick, then becomes a 1,000-unit deposit.",
     recipe: [
       { type: ResourceType.MOTOR, amount: 2 },
     ],
     buildTime: BUILD_TIMES.miningDrill,
-    icon: Pickaxe,
+    icon: MiningDrillIcon,
   },
 ];
 
-// Retired blueprints stay in the full catalog so existing saves can still
+// Hidden nodes stay in the full catalog so existing saves can still
 // hydrate, run, and refund them without exposing them to new games.
-const VISIBLE_BUILD_CATALOG = BUILD_CATALOG.filter((item) => item.kind !== "filter");
+const VISIBLE_BUILD_CATALOG = BUILD_CATALOG.filter(
+  (item) => item.kind !== "filter" && item.kind !== "automataCoreAssembler",
+);
 
 type ShortcutNodeOption = {
   kind: PurchasableKind;
@@ -1857,8 +2890,19 @@ type NodeShortcutBarProps = {
   config: ShortcutBarConfig;
   options: ShortcutNodeOption[];
   placementActive: boolean;
+  grouped: boolean;
+  snapReady: boolean;
+  showGroupTooltip: boolean;
   onBuild: (kind: PurchasableKind) => void;
   onChange: (updater: (current: ShortcutBarConfig) => ShortcutBarConfig) => void;
+  onElementRef: (element: HTMLElement | null) => void;
+  onMoveStart: () => void;
+  onMove: (deltaX: number, deltaY: number) => void;
+  onMoveEnd: (commit: boolean) => void;
+  onRotate: () => void;
+  onResizeEnd: () => void;
+  onSeparate: () => void;
+  onDisableGroupTooltip: () => void;
 };
 
 const NodeShortcutBar = ({
@@ -1866,15 +2910,26 @@ const NodeShortcutBar = ({
   config,
   options,
   placementActive,
+  grouped,
+  snapReady,
+  showGroupTooltip,
   onBuild,
   onChange,
+  onElementRef,
+  onMoveStart,
+  onMove,
+  onMoveEnd,
+  onRotate,
+  onResizeEnd,
+  onSeparate,
+  onDisableGroupTooltip,
 }: NodeShortcutBarProps) => {
+  const [openAssignmentSlot, setOpenAssignmentSlot] = useState<number | null>(null);
   const interactionRef = useRef<{
     mode: "move" | "resize";
     pointerId: number;
     startX: number;
     startY: number;
-    position: ShortcutBarConfig["position"];
     scale: number;
   } | null>(null);
 
@@ -1891,9 +2946,9 @@ const NodeShortcutBar = ({
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      position: { ...config.position },
       scale: config.scale,
     };
+    if (mode === "move") onMoveStart();
   };
 
   const updateInteraction = (event: React.PointerEvent<HTMLElement>) => {
@@ -1903,15 +2958,7 @@ const NodeShortcutBar = ({
     const deltaX = event.clientX - interaction.startX;
     const deltaY = event.clientY - interaction.startY;
     if (interaction.mode === "move") {
-      const nextX = interaction.position.x + (deltaX / Math.max(1, window.innerWidth)) * 100;
-      const nextY = interaction.position.y + deltaY;
-      onChange((current) => ({
-        ...current,
-        position: {
-          x: Math.min(98, Math.max(2, nextX)),
-          y: Math.min(Math.max(68, window.innerHeight - 58), Math.max(68, nextY)),
-        },
-      }));
+      onMove(deltaX, deltaY);
       return;
     }
     const resizeDelta = (deltaX + deltaY) / 260;
@@ -1924,16 +2971,23 @@ const NodeShortcutBar = ({
     }));
   };
 
-  const finishInteraction = (event: React.PointerEvent<HTMLElement>) => {
-    if (interactionRef.current?.pointerId !== event.pointerId) return;
+  const finishInteraction = (
+    event: React.PointerEvent<HTMLElement>,
+    commit: boolean,
+  ) => {
+    const interaction = interactionRef.current;
+    if (interaction?.pointerId !== event.pointerId) return;
     interactionRef.current = null;
+    if (interaction.mode === "move") onMoveEnd(commit);
+    else onResizeEnd();
   };
 
   if (!config.visible) return null;
 
-  return (
+  const shortcutBar = (
     <section
-      className={`node-shortcut-bar ${config.locked ? "locked" : ""} ${config.rotation === 90 ? "vertical" : "horizontal"}`}
+      ref={onElementRef}
+      className={`node-shortcut-bar ${config.locked ? "locked" : ""} ${config.rotation === 90 ? "vertical" : "horizontal"} ${grouped ? "grouped" : ""} ${snapReady ? "snap-ready" : ""}`}
       aria-label={name}
       style={{
         left: `${config.position.x}%`,
@@ -1941,12 +2995,19 @@ const NodeShortcutBar = ({
         transform: `translateX(-50%) scale(${config.scale})`,
       }}
       onPointerMove={updateInteraction}
-      onPointerUp={finishInteraction}
-      onPointerCancel={finishInteraction}
+      onPointerUp={(event) => finishInteraction(event, true)}
+      onPointerCancel={(event) => finishInteraction(event, false)}
       onPointerDown={(event) => {
         const target = event.target as HTMLElement;
         if (target.closest("button, input, select, textarea, a, [role='menuitem']")) return;
         beginInteraction(event, "move");
+      }}
+      onContextMenuCapture={(event) => {
+        if (!grouped) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setOpenAssignmentSlot(null);
+        onSeparate();
       }}
     >
       <div className="shortcut-bar-toolbar">
@@ -1957,10 +3018,7 @@ const NodeShortcutBar = ({
             aria-label={`Rotate ${name}`}
             title="Rotate 90°"
             disabled={config.locked}
-            onClick={() => onChange((current) => ({
-              ...current,
-              rotation: current.rotation === 0 ? 90 : 0,
-            }))}
+            onClick={onRotate}
           >
             ↻
           </button>
@@ -1983,32 +3041,70 @@ const NodeShortcutBar = ({
             : null;
           const Icon = option?.icon ?? Plus;
           const unavailable = Boolean(option && (!option.canBuild || placementActive));
-          const buttonTitle = option
+          const buttonStatus = option
             ? placementActive
-              ? `Finish placing the current node before building ${option.title}`
+              ? "Finish the current placement first"
               : option.canBuild
-                ? `Build ${option.title}`
-                : `Missing materials for ${option.title}`
-            : `Right-click to assign shortcut ${index + 1}`;
+                ? "Ready to build"
+                : "Not enough resources"
+            : "No node assigned";
           return (
-            <ContextMenu key={`${name}-slot-${index}`}>
-              <ContextMenuTrigger asChild>
-                <button
-                  type="button"
-                  className={`shortcut-slot ${assignment ? "assigned" : "empty"} ${unavailable ? "unavailable" : ""}`}
-                  aria-label={option ? `Build ${option.title}` : `Unassigned shortcut ${index + 1}`}
-                  title={buttonTitle}
-                  onClick={() => {
-                    if (!option || unavailable) return;
-                    onBuild(option.kind);
-                  }}
+            <ContextMenu
+              key={`${name}-slot-${index}`}
+              open={openAssignmentSlot === index}
+              onOpenChange={(open) => setOpenAssignmentSlot(open ? index : null)}
+            >
+              <Tooltip delayDuration={350}>
+                <TooltipTrigger asChild>
+                  <ContextMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className={`shortcut-slot ${assignment ? "assigned" : "empty"} ${unavailable ? "unavailable" : ""}`}
+                      aria-label={option ? `Build ${option.title}; right-click to change node` : `Unassigned shortcut ${index + 1}; right-click to choose node`}
+                      onClick={(event) => {
+                        if (!option) {
+                          const button = event.currentTarget;
+                          const bounds = button.getBoundingClientRect();
+                          const clientX = event.clientX || bounds.left + bounds.width / 2;
+                          const clientY = event.clientY || bounds.top + bounds.height / 2;
+                          window.requestAnimationFrame(() => {
+                            button.dispatchEvent(new MouseEvent("contextmenu", {
+                              bubbles: true,
+                              cancelable: true,
+                              clientX,
+                              clientY,
+                              button: 2,
+                            }));
+                          });
+                          return;
+                        }
+                        if (unavailable) return;
+                        onBuild(option.kind);
+                      }}
+                    >
+                      <Icon aria-hidden="true" />
+                      <span>{index + 1}</span>
+                    </button>
+                  </ContextMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent
+                  className="shortcut-slot-tooltip"
+                  side="top"
+                  sideOffset={8}
+                  collisionPadding={{ top: 12, right: 12, bottom: 12, left: 12 }}
+                  avoidCollisions
                 >
-                  <Icon aria-hidden="true" />
-                  <span>{index + 1}</span>
-                </button>
-              </ContextMenuTrigger>
+                  <div className="shortcut-slot-tooltip-heading">
+                    <span className="shortcut-slot-tooltip-icon"><Icon aria-hidden="true" /></span>
+                    <div>
+                      <strong>{option?.title ?? "Unassigned"}</strong>
+                      <span>{buttonStatus}</span>
+                    </div>
+                  </div>
+                  <p>Right-click to change the desired node.</p>
+                </TooltipContent>
+              </Tooltip>
               <ContextMenuContent className="shortcut-assignment-menu">
-                <ContextMenuLabel>{name} · Slot {index + 1}</ContextMenuLabel>
                 {options.map((candidate) => {
                   const CandidateIcon = candidate.icon;
                   return (
@@ -2062,6 +3158,89 @@ const NodeShortcutBar = ({
       </button>
     </section>
   );
+
+  if (!grouped || !showGroupTooltip) return shortcutBar;
+  return (
+    <Tooltip delayDuration={350}>
+      <TooltipTrigger asChild>{shortcutBar}</TooltipTrigger>
+      <TooltipContent className="shortcut-bar-group-tooltip" side="bottom" sideOffset={9}>
+        <strong>Shortcut bars attached</strong>
+        <span>Right click anywhere on any attached bar to separate them.</span>
+        <button
+          type="button"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={onDisableGroupTooltip}
+        >
+          Don&apos;t show this again
+        </button>
+      </TooltipContent>
+    </Tooltip>
+  );
+};
+
+type ViewportBoundTooltipProps = React.ComponentProps<"aside"> & {
+  measurementKey: string;
+};
+
+const ViewportBoundTooltip = ({
+  measurementKey,
+  style,
+  ...props
+}: ViewportBoundTooltipProps) => {
+  const tooltipRef = useRef<HTMLElement>(null);
+
+  useLayoutEffect(() => {
+    const tooltip = tooltipRef.current;
+    if (!tooltip) return;
+    let frame: number | null = null;
+    let settleTimer: number | null = null;
+    const measure = () => {
+      frame = null;
+      tooltip.style.setProperty("--viewport-tooltip-shift-x", "0px");
+      tooltip.style.setProperty("--viewport-tooltip-shift-y", "0px");
+      const bounds = tooltip.getBoundingClientRect();
+      const margin = 12;
+      let screenShiftX = 0;
+      let screenShiftY = 0;
+      if (bounds.left < margin) screenShiftX = margin - bounds.left;
+      else if (bounds.right > window.innerWidth - margin) {
+        screenShiftX = window.innerWidth - margin - bounds.right;
+      }
+      if (bounds.top < margin) screenShiftY = margin - bounds.top;
+      else if (bounds.bottom > window.innerHeight - margin) {
+        screenShiftY = window.innerHeight - margin - bounds.bottom;
+      }
+      const scaleX = tooltip.offsetWidth > 0 ? bounds.width / tooltip.offsetWidth : 1;
+      const scaleY = tooltip.offsetHeight > 0 ? bounds.height / tooltip.offsetHeight : 1;
+      tooltip.style.setProperty(
+        "--viewport-tooltip-shift-x",
+        `${screenShiftX / Math.max(0.01, scaleX)}px`,
+      );
+      tooltip.style.setProperty(
+        "--viewport-tooltip-shift-y",
+        `${screenShiftY / Math.max(0.01, scaleY)}px`,
+      );
+    };
+    const scheduleMeasure = () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(measure);
+    };
+    const resizeObserver = new ResizeObserver(scheduleMeasure);
+    resizeObserver.observe(tooltip);
+    window.addEventListener("resize", scheduleMeasure);
+    window.addEventListener("scroll", scheduleMeasure, true);
+    scheduleMeasure();
+    settleTimer = window.setTimeout(scheduleMeasure, 180);
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      if (settleTimer !== null) window.clearTimeout(settleTimer);
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", scheduleMeasure);
+      window.removeEventListener("scroll", scheduleMeasure, true);
+    };
+  }, [measurementKey]);
+
+  return <aside ref={tooltipRef} style={style} {...props} />;
 };
 
 type BuildOperationDetail = {
@@ -2094,13 +3273,16 @@ const getBuildRequiredInputs = (kind: PurchasableKind): BuildOperationDetail[] =
     return [{ label: "Charcoal", amount: "1", type: ResourceType.CHARCOAL }];
   }
   if (kind === "researchFoundry") {
-    return [{ label: "Automata Core", amount: "1", type: ResourceType.AUTOMATA_CORE }];
+    return [{ label: "All Cores", amount: "1", type: ResourceType.CORE }];
+  }
+  if (kind === "road") {
+    return [{ label: "Any inventory item", amount: "1", type: ResourceType.ANY }];
   }
   if (kind === "treePlanter") {
     return [{ label: "Power", amount: `${TREE_PLANTER_POWER_COST}W`, type: ResourceType.POWER }];
   }
   if (kind === "miningDrill") {
-    return [{ label: "Power per cycle", amount: `${MINING_DRILL_POWER_COST}W`, type: ResourceType.POWER }];
+    return [{ label: "Motor per tick", amount: "1", type: ResourceType.MOTOR }];
   }
   return [];
 };
@@ -2110,7 +3292,7 @@ const getBuildProductionOutputs = (
   previewNode: NodeSpec,
 ): BuildOperationDetail[] => {
   if (kind === "refiner") {
-    return [{ label: "Matching Gear or Wire", amount: "1" }];
+    return [{ label: "Matching Gear, Wire, or Brick", amount: "1" }];
   }
   if (kind === "assembler") {
     return [{ label: "Motor or Circuit A", amount: "1" }];
@@ -2128,6 +3310,9 @@ const getBuildProductionOutputs = (
   if (kind === "researchFoundry") {
     return [{ label: "Research", amount: "1" }];
   }
+  if (kind === "road") {
+    return [{ label: "Paired Road on adjacent map", amount: "1 item" }];
+  }
   if (kind === "treePlanter") {
     return [{ label: "Forest capacity", amount: "+1", type: ResourceType.FOREST_GROWTH }];
   }
@@ -2140,68 +3325,232 @@ const getBuildProductionOutputs = (
   }));
 };
 
-const announceNodeUnlock = (kind: PurchasableKind) => {
-  const item = VISIBLE_BUILD_CATALOG.find((candidate) => candidate.kind === kind);
-  if (!item) return;
-  const category = getBuildCategory(kind);
-  const categoryLabel = category === "production"
-    ? "Production"
-    : category === "logistics"
-      ? "Logistics"
-      : "Storage";
-  toast(`${item.title} unlocked`, {
-    id: `node-unlocked-${kind}`,
-    description: `${categoryLabel} node now available in the Build menu.`,
-  });
-};
-
 const RESEARCH_PROJECTS: Array<{
   id: ResearchProjectId;
   title: string;
   description: string;
   unlock: string;
+  flavorText?: string;
   icon: NodeSpec["icon"];
 }> = [
   {
-    id: "extractor2",
-    title: "Extractor 2",
-    description: "Retrofit every Extractor with a refined drive that shortens its cycle to 90% of base time.",
-    unlock: "All existing and future Extractors run at 90% cycle time",
-    icon: Pickaxe,
+    id: "logistics",
+    title: "Logistics",
+    description: "Build an extractor to unlock logistics nodes.",
+    unlock: "Unlocks the Splitter, Merger, and Joint nodes",
+    flavorText: "This way, no that way!",
+    icon: GitMerge,
   },
   {
-    id: "treePlanter",
-    title: "Tree Planter",
-    description: "Automate reforestation by converting power into renewable Forest capacity.",
-    unlock: "Unlocks the Tree Planter blueprint",
-    icon: Sprout,
+    id: "kiln",
+    title: "Kiln",
+    description: "Fires Wood into Charcoal for metal processing.",
+    unlock: "Unlocks the Kiln node",
+    flavorText: "Burn, baby, burn!",
+    icon: FlameKindling,
   },
   {
-    id: "miningDrill",
-    title: "Mining Drill",
-    description: "Develop powered deep-bore surveying that creates a fresh ore deposit.",
-    unlock: "Unlocks the Mining Drill blueprint",
-    icon: Pickaxe,
+    id: "furnace",
+    title: "Furnace",
+    description: "Smelts metal ore with Charcoal into matching Plates.",
+    unlock: "Unlocks the Furnace node",
+    flavorText: "I'm melting, I'm melting!",
+    icon: Anvil,
+  },
+  {
+    id: "refiner",
+    title: "Refiner",
+    description: "Changes one input item into another product.",
+    unlock: "Unlocks the Refiner node",
+    flavorText: "Nothing a hammer can't fix.",
+    icon: Cog,
+  },
+  {
+    id: "assembler",
+    title: "Assembler",
+    description: "Combines two input items into another product.",
+    unlock: "Unlocks the Assembler node",
+    flavorText: "If it doesn't fit, make it fit.",
+    icon: Hammer,
+  },
+  {
+    id: "researchCenter",
+    title: "Research Center",
+    description: "Analyzes Basic Cores and Automata Cores to advance research projects.",
+    unlock: "Unlocks the Research Center node",
+    flavorText: "It's not a failure if we survive.",
+    icon: FlaskConical,
   },
   {
     id: "exploration",
     title: "Exploration",
     description: "Chart the territory around the Home factory and establish a navigable sector map.",
-    unlock: "Unlocks the Map and neighboring sector selection",
-    icon: MapIcon,
+    unlock: "Unlocks the Map and awards 1 Map Point",
+    flavorText: "The world is flat.",
+    icon: Compass,
+  },
+  {
+    id: "road",
+    title: "Road",
+    description: "Establishes paired edge links that carry items between adjacent map nodes.",
+    unlock: "Unlocks the Road node",
+    icon: RoadIcon,
+  },
+  {
+    id: "areaExpansion1",
+    title: "Area Expansion 1",
+    description: "Extends the usable factory grounds in every map node.",
+    unlock: "Increases every map node's Field Size by 25% in both dimensions",
+    flavorText: "YOU MUST CONSTRUCT ADDITIONAL.... nodes.",
+    icon: AreaExpansionIcon,
+  },
+  {
+    id: "extractor2",
+    title: "Extractor 1",
+    description: "Retrofit every Extractor with a refined drive that shortens its cycle to 90% of base time.",
+    unlock: "All existing and future Extractors run at 90% cycle time",
+    flavorText: "It's because we put that big spoiler on the back.",
+    icon: Pickaxe,
+  },
+  {
+    id: "extractor3",
+    title: "Extractor 2",
+    description: "Further refines every Extractor drive to shorten its cycle by another 10%.",
+    unlock: "All existing and future Extractors run at 80% base cycle time",
+    flavorText: "It's the muffler I tell you, just listen to it go!",
+    icon: Pickaxe,
+  },
+  {
+    id: "charcoalGenerator",
+    title: "Basic Electricity",
+    description: "Generates and distributes power for advanced machines.",
+    unlock: "Unlocks the Charcoal Generator and Power Splitter nodes",
+    flavorText: "Just connect these two wires right?",
+    icon: Zap,
+  },
+  {
+    id: "treePlanter",
+    title: "Tree Planter",
+    description: "Automate reforestation by converting power into renewable Forest capacity.",
+    unlock: "Unlocks the Tree Planter node",
+    flavorText: "Only you can prevent forest fires.",
+    icon: Sprout,
+  },
+  {
+    id: "miningDrill",
+    title: "Mining Drill",
+    description: "Develop motor-driven deep-bore surveying that creates a fresh ore deposit.",
+    unlock: "Unlocks the Mining Drill node",
+    flavorText: "I'm a miner, not a major.",
+    icon: MiningDrillIcon,
   },
 ];
+
+const RESEARCH_MILESTONE_REQUIREMENTS: Partial<Record<ResearchProjectId, {
+  pending: string;
+  complete: string;
+}>> = {
+  logistics: { pending: "Build an Extractor", complete: "Extractor built" },
+  kiln: { pending: "Produce at least 1 Wood", complete: "Wood produced" },
+  charcoalGenerator: { pending: "Produce at least 1 Motor", complete: "Motor produced" },
+  furnace: { pending: "Produce at least 1 Iron or Copper", complete: "Iron or Copper produced" },
+  refiner: { pending: "Produce at least 1 Iron Plate or Copper Plate", complete: "Iron or Copper Plate produced" },
+  assembler: { pending: "Build your first Refiner", complete: "Refiner built" },
+  researchCenter: { pending: "Build your first Assembler", complete: "Assembler built" },
+};
+
+const getResearchMilestoneRequirement = (projectId: ResearchProjectId) =>
+  RESEARCH_MILESTONE_REQUIREMENTS[projectId] ?? null;
+
+const isBasicCoreResearchProject = (projectId: ResearchProjectId) =>
+  projectId === "road" || projectId === "areaExpansion1" || projectId === "exploration" || projectId === "extractor2";
+
+const isMixedCoreResearchProject = (projectId: ResearchProjectId) =>
+  projectId === "extractor3" || projectId === "treePlanter" || projectId === "miningDrill";
+
+const getResearchProjectPrerequisite = (projectId: ResearchProjectId) =>
+  projectId === "extractor3" ? "Extractor 1" : null;
+
+const isResearchProjectPrerequisiteSatisfied = (
+  research: Runtime["research"],
+  projectId: ResearchProjectId,
+) => projectId !== "extractor3" || research.extractor2Unlocked;
+
+const getResearchProjectCost = (projectId: ResearchProjectId) =>
+  isMixedCoreResearchProject(projectId)
+    ? BASIC_CORE_RESEARCH_COST + RESEARCH_UNLOCK_COST
+    : isBasicCoreResearchProject(projectId)
+    ? BASIC_CORE_RESEARCH_COST
+    : getResearchMilestoneRequirement(projectId) ? 1 : RESEARCH_UNLOCK_COST;
+
+const getResearchProjectRequiredCoreType = (
+  projectId: ResearchProjectId | null,
+  projectProgress = 0,
+): CoreType | null => (
+  projectId && isBasicCoreResearchProject(projectId)
+    ? ResourceType.BASIC_CORE
+    : projectId && isMixedCoreResearchProject(projectId)
+      ? projectProgress < BASIC_CORE_RESEARCH_COST
+        ? ResourceType.BASIC_CORE
+        : ResourceType.AUTOMATA_CORE
+    : null
+);
+
+const getResearchProjectCoreLabel = (projectId: ResearchProjectId) =>
+  isMixedCoreResearchProject(projectId)
+    ? `Cores (${BASIC_CORE_RESEARCH_COST} Basic + ${RESEARCH_UNLOCK_COST} Automata)`
+    : isBasicCoreResearchProject(projectId)
+    ? "Basic Cores"
+    : "Cores";
+
+const getResearchFoundryProjectCoreCount = (
+  foundry: Runtime["researchFoundries"][NodeId] | undefined,
+  projectId: ResearchProjectId | null,
+  projectProgress = 0,
+) => {
+  const requiredType = getResearchProjectRequiredCoreType(projectId, projectProgress);
+  return requiredType
+    ? getResearchFoundryCoreCount(foundry, requiredType)
+    : getResearchFoundryCores(foundry);
+};
+
+const canSelectResearchProject = (runtime: Runtime, nodes: NodeSpec[]) =>
+  runtime.research.available || nodes.some((node) => {
+    if (node.kind !== "researchFoundry") return false;
+    const construction = runtime.construction[node.id];
+    return !construction || construction.complete;
+  });
 
 const isResearchProjectUnlocked = (
   research: Runtime["research"],
   projectId: ResearchProjectId,
-) => projectId === "extractor2"
-  ? research.extractor2Unlocked
-  : projectId === "treePlanter"
-    ? research.treePlanterUnlocked
-    : projectId === "miningDrill"
-      ? research.miningDrillUnlocked
-      : research.explorationUnlocked;
+) => projectId === "logistics"
+  ? research.logisticsUnlocked
+  : projectId === "kiln"
+    ? research.kilnUnlocked
+    : projectId === "charcoalGenerator"
+      ? research.charcoalGeneratorUnlocked
+      : projectId === "furnace"
+        ? research.furnaceUnlocked
+        : projectId === "refiner"
+          ? research.refinerUnlocked
+          : projectId === "assembler"
+            ? research.assemblerUnlocked
+            : projectId === "researchCenter"
+              ? research.researchCenterUnlocked
+              : projectId === "road"
+                ? research.roadUnlocked
+              : projectId === "areaExpansion1"
+                ? research.areaExpansion1Unlocked
+                : projectId === "extractor2"
+                  ? research.extractor2Unlocked
+                  : projectId === "extractor3"
+                    ? research.extractor3Unlocked
+                    : projectId === "treePlanter"
+                      ? research.treePlanterUnlocked
+                      : projectId === "miningDrill"
+                        ? research.miningDrillUnlocked
+                        : research.explorationUnlocked;
 
 const getResearchProject = (projectId: ResearchProjectId | null) =>
   RESEARCH_PROJECTS.find((project) => project.id === projectId) ?? null;
@@ -2215,11 +3564,6 @@ const announceResearchCompletion = (projectId: ResearchProjectId) => {
     className: "research-completion-toast",
   });
 };
-
-const RESEARCH_GATED_BUILD_KINDS = new Set<PurchasableKind>([
-  "treePlanter",
-  "miningDrill",
-]);
 
 const isAllResearchComplete = (research: Runtime["research"]) =>
   RESEARCH_PROJECTS.every((project) => isResearchProjectUnlocked(research, project.id));
@@ -2241,11 +3585,26 @@ const hasProducedItem = (runtime: Runtime, type: InventoryItemType) =>
 const hasProducedAny = (runtime: Runtime, types: InventoryItemType[]) =>
   types.some((type) => hasProducedItem(runtime, type));
 
-const hasProducedCharcoal = (runtime: Runtime) =>
-  hasProducedItem(runtime, ResourceType.CHARCOAL);
-
 const hasProducedPlate = (runtime: Runtime) =>
   hasProducedAny(runtime, [ResourceType.IRON_PLATE, ResourceType.COPPER_PLATE]);
+
+const isResearchMilestoneSatisfied = (
+  projectId: ResearchProjectId,
+  runtime: Runtime,
+  builtKinds: ReadonlySet<PurchasableKind>,
+) => projectId === "kiln"
+  ? hasProducedItem(runtime, ResourceType.WOOD)
+  : projectId === "charcoalGenerator"
+    ? hasProducedItem(runtime, ResourceType.MOTOR)
+    : projectId === "furnace"
+      ? hasProducedAny(runtime, [ResourceType.IRON, ResourceType.COPPER])
+      : projectId === "refiner"
+        ? hasProducedPlate(runtime)
+        : projectId === "assembler"
+          ? builtKinds.has("refiner")
+          : projectId === "researchCenter"
+            ? builtKinds.has("assembler")
+            : false;
 
 const BUILD_UNLOCK_RULES: Record<PurchasableKind, BuildUnlockRule> = {
   extractor: {
@@ -2261,11 +3620,11 @@ const BUILD_UNLOCK_RULES: Record<PurchasableKind, BuildUnlockRule> = {
     isSatisfied: () => true,
   },
   splitter: {
-    requirement: "Place the first player-built Extractor.",
+    requirement: "Complete Logistics research by building an Extractor.",
     isSatisfied: ({ logisticsUnlocked }) => logisticsUnlocked,
   },
   merger: {
-    requirement: "Place the first player-built Extractor.",
+    requirement: "Complete Logistics research by building an Extractor.",
     isSatisfied: ({ logisticsUnlocked }) => logisticsUnlocked,
   },
   filter: {
@@ -2277,64 +3636,51 @@ const BUILD_UNLOCK_RULES: Record<PurchasableKind, BuildUnlockRule> = {
     isSatisfied: () => false,
   },
   joint: {
-    requirement: "Place the first player-built Extractor.",
+    requirement: "Complete Logistics research by building an Extractor.",
     isSatisfied: ({ logisticsUnlocked }) => logisticsUnlocked,
   },
   powerSplitter: {
-    requirement: "Build a Charcoal Generator.",
-    isSatisfied: ({ builtKinds }) => builtKinds.has("generator"),
+    requirement: "Complete Basic electricity research by producing at least 1 Motor.",
+    isSatisfied: ({ runtime }) => runtime.research.charcoalGeneratorUnlocked,
   },
   kiln: {
-    requirement: "Produce at least 1 Wood.",
-    isSatisfied: ({ runtime }) => hasProducedItem(runtime, ResourceType.WOOD),
+    requirement: "Complete Kiln research by producing at least 1 Wood.",
+    isSatisfied: ({ runtime }) => runtime.research.kilnUnlocked,
   },
   furnace: {
-    requirement: "Produce at least 1 Iron or Copper.",
-    isSatisfied: ({ runtime }) =>
-      hasProducedAny(runtime, [ResourceType.IRON, ResourceType.COPPER]),
+    requirement: "Complete Furnace research by producing at least 1 Iron or Copper.",
+    isSatisfied: ({ runtime }) => runtime.research.furnaceUnlocked,
   },
   generator: {
-    requirement: "Produce at least 1 Charcoal.",
-    isSatisfied: ({ runtime }) => hasProducedCharcoal(runtime),
-  },
-  gearPress: {
-    requirement: "Produce at least 1 Iron Plate or Copper Plate.",
-    isSatisfied: ({ runtime }) => hasProducedPlate(runtime),
-  },
-  wireMill: {
-    requirement: "Produce at least 1 Iron Plate or Copper Plate.",
-    isSatisfied: ({ runtime }) => hasProducedPlate(runtime),
+    requirement: "Complete Basic electricity research by producing at least 1 Motor.",
+    isSatisfied: ({ runtime }) => runtime.research.charcoalGeneratorUnlocked,
   },
   refiner: {
-    requirement: "Produce at least 1 Iron Plate or Copper Plate.",
-    isSatisfied: ({ runtime }) => hasProducedPlate(runtime),
+    requirement: "Complete Refiner research by producing at least 1 Iron Plate or Copper Plate.",
+    isSatisfied: ({ runtime }) => runtime.research.refinerUnlocked,
   },
   assembler: {
-    requirement: "Build your first Refiner.",
-    isSatisfied: ({ builtKinds }) => builtKinds.has("refiner"),
-  },
-  motorFactory: {
-    requirement: "Build a Charcoal Generator.",
-    isSatisfied: ({ builtKinds }) => builtKinds.has("generator"),
-  },
-  circuitAConduit: {
-    requirement: "Build a Charcoal Generator.",
-    isSatisfied: ({ builtKinds }) => builtKinds.has("generator"),
+    requirement: "Complete Assembler research by building your first Refiner.",
+    isSatisfied: ({ runtime }) => runtime.research.assemblerUnlocked,
   },
   automataCoreAssembler: {
     requirement: "Build a Charcoal Generator.",
     isSatisfied: ({ builtKinds }) => builtKinds.has("generator"),
   },
   researchFoundry: {
-    requirement: "Build a Charcoal Generator.",
-    isSatisfied: ({ builtKinds }) => builtKinds.has("generator"),
+    requirement: "Complete Research Center research by building your first Assembler.",
+    isSatisfied: ({ runtime }) => runtime.research.researchCenterUnlocked,
+  },
+  road: {
+    requirement: `Complete Road research with ${BASIC_CORE_RESEARCH_COST} Basic Cores.`,
+    isSatisfied: ({ runtime }) => runtime.research.roadUnlocked,
   },
   treePlanter: {
-    requirement: `Complete the ${RESEARCH_UNLOCK_COST}-core Tree Planter research project.`,
+    requirement: `Complete Tree Planter research with ${BASIC_CORE_RESEARCH_COST} Basic Cores and ${RESEARCH_UNLOCK_COST} Automata Cores.`,
     isSatisfied: ({ runtime }) => runtime.research.treePlanterUnlocked,
   },
   miningDrill: {
-    requirement: `Complete the ${RESEARCH_UNLOCK_COST}-core Mining Drill research project.`,
+    requirement: `Complete Mining Drill research with ${BASIC_CORE_RESEARCH_COST} Basic Cores and ${RESEARCH_UNLOCK_COST} Automata Cores.`,
     isSatisfied: ({ runtime }) => runtime.research.miningDrillUnlocked,
   },
 };
@@ -2346,6 +3692,14 @@ const isBuildUnlockSatisfied = (
 
 const getBuildUnlockRequirement = (kind: PurchasableKind) =>
   BUILD_UNLOCK_RULES[kind].requirement;
+
+const isBuildKindUnlocked = (
+  kind: PurchasableKind,
+  revealedKinds: ReadonlySet<PurchasableKind>,
+  context: BuildUnlockContext,
+) => isBuildUnlockSatisfied(kind, context) || (
+  kind !== "researchFoundry" && revealedKinds.has(kind)
+);
 
 const formatUnlockTime = (elapsedMs: number) => {
   const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
@@ -2449,11 +3803,11 @@ const createBuildableNode = (kind: PurchasableKind, id: NodeId, sequence: number
     return {
       id,
       kind,
-      title: "Research Foundry",
+      title: "Research Center",
       eyebrow: `RESEARCH ${String(sequence).padStart(2, "0")}`,
       color: "#74a9e8",
       icon: FlaskConical,
-      inputs: [{ id: "research-core-in", label: "Automata Core", type: ResourceType.AUTOMATA_CORE, direction: "input" }],
+      inputs: [{ id: "research-core-in", label: "All Cores", type: ResourceType.CORE, direction: "input" }],
       outputs: [],
     };
   }
@@ -2476,8 +3830,8 @@ const createBuildableNode = (kind: PurchasableKind, id: NodeId, sequence: number
       title: "Mining Drill",
       eyebrow: `DEEP BORE ${String(sequence).padStart(2, "0")}`,
       color: "#d6a44f",
-      icon: Pickaxe,
-      inputs: [{ id: "power-in", label: `Power · ${MINING_DRILL_POWER_COST}W`, type: ResourceType.POWER, direction: "input" }],
+      icon: MiningDrillIcon,
+      inputs: [{ id: "motor-in", label: "Motor", type: ResourceType.MOTOR, direction: "input" }],
       outputs: [],
     };
   }
@@ -2510,6 +3864,18 @@ const createBuildableNode = (kind: PurchasableKind, id: NodeId, sequence: number
       outputs: [{ id: "joint-out", label: "Out", type: ResourceType.ANY, direction: "output" }],
     };
   }
+  if (kind === "road") {
+    return {
+      id,
+      kind,
+      title: "Road",
+      eyebrow: `MAP LINK ${String(sequence).padStart(2, "0")}`,
+      color: "#b48a5a",
+      icon: RoadIcon,
+      inputs: [{ id: "road-in", label: "Local In", type: ResourceType.ANY, direction: "input" }],
+      outputs: [{ id: "road-out", label: "Remote Out", type: ResourceType.ANY, direction: "output" }],
+    };
+  }
   if (kind === "powerSplitter") {
     return {
       id,
@@ -2527,7 +3893,6 @@ const createBuildableNode = (kind: PurchasableKind, id: NodeId, sequence: number
     };
   }
   const recipe = PROCESSOR_RECIPES[kind];
-  const powerCost = POWER_COSTS[kind];
   return {
     id,
     kind,
@@ -2535,12 +3900,7 @@ const createBuildableNode = (kind: PurchasableKind, id: NodeId, sequence: number
     eyebrow: `${recipe.eyebrow} ${String(sequence).padStart(2, "0")}`,
     color: recipe.color,
     icon: recipe.icon,
-    inputs: [
-      ...recipe.inputs.map((input) => ({ ...input, direction: "input" as const })),
-      ...(powerCost
-        ? [{ id: "power-in", label: `Power · ${powerCost}W`, type: ResourceType.POWER, direction: "input" as const }]
-        : []),
-    ],
+    inputs: recipe.inputs.map((input) => ({ ...input, direction: "input" as const })),
     outputs: [{ ...recipe.output, direction: "output" }],
   };
 };
@@ -2576,6 +3936,13 @@ const getJointInputType = (nodeId: NodeId, edges: Connection[]) => {
   )?.type ?? null;
 };
 
+const getRoadInputType = (nodeId: NodeId, edges: Connection[]) => {
+  if (!isRoadNode(nodeId)) return null;
+  return edges.find(
+    (connection) => connection.targetNode === nodeId && connection.targetPort === "road-in",
+  )?.type ?? null;
+};
+
 const getSmartProcessorInputType = (
   nodeId: NodeId,
   edges: Connection[],
@@ -2584,18 +3951,6 @@ const getSmartProcessorInputType = (
   if (isFurnaceNode(nodeId)) {
     return edges.find(
       (connection) => connection.targetNode === nodeId && connection.targetPort === "metal-in",
-    )?.type ?? null;
-  }
-  if (isGearPressNode(nodeId)) {
-    return edges.find(
-      (connection) =>
-        connection.targetNode === nodeId &&
-        (connection.targetPort === "plate-a-in" || connection.targetPort === "plate-b-in"),
-    )?.type ?? null;
-  }
-  if (isWireMillNode(nodeId)) {
-    return edges.find(
-      (connection) => connection.targetNode === nodeId && connection.targetPort === "wire-plate-in",
     )?.type ?? null;
   }
   if (
@@ -2619,14 +3974,6 @@ const getSmartProcessorOutput = (
   if (isFurnaceNode(nodeId)) {
     if (inputType === ResourceType.IRON) return { type: ResourceType.IRON_PLATE, label: "Iron Plate" };
     if (inputType === ResourceType.COPPER) return { type: ResourceType.COPPER_PLATE, label: "Copper Plate" };
-  }
-  if (isGearPressNode(nodeId)) {
-    if (inputType === ResourceType.IRON_PLATE) return { type: ResourceType.IRON_GEAR, label: "Iron Gear" };
-    if (inputType === ResourceType.COPPER_PLATE) return { type: ResourceType.COPPER_GEAR, label: "Copper Gear" };
-  }
-  if (isWireMillNode(nodeId)) {
-    if (inputType === ResourceType.IRON_PLATE) return { type: ResourceType.IRON_WIRE, label: "Iron Wire" };
-    if (inputType === ResourceType.COPPER_PLATE) return { type: ResourceType.COPPER_WIRE, label: "Copper Wire" };
   }
   if (isRefinerNode(nodeId) && processor?.refinerRecipe === "gear") {
     if (inputType === ResourceType.IRON_PLATE) return { type: ResourceType.IRON_GEAR, label: "Iron Gear" };
@@ -2654,15 +4001,11 @@ const getConnectedSmartProcessorMaterialType = (
 ) => {
   const typingPortIds = isFurnaceNode(nodeId)
     ? new Set(["metal-in"])
-    : isGearPressNode(nodeId)
-      ? new Set(["plate-a-in", "plate-b-in"])
-      : isWireMillNode(nodeId)
-        ? new Set(["wire-plate-in"])
-        : isRefinerNode(nodeId) && (
-          processor?.refinerRecipe === "gear" || processor?.refinerRecipe === "wire"
-        )
-          ? new Set(["refiner-in"])
-        : null;
+    : isRefinerNode(nodeId) && (
+      processor?.refinerRecipe === "gear" || processor?.refinerRecipe === "wire"
+    )
+      ? new Set(["refiner-in"])
+      : null;
   if (!typingPortIds) return null;
 
   return edges
@@ -2825,12 +4168,23 @@ const getStoredItemLocations = (
       add(node.id, runtime.generators[node.id]?.charcoal ?? 0, "buffer", "Fuel input");
       return;
     }
-    if (node.kind === "researchFoundry" && type === ResourceType.AUTOMATA_CORE) {
-      add(node.id, getResearchFoundryCores(runtime.researchFoundries[node.id]), "buffer", "Research input");
+    if (node.kind === "researchFoundry" && isCoreType(type)) {
+      add(
+        node.id,
+        getResearchFoundryCoreCount(runtime.researchFoundries[node.id], type),
+        "buffer",
+        "Research input",
+      );
       return;
     }
     if (node.kind === "joint" && runtime.joints[node.id]?.bufferedType === type) {
       add(node.id, 1, "buffer", "Routing buffer");
+      return;
+    }
+    if (node.kind === "road") {
+      const road = runtime.roads[node.id];
+      if (road?.outboundType === type) add(node.id, 1, "buffer", "Outbound Road transfer");
+      if (road?.inboundType === type) add(node.id, 1, "buffer", "Inbound Road transfer");
       return;
     }
     if (node.kind === "filter" && runtime.filters[node.id]?.bufferedType === type) {
@@ -2853,6 +4207,18 @@ const getStoredItemAmount = (
 
 const cloneStoredMaterialRuntime = (runtime: Runtime): Runtime => ({
   ...runtime,
+  blackHoles: Object.fromEntries(
+    Object.entries(runtime.blackHoles ?? {}).map(([id, hole]) => [id, {
+      ...hole,
+      shape: [...hole.shape],
+    }]),
+  ),
+  lakes: Object.fromEntries(
+    Object.entries(runtime.lakes ?? {}).map(([id, lake]) => [id, {
+      ...lake,
+      shape: [...lake.shape],
+    }]),
+  ),
   storages: Object.fromEntries(
     Object.entries(runtime.storages ?? {}).map(([nodeId, storage]) => [
       nodeId,
@@ -2875,7 +4241,10 @@ const cloneStoredMaterialRuntime = (runtime: Runtime): Runtime => ({
     Object.entries(runtime.generators ?? {}).map(([nodeId, generator]) => [nodeId, { ...generator }]),
   ),
   researchFoundries: Object.fromEntries(
-    Object.entries(runtime.researchFoundries ?? {}).map(([nodeId, foundry]) => [nodeId, { ...foundry }]),
+    Object.entries(runtime.researchFoundries ?? {}).map(([nodeId, foundry]) => [nodeId, {
+      ...foundry,
+      coreItems: [...getResearchFoundryCoreItems(foundry)],
+    }]),
   ),
   splitters: Object.fromEntries(
     Object.entries(runtime.splitters ?? {}).map(([nodeId, splitter]) => [
@@ -2885,6 +4254,9 @@ const cloneStoredMaterialRuntime = (runtime: Runtime): Runtime => ({
   ),
   joints: Object.fromEntries(
     Object.entries(runtime.joints ?? {}).map(([nodeId, joint]) => [nodeId, { ...joint }]),
+  ),
+  roads: Object.fromEntries(
+    Object.entries(runtime.roads ?? {}).map(([nodeId, road]) => [nodeId, { ...road }]),
   ),
   filters: Object.fromEntries(
     Object.entries(runtime.filters ?? {}).map(([nodeId, filter]) => [nodeId, { ...filter }]),
@@ -2950,14 +4322,31 @@ const consumeStoredMaterialInPlace = (
       if (generator) take(generator.charcoal, (amount) => { generator.charcoal -= amount; });
       return;
     }
-    if (node.kind === "researchFoundry" && type === ResourceType.AUTOMATA_CORE) {
+    if (node.kind === "researchFoundry" && isCoreType(type)) {
       const foundry = runtime.researchFoundries[node.id];
-      if (foundry) take(getResearchFoundryCores(foundry), (amount) => { foundry.cores -= amount; });
+      if (foundry) {
+        take(getResearchFoundryCoreCount(foundry, type), (amount) => {
+          let remainingToRemove = amount;
+          const nextCoreItems = getResearchFoundryCoreItems(foundry).filter((coreType) => {
+            if (coreType !== type || remainingToRemove <= 0) return true;
+            remainingToRemove -= 1;
+            return false;
+          });
+          foundry.coreItems = nextCoreItems;
+          foundry.cores = nextCoreItems.length;
+        });
+      }
       return;
     }
     if (node.kind === "joint") {
       const joint = runtime.joints[node.id];
       if (joint?.bufferedType === type) take(1, () => { joint.bufferedType = null; });
+      return;
+    }
+    if (node.kind === "road") {
+      const road = runtime.roads[node.id];
+      if (road?.outboundType === type) take(1, () => { road.outboundType = null; });
+      if (road?.inboundType === type) take(1, () => { road.inboundType = null; });
       return;
     }
     if (node.kind === "filter") {
@@ -3033,24 +4422,138 @@ const getBuildMaterialAvailability = (
   return availability;
 };
 
-const consumeBuildIngredients = (
-  runtime: Runtime,
+type GlobalBuildPayment = {
+  activeRuntime: Runtime;
+  mapFactories: MapFactoriesBySector;
+  previousFactoryRuntimes: Record<string, Runtime>;
+};
+
+const getMapFactoryNodes = (factory: MapFactoryState) => factory.nodes
+  .filter((node) => isNodeKind(node.kind))
+  .map((node) => hydrateNode(node as SerializedNode));
+
+const hasNodeKindAcrossMaps = (
+  kind: NodeKind,
+  activeNodes: NodeSpec[],
+  activeSector: string,
+  mapFactories: MapFactoriesBySector,
+) => activeNodes.some((node) => node.kind === kind) ||
+  Object.entries(mapFactories).some(([sectorKey, factory]) =>
+    sectorKey !== activeSector && factory.nodes.some((node) => node.kind === kind)
+  );
+
+const addBuildMaterialAvailability = (
+  target: BuildMaterialAvailability,
+  source: BuildMaterialAvailability,
+) => {
+  INVENTORY_ITEMS.forEach(({ type }) => {
+    target[type].storage += source[type].storage;
+    target[type].chests += source[type].chests;
+    target[type].production += source[type].production;
+    target[type].buffers += source[type].buffers;
+    target[type].total += source[type].total;
+  });
+};
+
+const getGlobalBuildMaterialAvailability = (
+  activeRuntime: Runtime,
+  activeNodes: NodeSpec[],
+  activeEdges: Connection[],
+  activeSector: string,
+  mapFactories: MapFactoriesBySector,
+  mapNodeProgress: MapNodeProgressBySector,
+): BuildMaterialAvailability => {
+  const availability = getBuildMaterialAvailability(activeRuntime, activeNodes, activeEdges);
+  Object.entries(mapFactories).forEach(([sectorKey, factory]) => {
+    if (
+      sectorKey === activeSector ||
+      !isMapNodeUnlocked(mapNodeProgress, sectorKey)
+    ) return;
+    addBuildMaterialAvailability(
+      availability,
+      getBuildMaterialAvailability(
+        factory.runtime,
+        getMapFactoryNodes(factory),
+        factory.connections,
+      ),
+    );
+  });
+  return availability;
+};
+
+const consumeGlobalBuildIngredients = (
+  activeRuntime: Runtime,
   recipe: BuildIngredient[],
-  nodes: NodeSpec[],
-  edges: Connection[],
-): Runtime | null => {
-  const availability = getBuildMaterialAvailability(runtime, nodes, edges);
+  activeNodes: NodeSpec[],
+  activeEdges: Connection[],
+  activeSector: string,
+  mapFactories: MapFactoriesBySector,
+  mapNodeProgress: MapNodeProgressBySector,
+): GlobalBuildPayment | null => {
+  const availability = getGlobalBuildMaterialAvailability(
+    activeRuntime,
+    activeNodes,
+    activeEdges,
+    activeSector,
+    mapFactories,
+    mapNodeProgress,
+  );
   if (recipe.some((ingredient) => availability[ingredient.type].total < ingredient.amount)) {
     return null;
   }
 
-  const next = cloneStoredMaterialRuntime(runtime);
-
+  const nextActiveRuntime = cloneStoredMaterialRuntime(activeRuntime);
+  const nextMapFactories = { ...mapFactories };
+  const previousFactoryRuntimes: Record<string, Runtime> = {};
+  const inactiveSectors = Object.keys(mapFactories)
+    .filter((sectorKey) =>
+      sectorKey !== activeSector && isMapNodeUnlocked(mapNodeProgress, sectorKey)
+    )
+    .sort();
   recipe.forEach((ingredient) => {
-    consumeStoredMaterialInPlace(next, nodes, edges, ingredient.type, ingredient.amount);
+    let remaining = ingredient.amount;
+    remaining -= consumeStoredMaterialInPlace(
+      nextActiveRuntime,
+      activeNodes,
+      activeEdges,
+      ingredient.type,
+      remaining,
+    );
+    for (const sectorKey of inactiveSectors) {
+      if (remaining <= 0) break;
+      const factory = nextMapFactories[sectorKey];
+      if (!factory) continue;
+      const factoryNodes = getMapFactoryNodes(factory);
+      if (
+        getBuildMaterialAvailability(
+          factory.runtime,
+          factoryNodes,
+          factory.connections,
+        )[ingredient.type].total <= 0
+      ) continue;
+      if (!previousFactoryRuntimes[sectorKey]) {
+        previousFactoryRuntimes[sectorKey] = cloneStoredMaterialRuntime(factory.runtime);
+        nextMapFactories[sectorKey] = {
+          ...factory,
+          runtime: cloneStoredMaterialRuntime(factory.runtime),
+        };
+      }
+      const nextFactory = nextMapFactories[sectorKey];
+      remaining -= consumeStoredMaterialInPlace(
+        nextFactory.runtime,
+        factoryNodes,
+        nextFactory.connections,
+        ingredient.type,
+        remaining,
+      );
+    }
   });
 
-  return next;
+  return {
+    activeRuntime: nextActiveRuntime,
+    mapFactories: nextMapFactories,
+    previousFactoryRuntimes,
+  };
 };
 
 const getEffectivePort = (nodeId: NodeId, port: Port, edges: Connection[]): Port => {
@@ -3115,6 +4618,22 @@ const getEffectivePort = (nodeId: NodeId, port: Port, edges: Connection[]): Port
       type: effectiveType,
     };
   }
+  if (isRoadNode(nodeId) && (port.id === "road-in" || port.id === "road-out")) {
+    const inputType = getRoadInputType(nodeId, edges);
+    const retainedOutputType = port.id === "road-out"
+      ? edges.find(
+          (connection) =>
+            connection.sourceNode === nodeId && connection.sourcePort === port.id,
+        )?.type ?? null
+      : null;
+    const effectiveType = port.id === "road-in" ? inputType : retainedOutputType;
+    if (!effectiveType) return port;
+    return {
+      ...port,
+      label: port.id === "road-in" ? "Local In" : "Remote Out",
+      type: effectiveType,
+    };
+  }
   if (isFurnaceNode(nodeId)) {
     const inputType = getSmartProcessorInputType(nodeId, edges);
     if (port.id === "metal-in" && inputType) {
@@ -3133,47 +4652,10 @@ const getEffectivePort = (nodeId: NodeId, port: Port, edges: Connection[]): Port
           : port;
     }
   }
-  if (isGearPressNode(nodeId)) {
-    const inputType = getSmartProcessorInputType(nodeId, edges);
-    if ((port.id === "plate-a-in" || port.id === "plate-b-in") && inputType) {
-      const channel = port.id === "plate-a-in" ? "A" : "B";
-      return { ...port, label: `${channel} · ${formatResourceType(inputType)}`, type: inputType };
-    }
-    if (port.id === "gear-out") {
-      const output = getSmartProcessorOutput(nodeId, inputType);
-      const retainedOutputType = edges.find(
-        (connection) =>
-          connection.sourceNode === nodeId && connection.sourcePort === port.id,
-      )?.type ?? null;
-      return output
-        ? { ...port, ...output }
-        : retainedOutputType && isInventoryItemType(retainedOutputType)
-          ? { ...port, label: formatResourceType(retainedOutputType), type: retainedOutputType }
-          : port;
-    }
-  }
-  if (isWireMillNode(nodeId)) {
-    const inputType = getSmartProcessorInputType(nodeId, edges);
-    if (port.id === "wire-plate-in" && inputType) {
-      return { ...port, label: formatResourceType(inputType), type: inputType };
-    }
-    if (port.id === "wire-out") {
-      const output = getSmartProcessorOutput(nodeId, inputType);
-      const retainedOutputType = edges.find(
-        (connection) =>
-          connection.sourceNode === nodeId && connection.sourcePort === port.id,
-      )?.type ?? null;
-      return output
-        ? { ...port, ...output }
-        : retainedOutputType && isInventoryItemType(retainedOutputType)
-          ? { ...port, label: formatResourceType(retainedOutputType), type: retainedOutputType }
-          : port;
-    }
-  }
   return port;
 };
 
-type DynamicPortRuntime = Pick<Runtime, "woodenChests" | "extractors" | "processors">;
+type DynamicPortRuntime = Pick<Runtime, "woodenChests" | "extractors" | "processors" | "blackHoles" | "lakes">;
 
 const isAssemblerPortDisabled = (
   nodeId: NodeId,
@@ -3326,6 +4808,7 @@ const isCompatible = (a: Port, b: Port) => {
   const input = a.direction === "input" ? a : b;
   if (output.id === "inventory-out" && input.id !== "filter-in") return false;
   if (input.id === "storage-in") return isStorageAcceptableOutputType(output.type);
+  if (input.id === "research-core-in") return isCoreType(output.type);
   if (input.id === "chest-in") {
     if (!isStorageAcceptableOutputType(output.type)) return false;
     return input.type === ResourceType.ANY ||
@@ -3432,13 +4915,108 @@ const getIncompatibleLogisticsOutputConnections = (
 };
 
 const MultiConnectionSocketTooltip = ({
+  enabled,
+  direction,
+  options,
+  onDisable,
   children,
 }: {
   enabled: boolean;
   direction: PortDirection;
   options: NodeConnectionOption[];
+  onDisable: () => void;
   children: React.ReactElement;
-}) => children;
+}) => {
+  if (!enabled) return children;
+  const connectedCount = options.filter((option) => option.connected).length;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent
+        className="multi-connection-socket-tooltip"
+        side={direction === "input" ? "left" : "right"}
+        sideOffset={8}
+      >
+        <strong>Multi-connection connector</strong>
+        <span>
+          This connector can accept multiple connections at the same time.
+          {connectedCount > 0 ? ` ${connectedCount} currently connected.` : ""}
+        </span>
+        <button
+          type="button"
+          className="multi-connection-tooltip-suppress"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={onDisable}
+        >
+          Don&apos;t show this again
+        </button>
+      </TooltipContent>
+    </Tooltip>
+  );
+};
+
+const CursorObstructionTooltip = ({
+  tooltip,
+  runtime,
+}: {
+  tooltip: ObstructionTooltipState;
+  runtime: Runtime;
+}) => {
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({
+    left: tooltip.clientX + 14,
+    top: tooltip.clientY + 14,
+  });
+
+  useLayoutEffect(() => {
+    const element = tooltipRef.current;
+    if (!element) return;
+    const bounds = element.getBoundingClientRect();
+    const viewportPadding = 8;
+    const cursorGap = 14;
+    let left = tooltip.clientX + cursorGap;
+    let top = tooltip.clientY + cursorGap;
+    if (left + bounds.width > window.innerWidth - viewportPadding) {
+      left = tooltip.clientX - bounds.width - cursorGap;
+    }
+    if (top + bounds.height > window.innerHeight - viewportPadding) {
+      top = tooltip.clientY - bounds.height - cursorGap;
+    }
+    setPosition({
+      left: Math.max(viewportPadding, Math.min(left, window.innerWidth - bounds.width - viewportPadding)),
+      top: Math.max(viewportPadding, Math.min(top, window.innerHeight - bounds.height - viewportPadding)),
+    });
+  }, [tooltip.clientX, tooltip.clientY]);
+
+  const hole = tooltip.kind === "blackHole" ? runtime.blackHoles[tooltip.nodeId] : null;
+  const lake = tooltip.kind === "lake" ? runtime.lakes[tooltip.nodeId] : null;
+  if (!hole && !lake) return null;
+  const requiredStone = hole ? getBlackHoleStoneRequirement(hole) : 0;
+
+  return (
+    <div
+      ref={tooltipRef}
+      className={`cursor-obstruction-tooltip ${hole ? "black-hole-cursor-tooltip" : "lake-obstacle-tooltip"}`}
+      role="tooltip"
+      style={{ left: position.left, top: position.top }}
+    >
+      {hole ? (
+        <>
+          <p>Looks deep, you should fill it in.</p>
+          <small>{hole.stoneFilled}/{requiredStone} Stone</small>
+        </>
+      ) : (
+        <>
+          <strong>Lake</strong>
+          <span>Output</span>
+          <p>Water</p>
+          <em>Wet, like water.</em>
+        </>
+      )}
+    </div>
+  );
+};
 
 const getInsertionPlan = (
   nodeId: NodeId,
@@ -3463,17 +5041,18 @@ const getInsertionPlan = (
       ? getRuntimeAwarePort(nodeId, port, edges, runtime)
       : getEffectivePort(nodeId, port, edges))
     .filter((port) => isCompatible(source, port));
-  const input = compatibleInputs.find(
+  const availableInput = compatibleInputs.find(
     (port) => !edges.some(
       (edge) => edge.targetNode === nodeId && edge.targetPort === port.id,
     ),
-  ) ?? compatibleInputs[0];
+  );
+  const input = isSplitterNode(nodeId) ? availableInput : availableInput ?? compatibleInputs[0];
   const recipe = EXTRACTOR_RECIPES[connection.type];
   const mergerType = getMergerInputType(nodeId, edges);
   const processor = runtime?.processors[nodeId];
   const smartProcessorInputType = getSmartProcessorInputType(nodeId, edges, processor) ?? connection.type;
   const smartProcessorOutput = getSmartProcessorOutput(nodeId, smartProcessorInputType, processor);
-  const output = node.outputs
+  const compatibleOutputs = node.outputs
     .map((port) =>
       runtime && (isAssemblerNode(nodeId) || isRefinerNode(nodeId))
         ? getRuntimeAwarePort(nodeId, port, edges, runtime)
@@ -3488,13 +5067,18 @@ const getInsertionPlan = (
           ? { ...port, type: connection.type }
         : smartProcessorOutput &&
             ((isFurnaceNode(nodeId) && port.id === "plate-out") ||
-              (isGearPressNode(nodeId) && port.id === "gear-out") ||
-              (isWireMillNode(nodeId) && port.id === "wire-out") ||
               (isRefinerNode(nodeId) && port.id === "refiner-out"))
           ? { ...port, ...smartProcessorOutput }
         : port,
     )
-    .find((port) => isCompatible(port, target));
+    .filter((port) => isCompatible(port, target));
+  const output = isSplitterNode(nodeId)
+    ? compatibleOutputs.find(
+        (port) => !edges.some(
+          (edge) => edge.sourceNode === nodeId && edge.sourcePort === port.id,
+        ),
+      )
+    : compatibleOutputs[0];
   return input && output ? { connection, input, output } : null;
 };
 
@@ -3503,7 +5087,17 @@ const normalizeDynamicConnections = (
   nodes: NodeSpec[],
   runtime?: DynamicPortRuntime,
 ) => {
-  const nodeMap = Object.fromEntries(nodes.map((node) => [node.id, node]));
+  const nodeMap: Record<string, Pick<NodeSpec, "inputs" | "outputs">> = Object.fromEntries([
+    ...nodes.map((node) => [node.id, node] as const),
+    ...Object.keys(runtime?.blackHoles ?? {}).map((holeId) => [holeId, {
+      inputs: [BLACK_HOLE_INPUT_PORT],
+      outputs: [],
+    }] as const),
+    ...Object.keys(runtime?.lakes ?? {}).map((lakeId) => [lakeId, {
+      inputs: [],
+      outputs: LAKE_WATER_OUTPUT_PORTS,
+    }] as const),
+  ]);
   let current = connections;
 
   for (let pass = 0; pass < nodes.length + 2; pass += 1) {
@@ -3586,6 +5180,728 @@ const normalizeDynamicConnections = (
   return current;
 };
 
+const BACKGROUND_SIMULATION_STEP_MS = 1000;
+const MAX_BACKGROUND_CATCH_UP_MS = 60 * 60 * 1000;
+
+const cloneRuntimeForBackgroundSimulation = (runtime: Runtime): Runtime => ({
+  ...cloneStoredMaterialRuntime(runtime),
+  ironOre: { ...runtime.ironOre },
+  copperOre: { ...runtime.copperOre },
+  stone: { ...runtime.stone },
+  forest: {
+    ...runtime.forest,
+    regenerationElapsed: runtime.forest.regenerationElapsed ?? 0,
+  },
+  treePlanters: Object.fromEntries(
+    Object.entries(runtime.treePlanters ?? {}).map(([nodeId, planter]) => [nodeId, { ...planter }]),
+  ),
+  miningDrills: Object.fromEntries(
+    Object.entries(runtime.miningDrills ?? {}).map(([nodeId, drill]) => [nodeId, { ...drill }]),
+  ),
+  minedDeposits: Object.fromEntries(
+    Object.entries(runtime.minedDeposits ?? {}).map(([nodeId, deposit]) => [nodeId, { ...deposit }]),
+  ),
+  research: {
+    ...makeResearchState(),
+    ...runtime.research,
+    progress: {
+      ...makeResearchState().progress,
+      ...(runtime.research?.progress ?? {}),
+    },
+  },
+  inventorySources: Object.fromEntries(
+    Object.entries(runtime.inventorySources ?? {}).map(([nodeId, source]) => [nodeId, {
+      ...source,
+      channels: Object.fromEntries(
+        Object.entries(source.channels ?? {}).map(([edgeId, channel]) => [edgeId, { ...channel }]),
+      ),
+    }]),
+  ),
+  roads: Object.fromEntries(
+    Object.entries(runtime.roads ?? {}).map(([nodeId, road]) => [nodeId, { ...road }]),
+  ),
+  storages: Object.fromEntries(
+    Object.entries(runtime.storages ?? {}).map(([nodeId, storage]) => [nodeId, {
+      ...storage,
+      items: normalizeItemStore(storage.items, storage.capacityPerItem),
+    }]),
+  ),
+  pausedOutputs: { ...(runtime.pausedOutputs ?? {}) },
+  construction: Object.fromEntries(
+    Object.entries(runtime.construction ?? {}).map(([nodeId, build]) => [nodeId, { ...build }]),
+  ),
+  produced: { ...makeEmptyItemStore(), ...(runtime.produced ?? {}) },
+});
+
+/**
+ * Advances a stored map without mounting its canvas. Research selection is
+ * global, so an inactive map inherits unlocks but does not independently spend
+ * research cores. Its physical production and routing graph continue normally.
+ */
+const advanceMapFactoryInBackground = (
+  factory: MapFactoryState,
+  elapsedMs: number,
+  sharedResearch: Runtime["research"],
+): MapFactoryState => {
+  const simulatedElapsed = Math.min(
+    MAX_BACKGROUND_CATCH_UP_MS,
+    Math.max(0, Number(elapsedMs) || 0),
+  );
+  if (simulatedElapsed <= 0) return factory;
+
+  let simulationNodes = factory.nodes
+    .filter((node) => isNodeKind(node.kind))
+    .map((node) => hydrateNode(node as SerializedNode));
+  const validNodeIds = new Set([
+    ...simulationNodes.map((node) => node.id),
+    ...Object.keys(factory.runtime.blackHoles ?? {}),
+    ...Object.keys(factory.runtime.lakes ?? {}),
+  ]);
+  let edges = factory.connections
+    .filter((edge) => validNodeIds.has(edge.sourceNode) && validNodeIds.has(edge.targetNode))
+    .map((edge) => ({ ...edge }));
+  const next = cloneRuntimeForBackgroundSimulation(factory.runtime);
+  next.research = {
+    ...sharedResearch,
+    activeProject: null,
+    progress: { ...sharedResearch.progress },
+  };
+
+  let remainingElapsed = simulatedElapsed;
+  while (remainingElapsed > 0) {
+    const elapsed = Math.min(BACKGROUND_SIMULATION_STEP_MS, remainingElapsed);
+    remainingElapsed -= elapsed;
+
+    const simulationNodeById = new Map(
+      simulationNodes.map((node) => [node.id, node] as const),
+    );
+    const incomingEdgeByPort = new Map<string, Connection>();
+    const outgoingEdgesByPort = new Map<string, Connection[]>();
+    const edgeById = new Map(edges.map((edge) => [edge.id, edge] as const));
+    edges.forEach((edge) => {
+      incomingEdgeByPort.set(`${edge.targetNode}:${edge.targetPort}`, edge);
+      const key = `${edge.sourceNode}:${edge.sourcePort}`;
+      const outgoing = outgoingEdgesByPort.get(key);
+      if (outgoing) outgoing.push(edge);
+      else outgoingEdgesByPort.set(key, [edge]);
+    });
+
+    if (next.forest.remaining >= RESOURCE_CAPACITIES.forest) {
+      next.forest.regenerationElapsed = 0;
+    } else {
+      const accumulated = next.forest.regenerationElapsed + elapsed;
+      const regenerated = Math.floor(accumulated / FOREST_BASE_REGENERATION_DURATION);
+      if (regenerated > 0) {
+        next.forest.remaining = Math.min(
+          RESOURCE_CAPACITIES.forest,
+          next.forest.remaining + regenerated,
+        );
+      }
+      next.forest.regenerationElapsed = next.forest.remaining >= RESOURCE_CAPACITIES.forest
+        ? 0
+        : accumulated % FOREST_BASE_REGENERATION_DURATION;
+    }
+
+    simulationNodes.forEach((node) => {
+      const build = next.construction[node.id];
+      if (!build || build.complete || !isPurchasableKind(node.kind)) return;
+      build.progress = Math.min(
+        100,
+        build.progress + (elapsed / BUILD_TIMES[node.kind]) * 100,
+      );
+      if (build.progress >= 100) build.complete = true;
+    });
+
+    simulationNodes
+      .filter((node) => node.kind === "generator")
+      .forEach((node) => {
+        const build = next.construction[node.id];
+        const generator = next.generators[node.id] ?? { power: 0, charcoal: 0 };
+        next.generators[node.id] = generator;
+        if (build && !build.complete) return;
+        while (
+          generator.charcoal > 0 &&
+          generator.power <= GENERATOR_MAX_POWER - POWER_PER_CHARCOAL
+        ) {
+          generator.charcoal -= 1;
+          generator.power += POWER_PER_CHARCOAL;
+        }
+      });
+
+    const deliverProduct = (
+      sourceNode: NodeId,
+      sourcePort: string,
+      product: ResourceType,
+      targetEdgeId?: string,
+      visitedConnectionIds: ReadonlySet<string> = new Set(),
+    ): boolean => {
+      if (next.pausedOutputs[sourceNode]) return false;
+      const requestedEdge = targetEdgeId ? edgeById.get(targetEdgeId) : null;
+      const edge = targetEdgeId
+        ? requestedEdge?.sourceNode === sourceNode && requestedEdge.sourcePort === sourcePort
+          ? requestedEdge
+          : null
+        : outgoingEdgesByPort.get(`${sourceNode}:${sourcePort}`)?.[0];
+      if (!edge || visitedConnectionIds.has(edge.id)) return false;
+      const visited = new Set(visitedConnectionIds).add(edge.id);
+      const targetNode = simulationNodeById.get(edge.targetNode);
+      const targetBuild = next.construction[edge.targetNode];
+      const targetReady = !targetBuild || targetBuild.complete;
+      const targetBlackHole = next.blackHoles[edge.targetNode];
+      if (
+        targetBlackHole &&
+        edge.targetPort === BLACK_HOLE_INPUT_PORT.id &&
+        product === ResourceType.STONE
+      ) {
+        const requiredStone = getBlackHoleStoneRequirement(targetBlackHole);
+        if (targetBlackHole.stoneFilled >= requiredStone) return false;
+        targetBlackHole.stoneFilled = Math.min(requiredStone, targetBlackHole.stoneFilled + 1);
+        return true;
+      }
+      if (!targetNode || !targetReady) return false;
+
+      if (
+        targetNode.kind === "generator" &&
+        edge.targetPort === "generator-charcoal-in" &&
+        product === ResourceType.CHARCOAL
+      ) {
+        const generator = next.generators[edge.targetNode] ?? { power: 0, charcoal: 0 };
+        next.generators[edge.targetNode] = generator;
+        if (generator.charcoal < PRODUCTION_INGREDIENT_CAPACITY) {
+          generator.charcoal += 1;
+          return true;
+        }
+      }
+
+      if (
+        targetNode.kind === "researchFoundry" &&
+        edge.targetPort === "research-core-in" &&
+        isCoreType(product)
+      ) {
+        const foundry = next.researchFoundries[edge.targetNode] ?? {
+          progress: 0,
+          cores: 0,
+          coreItems: [],
+        };
+        next.researchFoundries[edge.targetNode] = foundry;
+        const coreItems = getResearchFoundryCoreItems(foundry);
+        if (coreItems.length < PRODUCTION_INGREDIENT_CAPACITY) {
+          foundry.coreItems = [...coreItems, product];
+          foundry.cores = foundry.coreItems.length;
+          foundry.coreLoaded = undefined;
+          next.research.available = true;
+          return true;
+        }
+      }
+
+      if (
+        targetNode.kind === "miningDrill" &&
+        edge.targetPort === "motor-in" &&
+        product === ResourceType.MOTOR
+      ) {
+        const drill = next.miningDrills[edge.targetNode] ?? {
+          progress: 0,
+          iterations: 0,
+          selectedType: null,
+        };
+        next.miningDrills[edge.targetNode] = drill;
+        if (drill.selectedType && drill.iterations < MINING_DRILL_ITERATIONS) {
+          drill.progress = 0;
+          drill.iterations = Math.min(MINING_DRILL_ITERATIONS, drill.iterations + 1);
+          return true;
+        }
+      }
+
+      if (
+        targetNode.kind === "forest" &&
+        edge.targetPort === "forest-growth-in" &&
+        product === ResourceType.FOREST_GROWTH &&
+        next.forest.remaining < RESOURCE_CAPACITIES.forest
+      ) {
+        next.forest.remaining = Math.min(RESOURCE_CAPACITIES.forest, next.forest.remaining + 1);
+        return true;
+      }
+
+      if (isProcessorKind(targetNode.kind)) {
+        let processor = next.processors[edge.targetNode] ?? makeProcessorState(targetNode.kind);
+        next.processors[edge.targetNode] = processor;
+        const recipe = getProcessorRecipe(targetNode.kind, processor);
+        const requirement = recipe?.inputs.find((input) => input.id === edge.targetPort);
+        if (!recipe || !requirement) return false;
+        const productPort: Port = {
+          id: "background-product",
+          label: formatResourceType(product),
+          type: product,
+          direction: "output",
+        };
+        const requirementPort: Port = {
+          id: requirement.id,
+          label: requirement.label,
+          type: requirement.type,
+          direction: "input",
+        };
+        const smartDelivery = Boolean(
+          getSmartProcessorOutputPortId(edge.targetNode, processor) &&
+          isSmartProcessorTypingPort(edge.targetNode, edge.targetPort, processor),
+        );
+        const materialType = smartDelivery
+          ? getConcreteSmartProcessorMaterialType(edge.targetNode, product, processor)
+          : null;
+        if (smartDelivery && !materialType) return false;
+        if (materialType) {
+          const currentType = getConcreteSmartProcessorMaterialType(
+            edge.targetNode,
+            processor.materialType,
+            processor,
+          );
+          const materialLocked = hasSmartProcessorMaterialLock(
+            edge.targetNode,
+            processor,
+            recipe,
+          );
+          if (!currentType || (!materialLocked && currentType !== materialType)) {
+            processor = { ...processor, materialType };
+            next.processors[edge.targetNode] = processor;
+          }
+        }
+        if (
+          isCompatible(productPort, requirementPort) &&
+          (!smartDelivery || processor.materialType === product) &&
+          (processor.inputs[requirement.id] ?? 0) < PRODUCTION_INGREDIENT_CAPACITY
+        ) {
+          processor.inputs[requirement.id] = (processor.inputs[requirement.id] ?? 0) + 1;
+          return true;
+        }
+      }
+
+      if (
+        targetNode.kind === "filter" &&
+        edge.targetPort === "filter-in" &&
+        isInventoryItemType(product)
+      ) {
+        const filter = next.filters[edge.targetNode] ?? {
+          selectedType: null,
+          bufferedType: null,
+        };
+        next.filters[edge.targetNode] = filter;
+        if (filter.selectedType === product && filter.bufferedType === null) {
+          filter.bufferedType = product;
+          return true;
+        }
+      }
+
+      if (
+        targetNode.kind === "road" &&
+        edge.targetPort === "road-in" &&
+        isInventoryItemType(product)
+      ) {
+        const road = next.roads[edge.targetNode];
+        if (road && road.outboundType === null && road.pairedRoadId && road.pairedSector) {
+          road.outboundType = product;
+          return true;
+        }
+      }
+
+      if (targetNode.kind === "splitter" && edge.targetPort === "split-in") {
+        const splitter = next.splitters[edge.targetNode] ?? { nextOutput: "a" as const };
+        next.splitters[edge.targetNode] = splitter;
+        const preferred = splitter.nextOutput;
+        const alternate = preferred === "a" ? "b" : "a";
+        const deliverTo = (output: "a" | "b") => deliverProduct(
+          edge.targetNode,
+          output === "a" ? "split-a-out" : "split-b-out",
+          product,
+          undefined,
+          visited,
+        );
+        const deliveredTo = deliverTo(preferred)
+          ? preferred
+          : deliverTo(alternate)
+            ? alternate
+            : null;
+        if (deliveredTo) {
+          splitter.nextOutput = deliveredTo === "a" ? "b" : "a";
+          return true;
+        }
+      }
+
+      if (
+        targetNode.kind === "merger" &&
+        (edge.targetPort === "merge-a-in" || edge.targetPort === "merge-b-in") &&
+        getMergerInputType(edge.targetNode, edges) === product &&
+        deliverProduct(edge.targetNode, "merge-out", product, undefined, visited)
+      ) {
+        return true;
+      }
+
+      if (targetNode.kind === "joint" && edge.targetPort === "joint-in") {
+        const joint = next.joints[edge.targetNode] ?? { bufferedType: null };
+        next.joints[edge.targetNode] = joint;
+        if (joint.bufferedType === null) {
+          joint.bufferedType = product;
+          return true;
+        }
+      }
+
+      if (
+        targetNode.kind === "woodenChest" &&
+        edge.targetPort === "chest-in" &&
+        isInventoryItemType(product)
+      ) {
+        const chest = next.woodenChests[edge.targetNode] ?? { itemType: null, stored: 0 };
+        next.woodenChests[edge.targetNode] = chest;
+        if (chest.itemType && chest.itemType !== product) return false;
+        chest.itemType ??= product;
+        if (chest.stored < WOODEN_CHEST_CAPACITY) {
+          chest.stored += 1;
+          return true;
+        }
+      }
+
+      if (targetNode.kind === "storage" && isInventoryItemType(product)) {
+        const storage = next.storages[edge.targetNode];
+        if (storage && (storage.items[product] ?? 0) < storage.capacityPerItem) {
+          storage.items[product] = (storage.items[product] ?? 0) + 1;
+          return true;
+        }
+      }
+      return false;
+    };
+
+    Object.values(next.lakes).forEach((lake) => {
+      const waterRoutes = LAKE_WATER_OUTPUT_PORTS.flatMap((port) =>
+        outgoingEdgesByPort.get(`${lake.id}:${port.id}`) ?? []
+      );
+      const accumulated = lake.productionElapsed + elapsed;
+      const waterUnits = Math.floor(accumulated / LAKE_PRODUCTION_DURATION);
+      lake.productionElapsed = accumulated % LAKE_PRODUCTION_DURATION;
+      for (let unit = 0; unit < waterUnits && waterRoutes.length > 0; unit += 1) {
+        const startingIndex = lake.nextOutputIndex % waterRoutes.length;
+        for (let attempt = 0; attempt < waterRoutes.length; attempt += 1) {
+          const routeIndex = (startingIndex + attempt) % waterRoutes.length;
+          const route = waterRoutes[routeIndex];
+          if (
+            deliverProduct(
+              lake.id,
+              route.sourcePort,
+              ResourceType.WATER,
+              route.id,
+            )
+          ) {
+            lake.nextOutputIndex = (routeIndex + 1) % waterRoutes.length;
+            next.produced[ResourceType.WATER] += 1;
+            break;
+          }
+        }
+      }
+    });
+
+    simulationNodes
+      .filter((node) => node.kind === "joint")
+      .forEach((node) => {
+        const joint = next.joints[node.id] ?? { bufferedType: null };
+        next.joints[node.id] = joint;
+        if (joint.bufferedType && deliverProduct(node.id, "joint-out", joint.bufferedType)) {
+          joint.bufferedType = null;
+        }
+      });
+
+    simulationNodes
+      .filter((node) => node.kind === "road")
+      .forEach((node) => {
+        const road = next.roads[node.id];
+        if (road?.inboundType && deliverProduct(node.id, "road-out", road.inboundType)) {
+          road.inboundType = null;
+        }
+      });
+
+    simulationNodes
+      .filter((node) => node.kind === "filter")
+      .forEach((node) => {
+        const filter = next.filters[node.id] ?? { selectedType: null, bufferedType: null };
+        next.filters[node.id] = filter;
+        if (
+          filter.bufferedType &&
+          filter.bufferedType === filter.selectedType &&
+          deliverProduct(node.id, "filter-out", filter.bufferedType)
+        ) {
+          filter.bufferedType = null;
+        }
+      });
+
+    simulationNodes
+      .filter((node) => node.kind === "woodenChest")
+      .forEach((node) => {
+        const chest = next.woodenChests[node.id];
+        if (
+          chest?.itemType &&
+          chest.stored > 0 &&
+          deliverProduct(node.id, "chest-out", chest.itemType)
+        ) {
+          chest.stored -= 1;
+        }
+      });
+
+    simulationNodes
+      .filter((node) => isExtractorKind(node.kind))
+      .forEach((node) => {
+        const build = next.construction[node.id];
+        if (build && !build.complete) return;
+        const resourceEdge = incomingEdgeByPort.get(`${node.id}:resource-in`);
+        const recipe = resourceEdge ? EXTRACTOR_RECIPES[resourceEdge.type] : null;
+        const extractor = next.extractors[node.id] ?? {
+          progress: 0,
+          stored: 0,
+          full: false,
+          materialType: null,
+        };
+        next.extractors[node.id] = extractor;
+        const bufferedType = extractor.stored > 0
+          ? extractor.materialType ?? recipe?.product ?? null
+          : null;
+        if (bufferedType && deliverProduct(node.id, "product-out", bufferedType)) {
+          extractor.stored = Math.max(0, extractor.stored - 1);
+        }
+        extractor.full = extractor.stored >= EXTRACTOR_CAPACITY;
+        if (!recipe || !resourceEdge) {
+          extractor.progress = 0;
+          return;
+        }
+        if (
+          extractor.stored > 0 &&
+          extractor.materialType &&
+          extractor.materialType !== recipe.product
+        ) {
+          extractor.progress = 0;
+          return;
+        }
+        if (extractor.stored === 0) extractor.materialType = recipe.product;
+        const sourceAvailable = getResourceRemaining(
+          next,
+          resourceEdge.sourceNode,
+          resourceEdge.type,
+          edges,
+        ) > 0;
+        if (!sourceAvailable) {
+          extractor.progress = 0;
+          return;
+        }
+        if (extractor.stored >= EXTRACTOR_CAPACITY) return;
+        const duration = recipe.duration * getExtractorResearchCycleMultiplier(next.research);
+        extractor.progress = Math.min(100, extractor.progress + (elapsed / duration) * 100);
+        if (extractor.progress >= 100) {
+          extractor.progress = 0;
+          extractor.stored = Math.min(EXTRACTOR_CAPACITY, extractor.stored + 1);
+          extractor.full = extractor.stored >= EXTRACTOR_CAPACITY;
+          extractor.materialType = recipe.product;
+          next.produced[recipe.product] = (next.produced[recipe.product] ?? 0) + 1;
+          consumeResource(next, resourceEdge.sourceNode, resourceEdge.type, edges);
+        }
+      });
+
+    simulationNodes
+      .filter((node) => isProcessorKind(node.kind))
+      .forEach((node) => {
+        if (!isProcessorKind(node.kind)) return;
+        const build = next.construction[node.id];
+        if (build && !build.complete) return;
+        const processor = next.processors[node.id] ?? makeProcessorState(node.kind);
+        next.processors[node.id] = processor;
+        const recipe = getProcessorRecipe(node.kind, processor);
+        if (!recipe) {
+          processor.progress = 0;
+          return;
+        }
+        const materialType = getEffectiveSmartProcessorMaterialType(node.id, processor, edges);
+        const dynamicOutput = getSmartProcessorOutput(node.id, materialType, processor);
+        const output = dynamicOutput ?? (
+          isInventoryItemType(recipe.output.type)
+            ? { type: recipe.output.type, label: recipe.output.label }
+            : null
+        );
+        if (!output) {
+          processor.progress = 0;
+          return;
+        }
+        if (processor.stored > 0 && deliverProduct(node.id, recipe.output.id, output.type)) {
+          processor.stored -= 1;
+        }
+        processor.full = processor.stored >= PROCESSOR_CAPACITY;
+        if (processor.full) return;
+        const hasInputs = recipe.inputs.every(
+          (input) => (processor.inputs[input.id] ?? 0) >= input.amount,
+        );
+        if (!hasInputs) {
+          processor.progress = 0;
+          return;
+        }
+        processor.progress = Math.min(100, processor.progress + (elapsed / recipe.duration) * 100);
+        if (processor.progress >= 100) {
+          processor.progress = 0;
+          processor.stored = Math.min(PROCESSOR_CAPACITY, processor.stored + 1);
+          processor.full = processor.stored >= PROCESSOR_CAPACITY;
+          next.produced[output.type] = (next.produced[output.type] ?? 0) + 1;
+          recipe.inputs.forEach((input) => {
+            processor.inputs[input.id] = Math.max(
+              0,
+              (processor.inputs[input.id] ?? 0) - input.amount,
+            );
+          });
+        }
+      });
+
+    simulationNodes
+      .filter((node) => node.kind === "treePlanter")
+      .forEach((node) => {
+        const build = next.construction[node.id];
+        if (build && !build.complete) return;
+        const planter = next.treePlanters[node.id] ?? { progress: 0 };
+        next.treePlanters[node.id] = planter;
+        const powerEdge = incomingEdgeByPort.get(`${node.id}:power-in`);
+        const outputEdge = outgoingEdgesByPort.get(`${node.id}:forest-growth-out`)?.[0];
+        const generatorId = powerEdge
+          ? findPowerGeneratorId(powerEdge.sourceNode, edges, next.generators, next.pausedOutputs)
+          : null;
+        const generator = generatorId ? next.generators[generatorId] : null;
+        if (
+          !powerEdge ||
+          !outputEdge ||
+          !generator ||
+          generator.power < TREE_PLANTER_POWER_COST ||
+          next.forest.remaining >= RESOURCE_CAPACITIES.forest
+        ) {
+          planter.progress = 0;
+          return;
+        }
+        planter.progress = Math.min(
+          100,
+          planter.progress + (elapsed / TREE_PLANTER_CYCLE_DURATION) * 100,
+        );
+        if (
+          planter.progress >= 100 &&
+          deliverProduct(node.id, "forest-growth-out", ResourceType.FOREST_GROWTH)
+        ) {
+          planter.progress = 0;
+          generator.power -= TREE_PLANTER_POWER_COST;
+        }
+      });
+
+    const completedDrills = simulationNodes.flatMap((node) => {
+      if (node.kind !== "miningDrill") return [];
+      const drill = next.miningDrills[node.id];
+      return drill?.selectedType && drill.iterations >= MINING_DRILL_ITERATIONS
+        ? [{ nodeId: node.id, type: drill.selectedType }]
+        : [];
+    });
+    if (completedDrills.length > 0) {
+      const completedIds = new Set(completedDrills.map(({ nodeId }) => nodeId));
+      simulationNodes = simulationNodes.map((node) => {
+        const completion = completedDrills.find(({ nodeId }) => nodeId === node.id);
+        return completion ? createMinedDepositNode(node.id, completion.type) : node;
+      });
+      edges = edges.filter((edge) => !completedIds.has(edge.targetNode));
+      completedDrills.forEach(({ nodeId, type }) => {
+        next.minedDeposits[nodeId] = {
+          type,
+          remaining: MINED_DEPOSIT_CAPACITY,
+          capacity: MINED_DEPOSIT_CAPACITY,
+        };
+        delete next.miningDrills[nodeId];
+        delete next.construction[nodeId];
+      });
+    }
+  }
+
+  const collapsed = collapseDepletedResourceNodes(
+    simulationNodes,
+    factory.positions,
+    edges,
+    next,
+  );
+  simulationNodes = collapsed.nodes;
+  edges = collapsed.connections;
+  const normalizedEdges = normalizeDynamicConnections(edges, simulationNodes, next);
+  return {
+    ...factory,
+    nodes: simulationNodes.map(serializeNode),
+    positions: collapsed.positions,
+    connections: normalizedEdges,
+    runtime: next,
+    lastSimulatedAt: factory.lastSimulatedAt + simulatedElapsed,
+  };
+};
+
+const transferRoadItemsAcrossMaps = (
+  activeSector: string,
+  activeRuntime: Runtime,
+  mapFactories: MapFactoriesBySector,
+  mapNodeProgress: MapNodeProgressBySector,
+) => {
+  let nextActiveRuntime = activeRuntime;
+  let activeChanged = false;
+  let nextMapFactories = mapFactories;
+  const changedFactorySectors = new Set<string>();
+  const sourceSectors = [
+    activeSector,
+    ...Object.keys(mapFactories)
+      .filter((sectorKey) =>
+        sectorKey !== activeSector && isMapNodeUnlocked(mapNodeProgress, sectorKey)
+      )
+      .sort(),
+  ];
+  const getRuntime = (sectorKey: string) => sectorKey === activeSector
+    ? nextActiveRuntime
+    : nextMapFactories[sectorKey]?.runtime ?? null;
+  const getMutableRuntime = (sectorKey: string) => {
+    if (sectorKey === activeSector) {
+      if (!activeChanged) {
+        nextActiveRuntime = cloneStoredMaterialRuntime(nextActiveRuntime);
+        activeChanged = true;
+      }
+      return nextActiveRuntime;
+    }
+    const factory = nextMapFactories[sectorKey];
+    if (!factory) return null;
+    if (!changedFactorySectors.has(sectorKey)) {
+      if (nextMapFactories === mapFactories) nextMapFactories = { ...mapFactories };
+      nextMapFactories[sectorKey] = {
+        ...factory,
+        runtime: cloneStoredMaterialRuntime(factory.runtime),
+      };
+      changedFactorySectors.add(sectorKey);
+    }
+    return nextMapFactories[sectorKey].runtime;
+  };
+
+  sourceSectors.forEach((sectorKey) => {
+    const runtime = getRuntime(sectorKey);
+    if (!runtime) return;
+    Object.keys(runtime.roads ?? {}).sort().forEach((roadId) => {
+      const currentRuntime = getRuntime(sectorKey);
+      const road = currentRuntime?.roads[roadId];
+      if (!road?.outboundType || !road.pairedSector || !road.pairedRoadId) return;
+      if (!isMapNodeUnlocked(mapNodeProgress, road.pairedSector)) return;
+      const targetRuntime = getRuntime(road.pairedSector);
+      const targetRoad = targetRuntime?.roads[road.pairedRoadId];
+      if (!targetRoad || targetRoad.inboundType !== null) return;
+      const mutableSource = getMutableRuntime(sectorKey);
+      const mutableTarget = getMutableRuntime(road.pairedSector);
+      if (!mutableSource || !mutableTarget) return;
+      const transferredType = mutableSource.roads[roadId]?.outboundType ?? null;
+      if (!transferredType || mutableTarget.roads[road.pairedRoadId]?.inboundType !== null) return;
+      mutableSource.roads[roadId].outboundType = null;
+      mutableTarget.roads[road.pairedRoadId].inboundType = transferredType;
+    });
+  });
+
+  return {
+    activeRuntime: nextActiveRuntime,
+    mapFactories: nextMapFactories,
+    activeChanged,
+    factoriesChanged: changedFactorySectors.size > 0,
+  };
+};
+
 const connectionsAreEqual = (first: Connection[], second: Connection[]) =>
   first.length === second.length && first.every((connection, index) => {
     const candidate = second[index];
@@ -3605,6 +5921,21 @@ const getCurveControlPoints = (start: Position, end: Position, sourcePortId?: st
   const horizontalDistance = deltaX >= 0
     ? deltaX * 0.45
     : Math.max(82, Math.abs(deltaX) * 0.52);
+  const lakeOutputSide = sourcePortId ? getLakeWaterOutputPort(sourcePortId)?.side : null;
+  if (lakeOutputSide === "north" || lakeOutputSide === "south") {
+    const direction = lakeOutputSide === "north" ? -1 : 1;
+    const verticalDistance = Math.max(82, Math.abs(end.y - start.y) * 0.45);
+    return {
+      first: { x: start.x, y: start.y + direction * verticalDistance },
+      second: { x: end.x - horizontalDistance, y: end.y },
+    };
+  }
+  if (lakeOutputSide === "west") {
+    return {
+      first: { x: start.x - Math.max(82, Math.abs(deltaX) * 0.45), y: start.y },
+      second: { x: end.x - horizontalDistance, y: end.y },
+    };
+  }
   if (sourcePortId === "power-split-top" || sourcePortId === "power-split-bottom") {
     const direction = sourcePortId === "power-split-top" ? -1 : 1;
     const verticalDistance = Math.max(72, Math.abs(end.y - start.y) * 0.38);
@@ -3632,14 +5963,378 @@ const getCurveMidpoint = (start: Position, end: Position, sourcePortId?: string)
   };
 };
 
-const MIN_ZOOM = 0.45;
-const MAX_ZOOM = 1.8;
-const clampZoom = (value: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
-const getPortZoomScale = (value: number) => 1 + Math.max(0, 1 - value) * 0.65;
-const hasPlatformInsertModifier = (event: { metaKey: boolean; ctrlKey: boolean }) => {
-  const platform = typeof navigator === "undefined" ? "" : navigator.platform || navigator.userAgent;
-  return /Mac|iPhone|iPad|iPod/i.test(platform) ? event.metaKey : event.ctrlKey;
+const getBezierPoint = (
+  start: Position,
+  end: Position,
+  sourcePortId: string | undefined,
+  progress: number,
+): Position => {
+  const controls = getCurveControlPoints(start, end, sourcePortId);
+  const inverse = 1 - progress;
+  return {
+    x:
+      inverse ** 3 * start.x +
+      3 * inverse ** 2 * progress * controls.first.x +
+      3 * inverse * progress ** 2 * controls.second.x +
+      progress ** 3 * end.x,
+    y:
+      inverse ** 3 * start.y +
+      3 * inverse ** 2 * progress * controls.first.y +
+      3 * inverse * progress ** 2 * controls.second.y +
+      progress ** 3 * end.y,
+  };
 };
+
+const curveIntersectsBlackHole = (
+  start: Position,
+  end: Position,
+  sourcePortId: string | undefined,
+  holes: Iterable<BlackHoleObstacle>,
+  clearance = BLACK_HOLE_CLEARANCE,
+) => {
+  const blackHoles = Array.from(holes);
+  if (!blackHoles.length) return false;
+  const controls = getCurveControlPoints(start, end, sourcePortId);
+  const approximateLength =
+    Math.hypot(controls.first.x - start.x, controls.first.y - start.y) +
+    Math.hypot(controls.second.x - controls.first.x, controls.second.y - controls.first.y) +
+    Math.hypot(end.x - controls.second.x, end.y - controls.second.y);
+  const samples = Math.max(16, Math.ceil(approximateLength / 10));
+  for (let index = 0; index <= samples; index += 1) {
+    const point = getBezierPoint(start, end, sourcePortId, index / samples);
+    if (blackHoles.some((hole) =>
+      Math.hypot(point.x - hole.x, point.y - hole.y) <= hole.radius + clearance
+    )) return true;
+  }
+  return false;
+};
+
+const rectangleIntersectsBlackHole = (
+  rectangle: Position & NodeSize,
+  hole: BlackHoleObstacle,
+  clearance = BLACK_HOLE_CLEARANCE,
+) => {
+  const nearestX = Math.max(rectangle.x, Math.min(hole.x, rectangle.x + rectangle.width));
+  const nearestY = Math.max(rectangle.y, Math.min(hole.y, rectangle.y + rectangle.height));
+  return Math.hypot(hole.x - nearestX, hole.y - nearestY) <= hole.radius + clearance;
+};
+
+const getLakePolygonWorldPoints = (lake: LakeObstacle, clearance = 0): Position[] =>
+  lake.shape.map((scale, index) => {
+    const angle = (Math.PI * 2 * index) / lake.shape.length;
+    return {
+      x: lake.x + Math.cos(angle) * (lake.width / 2 + clearance) * scale,
+      y: lake.y + Math.sin(angle) * (lake.height / 2 + clearance) * scale,
+    };
+  });
+
+const getLakePolygonSvgPointList = (lake: LakeObstacle): Position[] =>
+  lake.shape.map((scale, index) => {
+    const angle = (Math.PI * 2 * index) / lake.shape.length;
+    return {
+      x: 50 + Math.cos(angle) * 50 * scale,
+      y: 50 + Math.sin(angle) * 50 * scale,
+    };
+  });
+
+const getLakePolygonSvgPoints = (lake: LakeObstacle) =>
+  getLakePolygonSvgPointList(lake).map((point) => `${point.x},${point.y}`).join(" ");
+
+const getLakeOutputPortPosition = (
+  lake: LakeObstacle,
+  side: LakeOutputDirection,
+): Position => getLakePolygonSvgPointList(lake).reduce((selected, point) => {
+  if (side === "north") return point.y < selected.y ? point : selected;
+  if (side === "south") return point.y > selected.y ? point : selected;
+  if (side === "west") return point.x < selected.x ? point : selected;
+  return point.x > selected.x ? point : selected;
+});
+
+const pointInPolygon = (point: Position, polygon: Position[]) => {
+  let inside = false;
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current++) {
+    const a = polygon[current];
+    const b = polygon[previous];
+    if (
+      ((a.y > point.y) !== (b.y > point.y)) &&
+      point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x
+    ) inside = !inside;
+  }
+  return inside;
+};
+
+const lineSegmentsIntersect = (a: Position, b: Position, c: Position, d: Position) => {
+  const cross = (first: Position, second: Position, third: Position) =>
+    (second.x - first.x) * (third.y - first.y) -
+    (second.y - first.y) * (third.x - first.x);
+  const onSegment = (first: Position, point: Position, second: Position) =>
+    point.x >= Math.min(first.x, second.x) &&
+    point.x <= Math.max(first.x, second.x) &&
+    point.y >= Math.min(first.y, second.y) &&
+    point.y <= Math.max(first.y, second.y);
+  const abC = cross(a, b, c);
+  const abD = cross(a, b, d);
+  const cdA = cross(c, d, a);
+  const cdB = cross(c, d, b);
+  if (abC === 0 && onSegment(a, c, b)) return true;
+  if (abD === 0 && onSegment(a, d, b)) return true;
+  if (cdA === 0 && onSegment(c, a, d)) return true;
+  if (cdB === 0 && onSegment(c, b, d)) return true;
+  return ((abC < 0 && abD > 0) || (abC > 0 && abD < 0)) &&
+    ((cdA < 0 && cdB > 0) || (cdA > 0 && cdB < 0));
+};
+
+const rectangleIntersectsLake = (
+  rectangle: Position & NodeSize,
+  lake: LakeObstacle,
+  clearance = BLACK_HOLE_CLEARANCE,
+) => {
+  const polygon = getLakePolygonWorldPoints(lake, clearance);
+  const corners = [
+    { x: rectangle.x, y: rectangle.y },
+    { x: rectangle.x + rectangle.width, y: rectangle.y },
+    { x: rectangle.x + rectangle.width, y: rectangle.y + rectangle.height },
+    { x: rectangle.x, y: rectangle.y + rectangle.height },
+  ];
+  if (corners.some((corner) => pointInPolygon(corner, polygon))) return true;
+  if (polygon.some((point) =>
+    point.x >= rectangle.x &&
+    point.x <= rectangle.x + rectangle.width &&
+    point.y >= rectangle.y &&
+    point.y <= rectangle.y + rectangle.height
+  )) return true;
+  return polygon.some((point, index) => {
+    const next = polygon[(index + 1) % polygon.length];
+    return corners.some((corner, cornerIndex) =>
+      lineSegmentsIntersect(
+        point,
+        next,
+        corner,
+        corners[(cornerIndex + 1) % corners.length],
+      )
+    );
+  });
+};
+
+const curveIntersectsLake = (
+  start: Position,
+  end: Position,
+  sourcePortId: string | undefined,
+  lakes: Iterable<LakeObstacle>,
+  clearance = BLACK_HOLE_CLEARANCE,
+) => {
+  const lakePolygons = Array.from(lakes).map((lake) =>
+    getLakePolygonWorldPoints(lake, clearance)
+  );
+  if (!lakePolygons.length) return false;
+  const controls = getCurveControlPoints(start, end, sourcePortId);
+  const approximateLength =
+    Math.hypot(controls.first.x - start.x, controls.first.y - start.y) +
+    Math.hypot(controls.second.x - controls.first.x, controls.second.y - controls.first.y) +
+    Math.hypot(end.x - controls.second.x, end.y - controls.second.y);
+  const samples = Math.max(20, Math.ceil(approximateLength / 10));
+  for (let index = 0; index <= samples; index += 1) {
+    const point = getBezierPoint(start, end, sourcePortId, index / samples);
+    if (lakePolygons.some((polygon) => pointInPolygon(point, polygon))) return true;
+  }
+  return false;
+};
+
+const getBlackHolePolygonPoints = (hole: BlackHoleObstacle) =>
+  hole.shape.map((scale, index) => {
+    const angle = (Math.PI * 2 * index) / hole.shape.length + hole.rotation * Math.PI / 180;
+    const distance = 43 * scale;
+    return `${50 + Math.cos(angle) * distance},${50 + Math.sin(angle) * distance}`;
+  }).join(" ");
+
+const collapseDepletedResourceNodes = (
+  nodes: NodeSpec[],
+  positions: Positions,
+  connections: Connection[],
+  runtime: Runtime,
+) => {
+  const depletedNodes = nodes.filter((node) => {
+    if (node.kind === "forest" || !isResourceNodeKind(node.kind)) return false;
+    const resourceType = runtime.minedDeposits[node.id]?.type ?? (
+      node.kind === "ironOre"
+        ? ResourceType.IRON_ORE
+        : node.kind === "copperOre"
+          ? ResourceType.COPPER_ORE
+          : ResourceType.STONE_CHUNKS
+    );
+    return getDirectResourceRemaining(runtime, node.id, resourceType) <= 0;
+  });
+  if (!depletedNodes.length) {
+    return { nodes, positions, connections, depletedNodes };
+  }
+
+  const depletedIds = new Set(depletedNodes.map((node) => node.id));
+  depletedNodes.forEach((node) => {
+    const position = positions[node.id];
+    if (!position) return;
+    const size = getEstimatedNodeSize(node);
+    const holeId = `black-hole-${node.id}`;
+    runtime.blackHoles[holeId] = createBlackHoleObstacle(
+      { x: position.x + size.width / 2, y: position.y + size.height / 2 },
+      RESOURCE_DEPLETION_BLACK_HOLE_RADIUS,
+      holeId,
+    );
+    delete runtime.minedDeposits[node.id];
+  });
+  const remainingNodes = nodes.filter((node) => !depletedIds.has(node.id));
+  const remainingConnections = connections.filter(
+    (connection) =>
+      !depletedIds.has(connection.sourceNode) && !depletedIds.has(connection.targetNode),
+  );
+  const nodeById = new Map(remainingNodes.map((node) => [node.id, node] as const));
+  const getEstimatedAnchor = (
+    nodeId: NodeId,
+    direction: PortDirection,
+    portId?: string,
+  ): Position | null => {
+    const hole = runtime.blackHoles[nodeId];
+    if (hole) {
+      return { x: hole.x, y: hole.y };
+    }
+    const lake = runtime.lakes[nodeId];
+    if (lake) {
+      const lakePort = portId ? getLakeWaterOutputPort(portId) : null;
+      if (direction === "output" && lakePort) {
+        const position = getLakeOutputPortPosition(lake, lakePort.side);
+        return {
+          x: lake.x - lake.width / 2 + lake.width * position.x / 100,
+          y: lake.y - lake.height / 2 + lake.height * position.y / 100,
+        };
+      }
+      return {
+        x: direction === "output" ? lake.x + lake.width / 2 : lake.x - lake.width / 2,
+        y: lake.y,
+      };
+    }
+    const node = nodeById.get(nodeId);
+    const position = positions[nodeId];
+    if (!node || !position) return null;
+    const size = getEstimatedNodeSize(node);
+    return {
+      x: direction === "output" ? position.x + size.width : position.x,
+      y: position.y + size.height / 2,
+    };
+  };
+  const safeConnections = remainingConnections.filter((connection) => {
+    const start = getEstimatedAnchor(connection.sourceNode, "output", connection.sourcePort);
+    const end = getEstimatedAnchor(connection.targetNode, "input", connection.targetPort);
+    if (!start || !end) return false;
+    const holes = Object.values(runtime.blackHoles).filter(
+      (hole) => hole.id !== connection.sourceNode && hole.id !== connection.targetNode,
+    );
+    const lakes = Object.values(runtime.lakes).filter(
+      (lake) => lake.id !== connection.sourceNode && lake.id !== connection.targetNode,
+    );
+    return !curveIntersectsBlackHole(start, end, connection.sourcePort, holes) &&
+      !curveIntersectsLake(start, end, connection.sourcePort, lakes);
+  });
+  return {
+    nodes: remainingNodes,
+    positions: Object.fromEntries(
+      Object.entries(positions).filter(([nodeId]) => !depletedIds.has(nodeId)),
+    ),
+    connections: safeConnections,
+    depletedNodes,
+  };
+};
+
+const MIN_ZOOM = 0.35;
+const MAX_ZOOM = 1.8;
+const STARTING_ZOOM_MAX = 0.45;
+const STARTING_RESOURCE_VIEW_PADDING = 14;
+const clampZoom = (value: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+const getPortZoomScale = (value: number) => 1 + Math.max(0, 1 - value);
+const getPortHitPadding = (value: number) => {
+  const visualScale = getPortZoomScale(value);
+  const paddingForThirtyPixelTarget = (30 / (visualScale * value) - 16) / 2;
+  return Math.max(7, paddingForThirtyPixelTarget);
+};
+const hasControlModifier = (event: { ctrlKey: boolean }) => event.ctrlKey;
+
+type KeyboardShortcut = {
+  group: "General" | "Control groups" | "Node";
+  name: string;
+  keys: string[];
+  description: string;
+};
+
+const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
+  {
+    group: "General",
+    name: "Undo",
+    keys: ["Ctrl", "Z"],
+    description: "Undo the last supported node, cable, or layout change.",
+  },
+  {
+    group: "General",
+    name: "Cancel active action",
+    keys: ["Esc"],
+    description: "Cancel placement or wiring and clear the current selection.",
+  },
+  {
+    group: "General",
+    name: "Delete selection",
+    keys: ["Delete / Backspace"],
+    description: "Delete selected nodes or the selected connection after any required confirmation.",
+  },
+  {
+    group: "General",
+    name: "Pan the field",
+    keys: ["Right-click", "Drag"],
+    description: "Right-click and drag anywhere on the field to pan.",
+  },
+  {
+    group: "General",
+    name: "Add to selection",
+    keys: ["Shift", "Click / Drag"],
+    description: "Hold Shift to add. Drag down-right to include touched control groups; drag up-left to prioritize only the highlighted nodes, even inside groups.",
+  },
+  {
+    group: "Control groups",
+    name: "Create a control group",
+    keys: ["Right-click", "Selected nodes"],
+    description: "Right-click while multiple nodes are highlighted, then choose a group color.",
+  },
+  {
+    group: "Control groups",
+    name: "Select and move a group",
+    keys: ["Click / Drag", "Group member"],
+    description: "Select or move every node in a control group together.",
+  },
+  {
+    group: "Control groups",
+    name: "Control one node",
+    keys: ["Double-click", "Group member"],
+    description: "Select and move one node without affecting the rest of its control group.",
+  },
+  {
+    group: "Control groups",
+    name: "Disband a control group",
+    keys: ["Right-click", "Group member"],
+    description: "Open the confirmation to disband the selected control group.",
+  },
+  {
+    group: "Node",
+    name: "Create another node",
+    keys: ["Ctrl", "Click node"],
+    description: "Keep placing copies of the same node while their build costs are available.",
+  },
+  {
+    group: "Node",
+    name: "Repeat placement",
+    keys: ["Shift", "Place node"],
+    description: "Place the current node and immediately prepare another copy. Release Shift to stop.",
+  },
+];
+
+const KEYBOARD_SHORTCUT_GROUPS = Array.from(
+  new Set(KEYBOARD_SHORTCUTS.map((shortcut) => shortcut.group)),
+);
 
 export default function Home() {
   const [nodes, setNodes] = useState<NodeSpec[]>(INITIAL_NODES);
@@ -3654,6 +6349,9 @@ export default function Home() {
   const [rewiringConnectionId, setRewiringConnectionId] = useState<string | null>(null);
   const [anchors, setAnchors] = useState<Record<string, Position>>({});
   const [activeFlows, setActiveFlows] = useState<Record<string, number>>({});
+  const [productionFlashTokens, setProductionFlashTokens] = useState<Record<NodeId, number>>({});
+  const [rapidClickAnimations, setRapidClickAnimations] = useState<Record<NodeId, RapidClickAnimation>>({});
+  const [rapidClickWarningOpen, setRapidClickWarningOpen] = useState(false);
   const [selectedConnection, setSelectedConnection] = useState<string | null>(null);
   const [selectedNodes, setSelectedNodes] = useState<NodeId[]>([]);
   const [controlGroups, setControlGroups] = useState<ControlGroup[]>([]);
@@ -3673,22 +6371,40 @@ export default function Home() {
   const [isPanning, setIsPanning] = useState(false);
   const [buildOpen, setBuildOpen] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
+  const [hoveredResearchProject, setHoveredResearchProject] = useState<ResearchProjectId | null>(null);
   const [mapOpen, setMapOpen] = useState(false);
   const [selectedMapSector, setSelectedMapSector] = useState<string | null>(null);
+  const [activeMapSector, setActiveMapSector] = useState(MAP_HOME_SECTOR);
+  const [mapNodeDialogSector, setMapNodeDialogSector] = useState<string | null>(null);
+  const [mapNodeDialogOpen, setMapNodeDialogOpen] = useState(false);
+  const [mapNodeDraftName, setMapNodeDraftName] = useState("");
   const [mapNodeProgress, setMapNodeProgress] = useState<MapNodeProgressBySector>(
     makeInitialMapNodeProgress,
   );
   const [journalOpen, setJournalOpen] = useState(false);
   const [journalCategory, setJournalCategory] = useState<BuildCategory>("all");
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [recipesOpen, setRecipesOpen] = useState(false);
+  const [recipeNodeFilters, setRecipeNodeFilters] = useState<string[]>([]);
   const [saveOpen, setSaveOpen] = useState(false);
   const [wireAnimationsEnabled, setWireAnimationsEnabled] = useState(true);
   const [shortcutBars, setShortcutBars] = useState<ShortcutBarsState>(makeDefaultShortcutBars);
+  const [shortcutBarGroups, setShortcutBarGroups] = useState<ShortcutBarGroup[]>([]);
+  const [shortcutBarSnapTarget, setShortcutBarSnapTarget] = useState<ShortcutBarSnapCandidate | null>(null);
   const [removeBuildCosts, setRemoveBuildCosts] = useState(false);
   const [devOpen, setDevOpen] = useState(false);
   const [saveSlots, setSaveSlots] = useState<Array<SaveGameSlot | null>>(makeEmptySaveSlots);
   const [saveNames, setSaveNames] = useState<string[]>(makeDefaultSaveNames);
-  const [pendingLoadSlot, setPendingLoadSlot] = useState<number | null>(null);
+  const [temporarySave, setTemporarySave] = useState<SaveGameSlot | null>(null);
+  const [temporarySaveFrequencyMinutes, setTemporarySaveFrequencyMinutes] = useState(
+    DEFAULT_TEMPORARY_SAVE_FREQUENCY_MINUTES,
+  );
+  const [temporarySaveFrequencyDraft, setTemporarySaveFrequencyDraft] = useState(
+    DEFAULT_TEMPORARY_SAVE_FREQUENCY_MINUTES,
+  );
+  const [temporarySaveFrequencyOpen, setTemporarySaveFrequencyOpen] = useState(false);
+  const [pendingLoadSlot, setPendingLoadSlot] = useState<number | "temporary" | null>(null);
   const [loadConfirmOpen, setLoadConfirmOpen] = useState(false);
   const [showBuildableOnly, setShowBuildableOnly] = useState(false);
   const [showNeverBuiltOnly, setShowNeverBuiltOnly] = useState(false);
@@ -3723,9 +6439,20 @@ export default function Home() {
   const [assemblerRecipeChangeDialogOpen, setAssemblerRecipeChangeDialogOpen] = useState(false);
   const [suppressFutureAssemblerRecipeWarnings, setSuppressFutureAssemblerRecipeWarnings] = useState(false);
   const [alwaysApproveAssemblerRecipeChanges, setAlwaysApproveAssemblerRecipeChanges] = useState(false);
+  const [miningDrillWarningOpen, setMiningDrillWarningOpen] = useState(false);
+  const [suppressFutureMiningDrillWarnings, setSuppressFutureMiningDrillWarnings] = useState(false);
+  const [skipMiningDrillCompletionWarning, setSkipMiningDrillCompletionWarning] = useState(false);
+  const [skipMultiConnectionTooltip, setSkipMultiConnectionTooltip] = useState(false);
+  const [skipShortcutBarGroupTooltip, setSkipShortcutBarGroupTooltip] = useState(false);
   const [placingNodeId, setPlacingNodeId] = useState<NodeId | null>(null);
   const [placementBlocked, setPlacementBlocked] = useState(false);
   const [dragCollisionBlocked, setDragCollisionBlocked] = useState(false);
+  const [replicationResourceWarning, setReplicationResourceWarning] = useState<{
+    clientX: number;
+    clientY: number;
+    token: number;
+  } | null>(null);
+  const [obstructionTooltip, setObstructionTooltip] = useState<ObstructionTooltipState | null>(null);
   const [pendingDeletionNodeIds, setPendingDeletionNodeIds] = useState<NodeId[]>([]);
   const [destroyDialogOpen, setDestroyDialogOpen] = useState(false);
   const [pendingDeletionIsHighlightedGroup, setPendingDeletionIsHighlightedGroup] = useState(false);
@@ -3752,10 +6479,34 @@ export default function Home() {
   const workspaceRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const destroyConfirmButtonRef = useRef<HTMLButtonElement>(null);
-  const mapViewportRef = useRef<HTMLDivElement>(null);
+  const activeMapSectorRef = useRef(activeMapSector);
+  const mapFactoriesRef = useRef<MapFactoriesBySector>({});
+  const mapFactoriesGeneratedAtStartRef = useRef(false);
+  const mapNodeProgressRef = useRef(mapNodeProgress);
+  const shortcutsListRef = useRef<HTMLDivElement>(null);
+  const recipesListRef = useRef<HTMLDivElement>(null);
+  const shortcutBarElementsRef = useRef<Partial<Record<ShortcutBarId, HTMLElement | null>>>({});
+  const shortcutBarsRef = useRef(shortcutBars);
+  const shortcutBarGroupsRef = useRef(shortcutBarGroups);
+  const shortcutBarDragRef = useRef<{
+    barId: ShortcutBarId;
+    movingBarIds: ShortcutBarId[];
+    bars: ShortcutBarsState;
+    rects: Partial<Record<ShortcutBarId, ShortcutBarScreenRect>>;
+    snap: ShortcutBarSnapCandidate | null;
+  } | null>(null);
   const buildOpenRef = useRef(false);
   const gameElapsedMsRef = useRef(0);
+  const lastTemporarySaveElapsedRef = useRef(0);
+  const rapidClickTimestampsRef = useRef<Record<NodeId, number[]>>({});
+  const rapidClickSequenceRef = useRef({ count: 0, lastAt: 0 });
+  const rapidClickAnimationTimeoutsRef = useRef<Record<NodeId, number>>({});
+  const rapidFieldClicksRef = useRef<{ timestamps: number[]; center: Position | null }>({
+    timestamps: [],
+    center: null,
+  });
   const portRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const anchorsRef = useRef<Record<string, Position>>({});
   const snappedPortRef = useRef<PortHandle | null>(null);
   const nodeRefs = useRef<Record<NodeId, HTMLElement | null>>({});
   const pathRefs = useRef<Record<string, SVGPathElement | null>>({});
@@ -3778,7 +6529,6 @@ export default function Home() {
   const lastPublishedRuntimeSignatureRef = useRef<string | null>(null);
   const pendingActiveFlowIdsRef = useRef(new Set<string>());
   const wireAnimationsEnabledRef = useRef(true);
-  const trackpadGestureUntilRef = useRef(0);
   const pinchFrameRef = useRef<number | null>(null);
   const pinchTargetZoomRef = useRef(zoom);
   const pinchAnchorRef = useRef({ clientX: 0, clientY: 0, activeUntil: 0 });
@@ -3802,8 +6552,10 @@ export default function Home() {
     nodeId: NodeId;
     lastPlacedNodeId: NodeId;
   } | null>(null);
+  const continuousReplicationRef = useRef(false);
   const placementBlockedRef = useRef(false);
   const lastCanvasPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const placementCancelContextMenuUntilRef = useRef(0);
   const buildSequenceRef = useRef<BuildSequence>(makeBuildSequence());
   const panRef = useRef<{
     startX: number;
@@ -3820,9 +6572,11 @@ export default function Home() {
   } | null>(null);
   const selectionBoxRef = useRef<(SelectionBox & {
     baseSelection: NodeId[];
+    basePrioritySelection: NodeId[];
     currentSelection: NodeId[];
     moved: boolean;
   }) | null>(null);
+  const prioritizedBoxSelectionRef = useRef<NodeId[]>([]);
   const dragRef = useRef<{
     primaryNodeId: NodeId;
     nodeIds: NodeId[];
@@ -3843,6 +6597,50 @@ export default function Home() {
     const now = performance.now();
     lastSimulationTickRef.current = now;
     lastSimulationUiUpdateRef.current = now;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (shortcutsOpen && shortcutsListRef.current) {
+      shortcutsListRef.current.scrollTop = 0;
+    }
+  }, [shortcutsOpen]);
+
+  useLayoutEffect(() => {
+    if (recipesOpen && recipesListRef.current) {
+      recipesListRef.current.scrollTop = 0;
+    }
+  }, [recipeNodeFilters, recipesOpen]);
+
+  const replicationResourceWarningToken = replicationResourceWarning?.token;
+  useEffect(() => {
+    if (replicationResourceWarningToken === undefined) return;
+    const timer = window.setTimeout(() => {
+      setReplicationResourceWarning(null);
+    }, 1800);
+    return () => window.clearTimeout(timer);
+  }, [replicationResourceWarningToken]);
+
+  const updateObstructionTooltip = useCallback((
+    kind: ObstructionTooltipState["kind"],
+    nodeId: NodeId,
+    event: React.PointerEvent,
+  ) => {
+    if (event.pointerType !== "mouse") return;
+    setObstructionTooltip({
+      kind,
+      nodeId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+  }, []);
+
+  const clearObstructionTooltip = useCallback((
+    kind: ObstructionTooltipState["kind"],
+    nodeId: NodeId,
+  ) => {
+    setObstructionTooltip((current) =>
+      current?.kind === kind && current.nodeId === nodeId ? null : current
+    );
   }, []);
 
   useEffect(() => {
@@ -3872,39 +6670,421 @@ export default function Home() {
     }
   }, []);
 
+  useEffect(() => {
+    shortcutBarsRef.current = shortcutBars;
+  }, [shortcutBars]);
+
+  useEffect(() => {
+    shortcutBarGroupsRef.current = shortcutBarGroups;
+  }, [shortcutBarGroups]);
+
+  const commitShortcutBars = useCallback((
+    updater: (current: ShortcutBarsState) => ShortcutBarsState,
+  ) => {
+    setShortcutBars((current) => {
+      const updated = updater(current);
+      shortcutBarsRef.current = updated;
+      return updated;
+    });
+  }, []);
+
+  const commitShortcutBarGroups = useCallback((
+    updater: (current: ShortcutBarGroup[]) => ShortcutBarGroup[],
+  ) => {
+    setShortcutBarGroups((current) => {
+      const updated = updater(current);
+      shortcutBarGroupsRef.current = updated;
+      return updated;
+    });
+  }, []);
+
   const updateShortcutBar = useCallback((
     barId: ShortcutBarId,
     updater: (current: ShortcutBarConfig) => ShortcutBarConfig,
   ) => {
-    setShortcutBars((current) => ({
+    commitShortcutBars((current) => ({
       ...current,
       [barId]: updater(current[barId]),
     }));
+  }, [commitShortcutBars]);
+
+  const reflowShortcutBarGroup = useCallback((group: ShortcutBarGroup) => {
+    const visibleBarIds = group.barIds.filter((barId) =>
+      shortcutBarsRef.current[barId].visible && shortcutBarElementsRef.current[barId],
+    );
+    if (visibleBarIds.length < 2) return;
+
+    const rects = Object.fromEntries(visibleBarIds.map((barId) => {
+      const bounds = shortcutBarElementsRef.current[barId]!.getBoundingClientRect();
+      return [barId, {
+        left: bounds.left,
+        top: bounds.top,
+        width: bounds.width,
+        height: bounds.height,
+      }];
+    })) as Record<ShortcutBarId, ShortcutBarScreenRect>;
+    const firstRect = rects[visibleBarIds[0]];
+    const placements: Partial<Record<ShortcutBarId, { left: number; top: number }>> = {};
+
+    if (group.axis === "horizontal") {
+      let nextLeft = firstRect.left;
+      visibleBarIds.forEach((barId) => {
+        placements[barId] = { left: nextLeft, top: firstRect.top };
+        nextLeft += rects[barId].width + SHORTCUT_BAR_GROUP_GAP;
+      });
+    } else {
+      const centerX = firstRect.left + firstRect.width / 2;
+      let nextTop = firstRect.top;
+      visibleBarIds.forEach((barId) => {
+        placements[barId] = {
+          left: centerX - rects[barId].width / 2,
+          top: nextTop,
+        };
+        nextTop += rects[barId].height + SHORTCUT_BAR_GROUP_GAP;
+      });
+    }
+
+    const placedRects = visibleBarIds.map((barId) => ({
+      left: placements[barId]!.left,
+      top: placements[barId]!.top,
+      right: placements[barId]!.left + rects[barId].width,
+      bottom: placements[barId]!.top + rects[barId].height,
+    }));
+    const minLeft = Math.min(...placedRects.map((rect) => rect.left));
+    const maxRight = Math.max(...placedRects.map((rect) => rect.right));
+    const minTop = Math.min(...placedRects.map((rect) => rect.top));
+    const maxBottom = Math.max(...placedRects.map((rect) => rect.bottom));
+    let shiftX = minLeft < 8 ? 8 - minLeft : 0;
+    let shiftY = minTop < 68 ? 68 - minTop : 0;
+    if (maxRight + shiftX > window.innerWidth - 8) {
+      shiftX += window.innerWidth - 8 - (maxRight + shiftX);
+    }
+    if (maxBottom + shiftY > window.innerHeight - 8) {
+      shiftY += window.innerHeight - 8 - (maxBottom + shiftY);
+    }
+
+    commitShortcutBars((current) => {
+      const updated = { ...current };
+      visibleBarIds.forEach((barId) => {
+        const placement = placements[barId]!;
+        const rect = rects[barId];
+        updated[barId] = {
+          ...current[barId],
+          position: {
+            x: Math.min(98, Math.max(
+              2,
+              ((placement.left + shiftX + rect.width / 2) / Math.max(1, window.innerWidth)) * 100,
+            )),
+            y: Math.max(68, placement.top + shiftY),
+          },
+        };
+      });
+      return updated;
+    });
+  }, [commitShortcutBars]);
+
+  const beginShortcutBarMove = useCallback((barId: ShortcutBarId) => {
+    const group = shortcutBarGroupsRef.current.find((candidate) =>
+      candidate.barIds.includes(barId),
+    );
+    const movingBarIds = (group?.barIds ?? [barId]).filter((candidateId) =>
+      shortcutBarsRef.current[candidateId].visible,
+    );
+    const rects: Partial<Record<ShortcutBarId, ShortcutBarScreenRect>> = {};
+    SHORTCUT_BAR_IDS.forEach((candidateId) => {
+      const element = shortcutBarElementsRef.current[candidateId];
+      if (!element || !shortcutBarsRef.current[candidateId].visible) return;
+      const bounds = element.getBoundingClientRect();
+      rects[candidateId] = {
+        left: bounds.left,
+        top: bounds.top,
+        width: bounds.width,
+        height: bounds.height,
+      };
+    });
+    shortcutBarDragRef.current = {
+      barId,
+      movingBarIds,
+      bars: shortcutBarsRef.current,
+      rects,
+      snap: null,
+    };
+    setShortcutBarSnapTarget(null);
   }, []);
 
+  const moveShortcutBar = useCallback((
+    barId: ShortcutBarId,
+    deltaX: number,
+    deltaY: number,
+  ) => {
+    const drag = shortcutBarDragRef.current;
+    if (!drag || drag.barId !== barId) return;
+    const movingRects = drag.movingBarIds
+      .map((movingBarId) => drag.rects[movingBarId])
+      .filter((rect): rect is ShortcutBarScreenRect => Boolean(rect));
+    if (movingRects.length === 0) return;
+
+    const minLeft = Math.min(...movingRects.map((rect) => rect.left));
+    const maxRight = Math.max(...movingRects.map((rect) => rect.left + rect.width));
+    const minTop = Math.min(...movingRects.map((rect) => rect.top));
+    const maxBottom = Math.max(...movingRects.map((rect) => rect.top + rect.height));
+    let finalDeltaX = Math.min(
+      window.innerWidth - 8 - maxRight,
+      Math.max(8 - minLeft, deltaX),
+    );
+    let finalDeltaY = Math.min(
+      window.innerHeight - 8 - maxBottom,
+      Math.max(68 - minTop, deltaY),
+    );
+
+    let nearestSnap: {
+      candidate: ShortcutBarSnapCandidate;
+      correctionX: number;
+      correctionY: number;
+      distance: number;
+    } | null = null;
+    drag.movingBarIds.forEach((movingBarId) => {
+      const movingRect = drag.rects[movingBarId];
+      if (!movingRect) return;
+      SHORTCUT_BAR_IDS.forEach((targetBarId) => {
+        if (drag.movingBarIds.includes(targetBarId)) return;
+        const targetRect = drag.rects[targetBarId];
+        if (!targetRect || !drag.bars[targetBarId].visible) return;
+        const movedLeft = movingRect.left + finalDeltaX;
+        const movedTop = movingRect.top + finalDeltaY;
+        const placements = [
+          {
+            axis: "horizontal" as const,
+            movingBeforeTarget: true,
+            left: targetRect.left - SHORTCUT_BAR_GROUP_GAP - movingRect.width,
+            top: targetRect.top,
+          },
+          {
+            axis: "horizontal" as const,
+            movingBeforeTarget: false,
+            left: targetRect.left + targetRect.width + SHORTCUT_BAR_GROUP_GAP,
+            top: targetRect.top,
+          },
+          {
+            axis: "vertical" as const,
+            movingBeforeTarget: true,
+            left: targetRect.left + (targetRect.width - movingRect.width) / 2,
+            top: targetRect.top - SHORTCUT_BAR_GROUP_GAP - movingRect.height,
+          },
+          {
+            axis: "vertical" as const,
+            movingBeforeTarget: false,
+            left: targetRect.left + (targetRect.width - movingRect.width) / 2,
+            top: targetRect.top + targetRect.height + SHORTCUT_BAR_GROUP_GAP,
+          },
+        ];
+        placements.forEach((placement) => {
+          const correctionX = placement.left - movedLeft;
+          const correctionY = placement.top - movedTop;
+          const distance = Math.hypot(correctionX, correctionY);
+          if (distance > SHORTCUT_BAR_SNAP_DISTANCE || (nearestSnap && distance >= nearestSnap.distance)) {
+            return;
+          }
+          const correctedDeltaX = finalDeltaX + correctionX;
+          const correctedDeltaY = finalDeltaY + correctionY;
+          if (
+            correctedDeltaX < 8 - minLeft ||
+            correctedDeltaX > window.innerWidth - 8 - maxRight ||
+            correctedDeltaY < 68 - minTop ||
+            correctedDeltaY > window.innerHeight - 8 - maxBottom
+          ) {
+            return;
+          }
+          nearestSnap = {
+            candidate: {
+              movingBarId,
+              targetBarId,
+              axis: placement.axis,
+              movingBeforeTarget: placement.movingBeforeTarget,
+            },
+            correctionX,
+            correctionY,
+            distance,
+          };
+        });
+      });
+    });
+
+    const resolvedSnap = nearestSnap as {
+      candidate: ShortcutBarSnapCandidate;
+      correctionX: number;
+      correctionY: number;
+      distance: number;
+    } | null;
+    if (resolvedSnap) {
+      finalDeltaX += resolvedSnap.correctionX;
+      finalDeltaY += resolvedSnap.correctionY;
+    }
+    const snapCandidate = resolvedSnap?.candidate ?? null;
+    drag.snap = snapCandidate;
+    setShortcutBarSnapTarget((current) =>
+      current?.movingBarId === snapCandidate?.movingBarId &&
+      current?.targetBarId === snapCandidate?.targetBarId &&
+      current?.axis === snapCandidate?.axis &&
+      current?.movingBeforeTarget === snapCandidate?.movingBeforeTarget
+        ? current
+        : snapCandidate,
+    );
+
+    commitShortcutBars((current) => {
+      const updated = { ...current };
+      drag.movingBarIds.forEach((movingBarId) => {
+        const origin = drag.bars[movingBarId];
+        updated[movingBarId] = {
+          ...current[movingBarId],
+          position: {
+            x: origin.position.x + (finalDeltaX / Math.max(1, window.innerWidth)) * 100,
+            y: origin.position.y + finalDeltaY,
+          },
+        };
+      });
+      return updated;
+    });
+  }, [commitShortcutBars]);
+
+  const finishShortcutBarMove = useCallback((barId: ShortcutBarId, commit: boolean) => {
+    const drag = shortcutBarDragRef.current;
+    if (!drag || drag.barId !== barId) return;
+    shortcutBarDragRef.current = null;
+    setShortcutBarSnapTarget(null);
+    if (!commit || !drag.snap) return;
+
+    const { movingBarId, targetBarId, axis, movingBeforeTarget } = drag.snap;
+    const groups = shortcutBarGroupsRef.current;
+    const movingGroup = groups.find((group) => group.barIds.includes(movingBarId));
+    const targetGroup = groups.find((group) => group.barIds.includes(targetBarId));
+    const sortAlongAxis = (barIds: ShortcutBarId[]) => [...barIds].sort((firstId, secondId) => {
+      const firstRect = shortcutBarElementsRef.current[firstId]?.getBoundingClientRect();
+      const secondRect = shortcutBarElementsRef.current[secondId]?.getBoundingClientRect();
+      if (!firstRect || !secondRect) return 0;
+      return axis === "horizontal"
+        ? firstRect.left - secondRect.left
+        : firstRect.top - secondRect.top;
+    });
+    const movingIds = sortAlongAxis(movingGroup?.barIds ?? [movingBarId]);
+    const targetIds = sortAlongAxis(targetGroup?.barIds ?? [targetBarId]);
+    const mergedGroup: ShortcutBarGroup = {
+      axis,
+      barIds: [...new Set(
+        movingBeforeTarget
+          ? [...movingIds, ...targetIds]
+          : [...targetIds, ...movingIds],
+      )],
+    };
+    const mergedIds = new Set(mergedGroup.barIds);
+    commitShortcutBarGroups((current) => [
+      ...current.filter((group) => !group.barIds.some((candidateId) => mergedIds.has(candidateId))),
+      mergedGroup,
+    ]);
+    window.requestAnimationFrame(() => reflowShortcutBarGroup(mergedGroup));
+  }, [commitShortcutBarGroups, reflowShortcutBarGroup]);
+
+  const rotateShortcutBar = useCallback((barId: ShortcutBarId) => {
+    const group = shortcutBarGroupsRef.current.find((candidate) => candidate.barIds.includes(barId));
+    if (!group) {
+      updateShortcutBar(barId, (current) => ({
+        ...current,
+        rotation: current.rotation === 0 ? 90 : 0,
+      }));
+      return;
+    }
+
+    const groupedBarIds = new Set(group.barIds);
+    commitShortcutBars((current) => {
+      const updated = { ...current };
+      group.barIds.forEach((groupedBarId) => {
+        updated[groupedBarId] = {
+          ...current[groupedBarId],
+          rotation: current[groupedBarId].rotation === 0 ? 90 : 0,
+        };
+      });
+      return updated;
+    });
+    const rotatedGroup: ShortcutBarGroup = {
+      ...group,
+      axis: group.axis === "horizontal" ? "vertical" : "horizontal",
+    };
+    commitShortcutBarGroups((current) => current.map((candidate) =>
+      candidate.barIds.some((candidateBarId) => groupedBarIds.has(candidateBarId))
+        ? rotatedGroup
+        : candidate
+    ));
+    window.requestAnimationFrame(() => reflowShortcutBarGroup(rotatedGroup));
+  }, [commitShortcutBarGroups, commitShortcutBars, reflowShortcutBarGroup, updateShortcutBar]);
+
+  const finishShortcutBarResize = useCallback((barId: ShortcutBarId) => {
+    const group = shortcutBarGroupsRef.current.find((candidate) => candidate.barIds.includes(barId));
+    if (group) window.requestAnimationFrame(() => reflowShortcutBarGroup(group));
+  }, [reflowShortcutBarGroup]);
+
+  const separateShortcutBarGroup = useCallback((barId: ShortcutBarId) => {
+    commitShortcutBarGroups((current) =>
+      current.filter((group) => !group.barIds.includes(barId)),
+    );
+  }, [commitShortcutBarGroups]);
+
   const toggleShortcutBarVisibility = useCallback((barId: ShortcutBarId) => {
-    updateShortcutBar(barId, (current) => ({ ...current, visible: !current.visible }));
-  }, [updateShortcutBar]);
+    const willBeVisible = !shortcutBarsRef.current[barId].visible;
+    updateShortcutBar(barId, (current) => ({ ...current, visible: willBeVisible }));
+    if (!willBeVisible) separateShortcutBarGroup(barId);
+  }, [separateShortcutBarGroup, updateShortcutBar]);
 
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(SAVE_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed)) throw new Error("Save data is not a slot list.");
-      const nextSlots = makeEmptySaveSlots();
-      for (let index = 0; index < SAVE_SLOT_COUNT; index += 1) {
-        const candidate = parsed[index];
-        if (candidate == null) continue;
-        if (!isSaveGameSlot(candidate)) throw new Error(`Save slot ${index + 1} is invalid.`);
-        nextSlots[index] = candidate;
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed)) throw new Error("Save data is not a slot list.");
+        const nextSlots = makeEmptySaveSlots();
+        for (let index = 0; index < SAVE_SLOT_COUNT; index += 1) {
+          const candidate = parsed[index];
+          if (candidate == null) continue;
+          if (!isSaveGameSlot(candidate)) throw new Error(`Save slot ${index + 1} is invalid.`);
+          nextSlots[index] = candidate;
+        }
+        setSaveSlots(nextSlots);
+        setSaveNames(nextSlots.map((slot, index) => slot?.name ?? `Save ${index + 1}`));
       }
-      setSaveSlots(nextSlots);
-      setSaveNames(nextSlots.map((slot, index) => slot?.name ?? `Save ${index + 1}`));
     } catch {
       toast.error("Local saves could not be read", {
         description: "The existing save data is incompatible or damaged. New saves can still overwrite it.",
       });
+    }
+    try {
+      const rawTemporarySave = window.localStorage.getItem(TEMPORARY_SAVE_STORAGE_KEY);
+      if (rawTemporarySave) {
+        const parsedTemporarySave = JSON.parse(rawTemporarySave) as unknown;
+        if (!isSaveGameSlot(parsedTemporarySave)) {
+          throw new Error("Temporary save data is invalid.");
+        }
+        setTemporarySave({
+          ...parsedTemporarySave,
+          name: formatTemporarySaveName(parsedTemporarySave.savedAt),
+        });
+      }
+    } catch {
+      toast.error("Temporary save could not be read", {
+        description: "A new temporary save will replace it after the configured play interval.",
+      });
+    }
+    try {
+      const rawFrequency = window.localStorage.getItem(TEMPORARY_SAVE_FREQUENCY_STORAGE_KEY);
+      const storedFrequency = Math.floor(Number(rawFrequency));
+      if (
+        rawFrequency &&
+        storedFrequency >= MIN_TEMPORARY_SAVE_FREQUENCY_MINUTES &&
+        storedFrequency <= MAX_TEMPORARY_SAVE_FREQUENCY_MINUTES
+      ) {
+        setTemporarySaveFrequencyMinutes(storedFrequency);
+        setTemporarySaveFrequencyDraft(storedFrequency);
+      }
+    } catch {
+      // The default interval remains available when the preference cannot be read.
     }
   }, []);
 
@@ -3925,15 +7105,21 @@ export default function Home() {
   }, [individualControlNodeId]);
 
   useEffect(() => {
-    if (!mapOpen) return;
-    const frame = window.requestAnimationFrame(() => {
-      const viewport = mapViewportRef.current;
-      if (!viewport) return;
-      viewport.scrollLeft = (viewport.scrollWidth - viewport.clientWidth) / 2;
-      viewport.scrollTop = (viewport.scrollHeight - viewport.clientHeight) / 2;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [mapOpen]);
+    activeMapSectorRef.current = activeMapSector;
+  }, [activeMapSector]);
+
+  useEffect(() => {
+    mapNodeProgressRef.current = mapNodeProgress;
+  }, [mapNodeProgress]);
+
+  useEffect(() => {
+    if (mapFactoriesGeneratedAtStartRef.current) return;
+    mapFactoriesGeneratedAtStartRef.current = true;
+    mapFactoriesRef.current = generateMapFactoriesAtGameStart(
+      runtimeRef.current,
+      MIN_ZOOM,
+    );
+  }, []);
 
   useEffect(() => {
     runtimeRef.current = runtime;
@@ -3950,6 +7136,95 @@ export default function Home() {
   useEffect(() => {
     isRunningRef.current = isRunning;
   }, [isRunning]);
+
+  const recordRapidNodeClick = useCallback((nodeId: NodeId) => {
+    const now = performance.now();
+    const recentClicks = (rapidClickTimestampsRef.current[nodeId] ?? [])
+      .filter((timestamp) => now - timestamp <= RAPID_CLICK_WINDOW_MS);
+    recentClicks.push(now);
+    if (recentClicks.length < RAPID_CLICK_TARGET) {
+      rapidClickTimestampsRef.current[nodeId] = recentClicks;
+      return;
+    }
+    rapidClickTimestampsRef.current[nodeId] = [];
+
+    const variant = Math.floor(Math.random() * 5) as RapidClickAnimationVariant;
+    setRapidClickAnimations((current) => ({
+      ...current,
+      [nodeId]: { token: Date.now(), variant },
+    }));
+    const previousTimeout = rapidClickAnimationTimeoutsRef.current[nodeId];
+    if (previousTimeout) window.clearTimeout(previousTimeout);
+    rapidClickAnimationTimeoutsRef.current[nodeId] = window.setTimeout(() => {
+      setRapidClickAnimations((current) => {
+        if (!current[nodeId]) return current;
+        const updated = { ...current };
+        delete updated[nodeId];
+        return updated;
+      });
+      delete rapidClickAnimationTimeoutsRef.current[nodeId];
+    }, RAPID_CLICK_ANIMATION_DURATION_MS);
+
+    const sequence = rapidClickSequenceRef.current;
+    const nextCount = now - sequence.lastAt <= RAPID_CLICK_SEQUENCE_WINDOW_MS
+      ? sequence.count + 1
+      : 1;
+    if (nextCount >= 3) {
+      rapidClickSequenceRef.current = { count: 0, lastAt: 0 };
+      setRapidClickWarningOpen(true);
+    } else {
+      rapidClickSequenceRef.current = { count: nextCount, lastAt: now };
+    }
+  }, []);
+
+  useEffect(() => () => {
+    Object.values(rapidClickAnimationTimeoutsRef.current).forEach((timeout) => {
+      window.clearTimeout(timeout);
+    });
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!isRunningRef.current) return;
+      const now = Date.now();
+      const activeSector = activeMapSectorRef.current;
+      let changed = false;
+      const advancedFactories = Object.fromEntries(
+        Object.entries(mapFactoriesRef.current).map(([sectorKey, factory]) => {
+          if (sectorKey === activeSector) return [sectorKey, factory];
+          if (!isMapNodeUnlocked(mapNodeProgressRef.current, sectorKey)) {
+            return [sectorKey, factory];
+          }
+          const elapsed = Math.max(0, now - factory.lastSimulatedAt);
+          if (elapsed <= 0) return [sectorKey, factory];
+          changed = true;
+          return [
+            sectorKey,
+            advanceMapFactoryInBackground(
+              factory,
+              elapsed,
+              runtimeRef.current.research,
+            ),
+          ];
+        }),
+      ) as MapFactoriesBySector;
+      const transferred = transferRoadItemsAcrossMaps(
+        activeSector,
+        runtimeRef.current,
+        changed ? advancedFactories : mapFactoriesRef.current,
+        mapNodeProgressRef.current,
+      );
+      if (changed || transferred.factoriesChanged) {
+        mapFactoriesRef.current = transferred.mapFactories;
+      }
+      if (transferred.activeChanged) {
+        runtimeRef.current = transferred.activeRuntime;
+        lastPublishedRuntimeSignatureRef.current = null;
+        setRuntime(transferred.activeRuntime);
+      }
+    }, BACKGROUND_SIMULATION_STEP_MS);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const controlGroupByNodeId = useMemo(() => {
     const groups = new Map<NodeId, ControlGroup>();
@@ -4010,6 +7285,7 @@ export default function Home() {
     controlGroupsRef.current = nextGroups;
     setControlGroups(nextGroups);
     selectedNodesRef.current = nodeIds;
+    prioritizedBoxSelectionRef.current = [];
     setSelectedNodes(nodeIds);
     setActiveControlGroupId(group.id);
     individualControlNodeRef.current = null;
@@ -4113,6 +7389,7 @@ export default function Home() {
         y: (rect.top - canvasRect.top + rect.height / 2) / zoomRef.current,
       };
     });
+    anchorsRef.current = next;
     setAnchors(next);
   }, []);
 
@@ -4178,8 +7455,38 @@ export default function Home() {
     const viewport = workspaceRef.current;
     if (!viewport) return;
     window.requestAnimationFrame(() => {
-      viewport.scrollLeft = HOME_OFFSET.x * zoomRef.current;
-      viewport.scrollTop = HOME_OFFSET.y * zoomRef.current;
+      const resourceWidth = STARTING_RESOURCE_BOUNDS.right - STARTING_RESOURCE_BOUNDS.left;
+      const resourceHeight = STARTING_RESOURCE_BOUNDS.bottom - STARTING_RESOURCE_BOUNDS.top;
+      const availableWidth = Math.max(
+        1,
+        viewport.clientWidth - STARTING_RESOURCE_VIEW_PADDING * 2,
+      );
+      const availableHeight = Math.max(
+        1,
+        viewport.clientHeight - STARTING_RESOURCE_VIEW_PADDING * 2,
+      );
+      const startingZoom = clampZoom(Math.min(
+        STARTING_ZOOM_MAX,
+        availableWidth / resourceWidth,
+        availableHeight / resourceHeight,
+      ));
+      const resourceCenterX = (
+        STARTING_RESOURCE_BOUNDS.left + STARTING_RESOURCE_BOUNDS.right
+      ) / 2;
+      const resourceCenterY = (
+        STARTING_RESOURCE_BOUNDS.top + STARTING_RESOURCE_BOUNDS.bottom
+      ) / 2;
+      zoomRef.current = startingZoom;
+      pinchTargetZoomRef.current = startingZoom;
+      flushSync(() => setZoom(startingZoom));
+      viewport.scrollLeft = Math.max(
+        0,
+        resourceCenterX * startingZoom - viewport.clientWidth / 2,
+      );
+      viewport.scrollTop = Math.max(
+        0,
+        resourceCenterY * startingZoom - viewport.clientHeight / 2,
+      );
       updateGridPosition();
       measureAnchors();
     });
@@ -4200,6 +7507,16 @@ export default function Home() {
       y: (clientY - rect.top) / zoomRef.current,
     };
   }, []);
+
+  const getPortWorldPosition = useCallback((nodeId: NodeId, portId: string) => {
+    const key = `${nodeId}:${portId}`;
+    const cached = anchorsRef.current[key];
+    if (cached) return cached;
+    const element = portRefs.current[key];
+    if (!element) return null;
+    const rect = element.getBoundingClientRect();
+    return pointFromEvent(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  }, [pointFromEvent]);
 
   const updateSnappedPort = useCallback((next: PortHandle | null) => {
     snappedPortRef.current = next;
@@ -4268,6 +7585,22 @@ export default function Home() {
       ...group,
       nodeIds: [...group.nodeIds],
     }));
+    if (snapshot.mapFactoryStates) {
+      mapFactoriesRef.current = {
+        ...mapFactoriesRef.current,
+        ...structuredClone(snapshot.mapFactoryStates),
+      };
+    }
+    if (snapshot.mapFactoryRuntimes) {
+      mapFactoriesRef.current = Object.fromEntries(
+        Object.entries(mapFactoriesRef.current).map(([sectorKey, factory]) => {
+          const restoredRuntime = snapshot.mapFactoryRuntimes?.[sectorKey];
+          return [sectorKey, restoredRuntime
+            ? { ...factory, runtime: cloneStoredMaterialRuntime(restoredRuntime) }
+            : factory];
+        }),
+      );
+    }
 
     nodesRef.current = restoredNodes;
     positionsRef.current = restoredPositions;
@@ -4282,6 +7615,7 @@ export default function Home() {
     setActiveFlows({});
     setSelectedConnection(null);
     selectedNodesRef.current = [];
+    prioritizedBoxSelectionRef.current = [];
     setSelectedNodes([]);
     setActiveControlGroupId(null);
     individualControlNodeRef.current = null;
@@ -4305,6 +7639,7 @@ export default function Home() {
     setRewiringConnectionId(null);
     placingNodeRef.current = null;
     repeatPlacementPreviewRef.current = null;
+    continuousReplicationRef.current = false;
     pendingPlacementUndoRef.current = null;
     setPlacingNodeId(null);
     updatePlacementBlocked(false);
@@ -4370,6 +7705,12 @@ export default function Home() {
   ) => {
     const size = getNodeSize(node.id, node);
     const candidateRect = { ...position, ...size };
+    if (Object.values(runtimeRef.current.blackHoles ?? {}).some((hole) =>
+      rectangleIntersectsBlackHole(candidateRect, hole)
+    )) return true;
+    if (Object.values(runtimeRef.current.lakes ?? {}).some((lake) =>
+      rectangleIntersectsLake(candidateRect, lake)
+    )) return true;
     return nodesRef.current.some((otherNode) => {
       if (ignoredNodeIds.has(otherNode.id)) return false;
       const otherPosition = positionsRef.current[otherNode.id];
@@ -4381,28 +7722,198 @@ export default function Home() {
     });
   }, [getNodeSize]);
 
+  const movedConnectionsCrossBlackHole = useCallback((
+    candidatePositions: Positions,
+    movingNodeIds: ReadonlySet<NodeId>,
+  ) => connectionsRef.current.some((connection) => {
+    if (!movingNodeIds.has(connection.sourceNode) && !movingNodeIds.has(connection.targetNode)) {
+      return false;
+    }
+    const currentStart = getPortWorldPosition(connection.sourceNode, connection.sourcePort);
+    const currentEnd = getPortWorldPosition(connection.targetNode, connection.targetPort);
+    if (!currentStart || !currentEnd) return false;
+    const offsetAnchor = (anchor: Position, nodeId: NodeId) => {
+      if (!movingNodeIds.has(nodeId)) return anchor;
+      const currentPosition = positionsRef.current[nodeId];
+      const nextPosition = candidatePositions[nodeId];
+      if (!currentPosition || !nextPosition) return anchor;
+      return {
+        x: anchor.x + nextPosition.x - currentPosition.x,
+        y: anchor.y + nextPosition.y - currentPosition.y,
+      };
+    };
+    const holes = Object.values(runtimeRef.current.blackHoles ?? {}).filter(
+      (hole) => hole.id !== connection.sourceNode && hole.id !== connection.targetNode,
+    );
+    const lakes = Object.values(runtimeRef.current.lakes ?? {}).filter(
+      (lake) => lake.id !== connection.sourceNode && lake.id !== connection.targetNode,
+    );
+    const start = offsetAnchor(currentStart, connection.sourceNode);
+    const end = offsetAnchor(currentEnd, connection.targetNode);
+    return curveIntersectsBlackHole(start, end, connection.sourcePort, holes) ||
+      curveIntersectsLake(start, end, connection.sourcePort, lakes);
+  }), [getPortWorldPosition]);
+
+  const recordRapidFieldClick = useCallback((
+    point: Position,
+    target: EventTarget | null,
+  ) => {
+    const targetElement = target instanceof Element ? target : null;
+    if (
+      !targetElement?.closest(".node-canvas") ||
+      targetElement.closest(".node-card, .cable-group, .black-hole-obstacle, .lake-obstacle")
+    ) {
+      rapidFieldClicksRef.current = { timestamps: [], center: null };
+      return;
+    }
+
+    const now = performance.now();
+    const previous = rapidFieldClicksRef.current;
+    const clustered = previous.center &&
+      Math.hypot(point.x - previous.center.x, point.y - previous.center.y) <=
+        BLACK_HOLE_CLICK_CLUSTER_RADIUS;
+    const timestamps = clustered
+      ? previous.timestamps.filter((timestamp) => now - timestamp <= RAPID_CLICK_WINDOW_MS)
+      : [];
+    timestamps.push(now);
+    if (timestamps.length < RAPID_CLICK_TARGET) {
+      rapidFieldClicksRef.current = {
+        timestamps,
+        center: clustered && previous.center
+          ? {
+              x: (previous.center.x * (timestamps.length - 1) + point.x) / timestamps.length,
+              y: (previous.center.y * (timestamps.length - 1) + point.y) / timestamps.length,
+            }
+          : point,
+      };
+      return;
+    }
+    rapidFieldClicksRef.current = { timestamps: [], center: null };
+
+    const center = previous.center ?? point;
+    const canvas = canvasRef.current;
+    if (
+      !canvas ||
+      center.x < BLACK_HOLE_RADIUS + BLACK_HOLE_CLEARANCE ||
+      center.y < BLACK_HOLE_RADIUS + BLACK_HOLE_CLEARANCE ||
+      center.x > canvas.clientWidth - BLACK_HOLE_RADIUS - BLACK_HOLE_CLEARANCE ||
+      center.y > canvas.clientHeight - BLACK_HOLE_RADIUS - BLACK_HOLE_CLEARANCE
+    ) return;
+
+    const candidate = createBlackHoleObstacle(center);
+    const existingHoles = Object.values(runtimeRef.current.blackHoles ?? {});
+    const touchesHole = existingHoles.some((hole) =>
+      Math.hypot(candidate.x - hole.x, candidate.y - hole.y) <=
+        candidate.radius + hole.radius + BLACK_HOLE_CLEARANCE
+    );
+    const touchesLake = Object.values(runtimeRef.current.lakes ?? {}).some((lake) =>
+      rectangleIntersectsLake({
+        x: candidate.x - candidate.radius,
+        y: candidate.y - candidate.radius,
+        width: candidate.radius * 2,
+        height: candidate.radius * 2,
+      }, lake)
+    );
+    const touchesNode = nodesRef.current.some((node) => {
+      const position = positionsRef.current[node.id];
+      return Boolean(
+        position &&
+        rectangleIntersectsBlackHole(
+          { ...position, ...getNodeSize(node.id, node) },
+          candidate,
+        )
+      );
+    });
+    const touchesCable = connectionsRef.current.some((connection) => {
+      const start = getPortWorldPosition(connection.sourceNode, connection.sourcePort);
+      const end = getPortWorldPosition(connection.targetNode, connection.targetPort);
+      return Boolean(
+        start &&
+        end &&
+        curveIntersectsBlackHole(start, end, connection.sourcePort, [candidate]),
+      );
+    });
+    if (touchesHole || touchesLake || touchesNode || touchesCable) return;
+
+    const nextRuntime = cloneStoredMaterialRuntime(runtimeRef.current);
+    nextRuntime.blackHoles[candidate.id] = candidate;
+    runtimeRef.current = nextRuntime;
+    lastPublishedRuntimeSignatureRef.current = null;
+    setRuntime(nextRuntime);
+    window.requestAnimationFrame(measureAnchors);
+  }, [getNodeSize, getPortWorldPosition, measureAnchors]);
+
+  const removeFilledBlackHole = useCallback((holeId: NodeId) => {
+    const hole = runtimeRef.current.blackHoles[holeId];
+    if (!hole || hole.stoneFilled < getBlackHoleStoneRequirement(hole)) return;
+    const undoSnapshot = captureGraphUndoSnapshot();
+    const nextRuntime = cloneStoredMaterialRuntime(runtimeRef.current);
+    delete nextRuntime.blackHoles[holeId];
+    const nextConnections = connectionsRef.current.filter(
+      (connection) => connection.sourceNode !== holeId && connection.targetNode !== holeId,
+    );
+    runtimeRef.current = nextRuntime;
+    connectionsRef.current = nextConnections;
+    lastPublishedRuntimeSignatureRef.current = null;
+    delete portRefs.current[`${holeId}:${BLACK_HOLE_INPUT_PORT.id}`];
+    delete anchorsRef.current[`${holeId}:${BLACK_HOLE_INPUT_PORT.id}`];
+    setRuntime(nextRuntime);
+    setConnections(nextConnections);
+    setSelectedConnection((current) =>
+      current && !nextConnections.some((connection) => connection.id === current) ? null : current
+    );
+    pushUndoEntry({ kind: "graph", snapshot: undoSnapshot });
+    window.requestAnimationFrame(measureAnchors);
+    toast.success("Black Hole filled in");
+  }, [captureGraphUndoSnapshot, measureAnchors, pushUndoEntry]);
+
   const buildNode = useCallback((
     kind: PurchasableKind,
     recipe: BuildIngredient[],
     repeatOriginNodeId?: NodeId,
   ) => {
+    if (
+      kind === "researchFoundry" &&
+      hasNodeKindAcrossMaps(
+        "researchFoundry",
+        nodesRef.current,
+        activeMapSectorRef.current,
+        mapFactoriesRef.current,
+      )
+    ) {
+      toast.error("Research Center limit reached", {
+        description: "Only one Research Center can exist across all map nodes.",
+      });
+      return false;
+    }
     const unlockContext: BuildUnlockContext = {
       runtime: runtimeRef.current,
       builtKinds: builtBuildKinds,
       logisticsUnlocked: logisticsUnlockedRef.current,
     };
-    if (
-      !revealedBuildKinds.has(kind) &&
-      !isBuildUnlockSatisfied(kind, unlockContext)
-    ) return;
+    if (!isBuildKindUnlocked(kind, revealedBuildKinds, unlockContext)) return false;
     const paymentDeferred = Boolean(repeatOriginNodeId) && !removeBuildCosts;
     const availability = paymentDeferred
-      ? getBuildMaterialAvailability(
+      ? getGlobalBuildMaterialAvailability(
           runtimeRef.current,
           nodesRef.current,
           connectionsRef.current,
+          activeMapSectorRef.current,
+          mapFactoriesRef.current,
+          mapNodeProgressRef.current,
         )
       : null;
+    const payment = removeBuildCosts || paymentDeferred
+      ? null
+      : consumeGlobalBuildIngredients(
+          runtimeRef.current,
+          recipe,
+          nodesRef.current,
+          connectionsRef.current,
+          activeMapSectorRef.current,
+          mapFactoriesRef.current,
+          mapNodeProgressRef.current,
+        );
     const buildRuntime = removeBuildCosts
       ? runtimeRef.current
       : paymentDeferred
@@ -4411,14 +7922,13 @@ export default function Home() {
           )
           ? runtimeRef.current
           : null
-        : consumeBuildIngredients(
-            runtimeRef.current,
-            recipe,
-            nodesRef.current,
-            connectionsRef.current,
-          );
-    if (!buildRuntime) return;
+        : payment?.activeRuntime ?? null;
+    if (!buildRuntime) return false;
     const placementUndoSnapshot = captureGraphUndoSnapshot();
+    if (payment) {
+      placementUndoSnapshot.mapFactoryRuntimes = payment.previousFactoryRuntimes;
+      mapFactoriesRef.current = payment.mapFactories;
+    }
     setBuiltBuildKinds((current) => new Set(current).add(kind));
     setRevealedBuildKinds((current) => new Set(current).add(kind));
     setNewBuildKinds((current) => {
@@ -4440,14 +7950,29 @@ export default function Home() {
     };
     const worldPoint = pointFromEvent(pointer.x, pointer.y);
     const { width: placementWidth, height: placementHeight } = getEstimatedNodeSize(node);
-    const placementOffsetY = kind === "joint" || kind === "powerSplitter" || kind === "woodenChest"
+    const placementOffsetY = kind === "joint" || kind === "road" || kind === "powerSplitter" || kind === "woodenChest"
       ? placementHeight / 2
       : 42;
+    const playAreaWorldSize = getPlayAreaWorldSize(
+      runtimeRef.current.research,
+      activeMapSectorRef.current,
+    );
     const position = {
-      x: Math.max(12, Math.min(WORLD_SIZE.width - placementWidth - 12, worldPoint.x - placementWidth / 2)),
-      y: Math.max(52, Math.min(WORLD_SIZE.height - placementHeight - 12, worldPoint.y - placementOffsetY)),
+      x: Math.max(12, Math.min(playAreaWorldSize.width - placementWidth - 12, worldPoint.x - placementWidth / 2)),
+      y: Math.max(52, Math.min(playAreaWorldSize.height - placementHeight - 12, worldPoint.y - placementOffsetY)),
     };
-    updatePlacementBlocked(overlapsAnotherNode(node, position));
+    const initialRoadPlacement = kind === "road"
+      ? getRoadEdgePlacement(
+          position,
+          { width: placementWidth, height: placementHeight },
+          playAreaWorldSize,
+          activeMapSectorRef.current,
+          mapNodeProgressRef.current,
+        )
+      : null;
+    updatePlacementBlocked(
+      overlapsAnotherNode(node, position) || (kind === "road" && !initialRoadPlacement),
+    );
 
     const nextNodes = [...nodesRef.current, node];
     nodesRef.current = nextNodes;
@@ -4475,7 +8000,7 @@ export default function Home() {
               ...current,
               researchFoundries: {
                 ...current.researchFoundries,
-                [id]: { progress: 0, cores: 0 },
+                [id]: { progress: 0, cores: 0, coreItems: [] },
               },
             }
         : kind === "treePlanter"
@@ -4495,7 +8020,6 @@ export default function Home() {
                   progress: 0,
                   iterations: 0,
                   selectedType: null,
-                  powerCommitted: false,
                 },
               },
             }
@@ -4515,6 +8039,20 @@ export default function Home() {
                   joints: {
                     ...current.joints,
                     [id]: { bufferedType: null },
+                  },
+                }
+            : kind === "road"
+              ? {
+                  ...current,
+                  roads: {
+                    ...current.roads,
+                    [id]: {
+                      outboundType: null,
+                      inboundType: null,
+                      pairedSector: null,
+                      pairedRoadId: null,
+                      edge: null,
+                    },
                   },
                 }
             : kind === "powerSplitter"
@@ -4586,9 +8124,22 @@ export default function Home() {
     setJournalOpen(false);
     buildOpenRef.current = false;
     window.requestAnimationFrame(() => {
-      updatePlacementBlocked(overlapsAnotherNode(node, positionsRef.current[id] ?? position));
+      const currentPosition = positionsRef.current[id] ?? position;
+      const currentRoadPlacement = kind === "road"
+        ? getRoadEdgePlacement(
+            currentPosition,
+            { width: placementWidth, height: placementHeight },
+            playAreaWorldSize,
+            activeMapSectorRef.current,
+            mapNodeProgressRef.current,
+          )
+        : null;
+      updatePlacementBlocked(
+        overlapsAnotherNode(node, currentPosition) || (kind === "road" && !currentRoadPlacement),
+      );
       measureAnchors();
     });
+    return true;
   }, [
     builtBuildKinds,
     captureGraphUndoSnapshot,
@@ -4626,6 +8177,7 @@ export default function Home() {
         minedDeposits: { ...current.minedDeposits },
         splitters: { ...current.splitters },
         joints: { ...current.joints },
+        roads: { ...(current.roads ?? {}) },
         inventorySources: { ...current.inventorySources },
         filters: { ...current.filters },
         woodenChests: { ...current.woodenChests },
@@ -4642,6 +8194,7 @@ export default function Home() {
       delete next.minedDeposits[nodeId];
       delete next.splitters[nodeId];
       delete next.joints[nodeId];
+      delete next.roads[nodeId];
       delete next.inventorySources[nodeId];
       delete next.filters[nodeId];
       delete next.woodenChests[nodeId];
@@ -4653,6 +8206,7 @@ export default function Home() {
     });
 
     repeatPlacementPreviewRef.current = null;
+    continuousReplicationRef.current = false;
     if (pendingPlacementUndoRef.current?.nodeId === nodeId) {
       pendingPlacementUndoRef.current = null;
     }
@@ -4670,6 +8224,17 @@ export default function Home() {
     window.requestAnimationFrame(measureAnchors);
     return true;
   }, [measureAnchors, updatePlacementBlocked]);
+
+  const cancelNodeInHand = useCallback(() => {
+    const nodeId = placingNodeRef.current;
+    if (!nodeId) return false;
+    if (cancelRepeatPlacementPreview()) return true;
+
+    const pendingPlacement = pendingPlacementUndoRef.current;
+    if (!pendingPlacement || pendingPlacement.nodeId !== nodeId) return false;
+    continuousReplicationRef.current = false;
+    return restoreGraphUndoSnapshot(pendingPlacement.snapshot);
+  }, [cancelRepeatPlacementPreview, restoreGraphUndoSnapshot]);
 
   const acknowledgeBuildKind = useCallback((kind: PurchasableKind) => {
     setNewBuildKinds((current) => {
@@ -4798,11 +8363,45 @@ export default function Home() {
       return;
     }
 
-    if (node.kind === "researchFoundry" && itemType === ResourceType.AUTOMATA_CORE) {
+    if (
+      node.kind === "miningDrill" &&
+      portId === "motor-in" &&
+      itemType === ResourceType.MOTOR
+    ) {
+      const drill = current.miningDrills[nodeId];
+      if (
+        !drill?.selectedType ||
+        drill.iterations >= MINING_DRILL_ITERATIONS
+      ) return;
+      const next = cloneStoredMaterialRuntime(current);
+      consumeStoredMaterialInPlace(
+        next,
+        nodesRef.current,
+        connectionsRef.current,
+        ResourceType.MOTOR,
+        1,
+        excludedNodeIds,
+      );
+      next.miningDrills = {
+        ...next.miningDrills,
+        [nodeId]: {
+          ...drill,
+          progress: 0,
+          iterations: Math.min(MINING_DRILL_ITERATIONS, drill.iterations + 1),
+        },
+      };
+      runtimeRef.current = next;
+      setRuntime(next);
+      return;
+    }
+
+    if (node.kind === "researchFoundry" && isCoreType(itemType)) {
       const foundry = current.researchFoundries[nodeId] ?? {
         progress: 0,
         cores: 0,
+        coreItems: [],
       };
+      const coreItems = getResearchFoundryCoreItems(foundry);
       const stored = getResearchFoundryCores(foundry);
       const remainingCapacity = Math.max(0, PRODUCTION_INGREDIENT_CAPACITY - stored);
       const transferred = Math.min(remainingCapacity, available);
@@ -4818,7 +8417,15 @@ export default function Home() {
       );
       next.researchFoundries = {
           ...next.researchFoundries,
-          [nodeId]: { ...foundry, cores: stored + transferred, coreLoaded: undefined },
+          [nodeId]: {
+            ...foundry,
+            cores: stored + transferred,
+            coreItems: [
+              ...coreItems,
+              ...Array.from({ length: transferred }, () => itemType),
+            ],
+            coreLoaded: undefined,
+          },
       };
       next.research = { ...current.research, available: true };
       runtimeRef.current = next;
@@ -4889,7 +8496,6 @@ export default function Home() {
         progress: 0,
         iterations: 0,
         selectedType: null,
-        powerCommitted: false,
       };
       const unchanged = drill.selectedType === targetType;
       const next = {
@@ -4902,7 +8508,6 @@ export default function Home() {
                 progress: 0,
                 iterations: 0,
                 selectedType: targetType,
-                powerCommitted: false,
               },
         },
       };
@@ -5016,31 +8621,6 @@ export default function Home() {
       if (Math.abs(event.deltaY) < 0.01) return;
 
       const now = performance.now();
-      const isPreciseTrackpadEvent =
-        !event.ctrlKey &&
-        event.deltaMode === WheelEvent.DOM_DELTA_PIXEL &&
-        (Math.abs(event.deltaY) < 50 ||
-          Math.abs(event.deltaX) > 0 ||
-          !Number.isInteger(event.deltaX) ||
-          !Number.isInteger(event.deltaY));
-
-      if (isPreciseTrackpadEvent) {
-        trackpadGestureUntilRef.current = now + 220;
-      }
-
-      const isTrackpadGesture =
-        !event.ctrlKey &&
-        (isPreciseTrackpadEvent || now < trackpadGestureUntilRef.current);
-
-      // Native scrolling gives trackpads Blender-style two-finger panning.
-      // Chromium reports a pinch separately with ctrlKey, so it still zooms.
-      if (
-        isTrackpadGesture ||
-        (!event.ctrlKey && Math.abs(event.deltaX) > Math.abs(event.deltaY))
-      ) {
-        return;
-      }
-
       event.preventDefault();
       const delta = event.deltaY * (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1);
       const sensitivity = event.ctrlKey ? 0.0045 : 0.0018;
@@ -5092,6 +8672,21 @@ export default function Home() {
 
   const unlockLogisticsBuildings = useCallback(() => {
     if (logisticsUnlockedRef.current) return;
+    const current = runtimeRef.current;
+    const newlyCompleted = !current.research.logisticsUnlocked;
+    const nextRuntime: Runtime = {
+      ...current,
+      research: {
+        ...current.research,
+        logisticsUnlocked: true,
+        progress: {
+          ...current.research.progress,
+          logistics: getResearchProjectCost("logistics"),
+        },
+      },
+    };
+    runtimeRef.current = nextRuntime;
+    setRuntime(nextRuntime);
     logisticsUnlockedRef.current = true;
     setLogisticsUnlocked(true);
     setRevealedBuildKinds((current) => {
@@ -5104,7 +8699,7 @@ export default function Home() {
       LOGISTICS_BUILD_KINDS.forEach((kind) => next.add(kind));
       return next;
     });
-    LOGISTICS_BUILD_KINDS.forEach(announceNodeUnlock);
+    if (newlyCompleted) announceResearchCompletion("logistics");
     if (!buildOpenRef.current) setBuildAttention(true);
   }, []);
 
@@ -5141,8 +8736,6 @@ export default function Home() {
       allowOverflowLoss?: boolean;
       overflowTitle?: string;
       overflowDescription?: string;
-      overflowConfirmLabel?: string;
-      overflowCancelLabel?: string;
       onConfirmOverflow?: () => void;
     } = {},
   ) => {
@@ -5179,8 +8772,6 @@ export default function Home() {
           title: options.overflowTitle ?? "Storage capacity exceeded",
           description: options.overflowDescription ??
             "Available storage nodes cannot hold all recovered materials. Anything beyond capacity will be permanently destroyed if you proceed.",
-          confirmLabel: options.overflowConfirmLabel ?? "Proceed & destroy overflow",
-          cancelLabel: options.overflowCancelLabel,
           loss: Array.from(loss),
         }, options.onConfirmOverflow);
       } else {
@@ -5231,27 +8822,11 @@ export default function Home() {
     return true;
   }, [getDisconnectedCompletedOutputs, requestInventoryOverflowConfirmation]);
 
-  const deleteConnection = useCallback(function deleteConnectionInternal(
-    connectionId: string,
-    allowMaterialLoss = false,
-  ) {
+  const deleteConnection = useCallback((connectionId: string) => {
     const before = connectionsRef.current;
     if (!before.some((connection) => connection.id === connectionId)) return false;
     const undoSnapshot = captureGraphUndoSnapshot();
-    const next = removeConnectionsWithDependents(
-      before,
-      (connection) => connection.id === connectionId,
-      nodesRef.current,
-      runtimeRef.current,
-    );
-    if (!storeDisconnectedCompletedOutputs(before, next, {
-      blockedAction: "deleting this connection",
-      allowOverflowLoss: allowMaterialLoss,
-      overflowTitle: "Delete connection and lose materials?",
-      overflowDescription: "Disconnecting this cable recovers completed output, but available storage nodes cannot hold all of it. The overflow will be permanently destroyed if you continue.",
-      overflowConfirmLabel: "Delete & destroy overflow",
-      onConfirmOverflow: () => deleteConnectionInternal(connectionId, true),
-    })) return false;
+    const next = before.filter((connection) => connection.id !== connectionId);
 
     connectionsRef.current = next;
     setConnections(next);
@@ -5264,7 +8839,7 @@ export default function Home() {
     setConnectionDeleteDialogOpen(false);
     pushUndoEntry({ kind: "graph", snapshot: undoSnapshot });
     return true;
-  }, [captureGraphUndoSnapshot, pushUndoEntry, storeDisconnectedCompletedOutputs]);
+  }, [captureGraphUndoSnapshot, pushUndoEntry]);
 
   const rememberAlwaysDeleteConnections = useCallback(() => {
     setAlwaysDeleteConnections(true);
@@ -5298,14 +8873,13 @@ export default function Home() {
     setMultiConnectionManagerOpen(true);
   }, []);
 
-  const enableTemporaryBlueprint = useCallback((kind: PurchasableKind) => {
+  const enableTemporaryNode = useCallback((kind: PurchasableKind) => {
     if (revealedBuildKinds.has(kind)) return;
     setRevealedBuildKinds((current) => new Set(current).add(kind));
     setNewBuildKinds((current) => new Set(current).add(kind));
     setShowAllBuildNodes(false);
     setShowBuildableOnly(false);
     setBuildCategory(getBuildCategory(kind));
-    announceNodeUnlock(kind);
   }, [revealedBuildKinds]);
 
   const unlockAllNodesForDevelopment = useCallback(() => {
@@ -5329,6 +8903,27 @@ export default function Home() {
         ...current,
         research: {
           ...current.research,
+          progress: {
+            ...current.research.progress,
+            logistics: getResearchProjectCost("logistics"),
+            kiln: getResearchProjectCost("kiln"),
+            charcoalGenerator: getResearchProjectCost("charcoalGenerator"),
+            furnace: getResearchProjectCost("furnace"),
+            refiner: getResearchProjectCost("refiner"),
+            assembler: getResearchProjectCost("assembler"),
+            researchCenter: getResearchProjectCost("researchCenter"),
+            road: getResearchProjectCost("road"),
+            areaExpansion1: getResearchProjectCost("areaExpansion1"),
+          },
+          logisticsUnlocked: true,
+          kilnUnlocked: true,
+          charcoalGeneratorUnlocked: true,
+          furnaceUnlocked: true,
+          refinerUnlocked: true,
+          assemblerUnlocked: true,
+          researchCenterUnlocked: true,
+          roadUnlocked: true,
+          areaExpansion1Unlocked: true,
           treePlanterUnlocked: true,
           miningDrillUnlocked: true,
         },
@@ -5346,8 +8941,8 @@ export default function Home() {
     }
     toast.success("All nodes unlocked", {
       description: newlyUnlocked.length > 0
-        ? `${newlyUnlocked.length} new blueprints are now available in Build.`
-        : "Every node blueprint is already available.",
+        ? `${newlyUnlocked.length} new nodes are now available in Build.`
+        : "Every node is already available.",
     });
   }, [revealedBuildKinds]);
 
@@ -5358,14 +8953,25 @@ export default function Home() {
     );
     const next: Runtime = {
       ...current,
+      mapPoints: Math.max(0, current.mapPoints) + (current.research.explorationUnlocked ? 0 : 1),
       research: {
         ...current.research,
         available: true,
         activeProject: null,
         progress: Object.fromEntries(
-          RESEARCH_PROJECTS.map((project) => [project.id, RESEARCH_UNLOCK_COST]),
+          RESEARCH_PROJECTS.map((project) => [project.id, getResearchProjectCost(project.id)]),
         ) as Record<ResearchProjectId, number>,
+        logisticsUnlocked: true,
+        kilnUnlocked: true,
+        charcoalGeneratorUnlocked: true,
+        furnaceUnlocked: true,
+        refinerUnlocked: true,
+        assemblerUnlocked: true,
+        researchCenterUnlocked: true,
+        roadUnlocked: true,
+        areaExpansion1Unlocked: true,
         extractor2Unlocked: true,
+        extractor3Unlocked: true,
         treePlanterUnlocked: true,
         miningDrillUnlocked: true,
         explorationUnlocked: true,
@@ -5379,10 +8985,43 @@ export default function Home() {
     };
     runtimeRef.current = next;
     setRuntime(next);
+    unlockLogisticsBuildings();
     newlyCompletedProjects.forEach((project) => {
       announceResearchCompletion(project.id);
     });
-  }, []);
+  }, [unlockLogisticsBuildings]);
+
+  const unlockAllMapNodesForDevelopment = useCallback(() => {
+    const sectorKeys = Array.from({ length: MAP_GRID_SIZE * MAP_GRID_SIZE }, (_, index) => {
+      const x = index % MAP_GRID_SIZE;
+      const y = Math.floor(index / MAP_GRID_SIZE);
+      return `${x},${y}`;
+    }).filter(isMapNodeInRange);
+    const newlyUnlockedCount = sectorKeys.filter(
+      (sectorKey) => !isMapNodeUnlocked(mapNodeProgress, sectorKey),
+    ).length;
+    const nextProgress = { ...mapNodeProgress };
+    sectorKeys.forEach((sectorKey) => {
+      nextProgress[sectorKey] = {
+        ...nextProgress[sectorKey],
+        explored: true,
+        customName: nextProgress[sectorKey]?.customName ?? (
+          sectorKey === MAP_HOME_SECTOR ? "Home Factory" : null
+        ),
+      };
+    });
+    mapNodeProgressRef.current = nextProgress;
+    setMapNodeProgress(nextProgress);
+    setSelectedMapSector(null);
+    toast.success(
+      newlyUnlockedCount > 0 ? "All map nodes unlocked" : "All map nodes already unlocked",
+      {
+        description: newlyUnlockedCount > 0
+          ? `${newlyUnlockedCount} map ${newlyUnlockedCount === 1 ? "node is" : "nodes are"} now available.`
+          : "Every map node is already available for travel.",
+      },
+    );
+  }, [mapNodeProgress]);
 
   const getDeletionRefund = useCallback((nodeIds: Iterable<NodeId>) => {
     const refund = new Map<InventoryItemType, number>();
@@ -5448,6 +9087,20 @@ export default function Home() {
     }
 
     const undoSnapshot = captureGraphUndoSnapshot();
+    const pairedRoads = Array.from(deletableNodeIds).flatMap((nodeId) => {
+      const road = runtimeRef.current.roads?.[nodeId];
+      return road?.pairedSector && road.pairedRoadId
+        ? [{ sectorKey: road.pairedSector, roadId: road.pairedRoadId }]
+        : [];
+    });
+    pairedRoads.forEach(({ sectorKey }) => {
+      const factory = mapFactoriesRef.current[sectorKey];
+      if (!factory || undoSnapshot.mapFactoryStates?.[sectorKey]) return;
+      undoSnapshot.mapFactoryStates = {
+        ...(undoSnapshot.mapFactoryStates ?? {}),
+        [sectorKey]: structuredClone(factory),
+      };
+    });
     const materials = getDeletionMaterialSummary(deletableNodeIds);
     const refund = materials.refund;
     const beforeConnections = connectionsRef.current;
@@ -5469,6 +9122,36 @@ export default function Home() {
       blockedAction: deletableNodeIds.size === 1 ? "destroying this node" : "destroying these nodes",
       allowOverflowLoss: true,
     })) return false;
+
+    if (pairedRoads.length > 0) {
+      const nextFactories = { ...mapFactoriesRef.current };
+      pairedRoads.forEach(({ sectorKey, roadId }) => {
+        const factory = nextFactories[sectorKey];
+        if (!factory) return;
+        const nextFactoryRuntime = cloneStoredMaterialRuntime(factory.runtime);
+        delete nextFactoryRuntime.roads[roadId];
+        delete nextFactoryRuntime.construction[roadId];
+        const nextFactoryPositions = { ...factory.positions };
+        delete nextFactoryPositions[roadId];
+        nextFactories[sectorKey] = {
+          ...factory,
+          nodes: factory.nodes.filter((node) => node.id !== roadId),
+          positions: nextFactoryPositions,
+          connections: factory.connections.filter(
+            (connection) =>
+              connection.sourceNode !== roadId && connection.targetNode !== roadId,
+          ),
+          controlGroups: factory.controlGroups
+            .map((group) => ({
+              ...group,
+              nodeIds: group.nodeIds.filter((nodeId) => nodeId !== roadId),
+            }))
+            .filter((group) => group.nodeIds.length >= 2),
+          runtime: nextFactoryRuntime,
+        };
+      });
+      mapFactoriesRef.current = nextFactories;
+    }
 
     const nextNodes = nodesRef.current.filter((node) => !deletableNodeIds.has(node.id));
     nodesRef.current = nextNodes;
@@ -5506,6 +9189,7 @@ export default function Home() {
     next.treePlanters = { ...current.treePlanters };
     next.miningDrills = { ...current.miningDrills };
     next.minedDeposits = { ...current.minedDeposits };
+    next.roads = { ...(current.roads ?? {}) };
     next.inventorySources = { ...current.inventorySources };
     next.pausedOutputs = { ...(current.pausedOutputs ?? {}) };
     next.construction = { ...current.construction };
@@ -5522,6 +9206,7 @@ export default function Home() {
       delete next.minedDeposits[nodeId];
       delete next.splitters[nodeId];
       delete next.joints[nodeId];
+      delete next.roads[nodeId];
       delete next.inventorySources[nodeId];
       delete next.filters[nodeId];
       delete next.woodenChests[nodeId];
@@ -5538,6 +9223,7 @@ export default function Home() {
       }
       placingNodeRef.current = null;
       repeatPlacementPreviewRef.current = null;
+      continuousReplicationRef.current = false;
       setPlacingNodeId(null);
       updatePlacementBlocked(false);
     }
@@ -5557,6 +9243,7 @@ export default function Home() {
     setInsertionTarget(null);
     setSelectedConnection(null);
     selectedNodesRef.current = [];
+    prioritizedBoxSelectionRef.current = [];
     setSelectedNodes([]);
     pushUndoEntry({ kind: "graph", snapshot: undoSnapshot });
     return true;
@@ -5652,6 +9339,28 @@ export default function Home() {
     if (!isCompatible(output.port, effectiveInput)) {
       toast.error("Socket type mismatch", {
         description: `${output.port.type} cannot feed a ${effectiveInput.type} socket.`,
+      });
+      return false;
+    }
+
+    const cableStart = getPortWorldPosition(output.nodeId, output.port.id);
+    const cableEnd = getPortWorldPosition(input.nodeId, input.port.id);
+    const blockingHoles = Object.values(runtimeRef.current.blackHoles ?? {}).filter(
+      (hole) => hole.id !== output.nodeId && hole.id !== input.nodeId,
+    );
+    const blockingLakes = Object.values(runtimeRef.current.lakes ?? {}).filter(
+      (lake) => lake.id !== output.nodeId && lake.id !== input.nodeId,
+    );
+    if (
+      cableStart &&
+      cableEnd &&
+      (
+        curveIntersectsBlackHole(cableStart, cableEnd, output.port.id, blockingHoles) ||
+        curveIntersectsLake(cableStart, cableEnd, output.port.id, blockingLakes)
+      )
+    ) {
+      toast.error("Cable path blocked", {
+        description: "Connections cannot pass through an obstruction.",
       });
       return false;
     }
@@ -5861,8 +9570,6 @@ export default function Home() {
       allowOverflowLoss: allowMaterialLoss,
       overflowTitle: "Continue with limited storage space?",
       overflowDescription: "Creating this input connection will move stored production items into available storage nodes, but there is not enough space for all of them. The listed overflow will be permanently destroyed if you continue.",
-      overflowConfirmLabel: "Continue",
-      overflowCancelLabel: "Cancel",
       onConfirmOverflow: () => connectPortsInternal(
         first,
         second,
@@ -5922,6 +9629,28 @@ export default function Home() {
         runtimeRef.current = next;
         return next;
       });
+    } else if (isRoadNode(input.nodeId) && input.port.id === "road-in") {
+      setRuntime((current) => {
+        const previous = current.roads[input.nodeId];
+        const next = {
+          ...current,
+          roads: {
+            ...current.roads,
+            [input.nodeId]: {
+              ...(previous ?? {
+                outboundType: null,
+                inboundType: null,
+                pairedSector: null,
+                pairedRoadId: null,
+                edge: null,
+              }),
+              outboundType: null,
+            },
+          },
+        };
+        runtimeRef.current = next;
+        return next;
+      });
     } else if (isSmartProcessorTypingPort(
       input.nodeId,
       input.port.id,
@@ -5961,7 +9690,12 @@ export default function Home() {
     setSelectedNodes([]);
     pushUndoEntry({ kind: "graph", snapshot: undoSnapshot });
     return true;
-  }, [captureGraphUndoSnapshot, pushUndoEntry, storeDisconnectedCompletedOutputs]);
+  }, [
+    captureGraphUndoSnapshot,
+    getPortWorldPosition,
+    pushUndoEntry,
+    storeDisconnectedCompletedOutputs,
+  ]);
 
   const findPortHandle = useCallback((element: Element | null): PortHandle | null => {
     const portElement = element?.closest<HTMLElement>("[data-port-node]");
@@ -5971,7 +9705,11 @@ export default function Home() {
     const node = nodesRef.current.find((item) => item.id === nodeId);
     const portSpec = node
       ? [...node.inputs, ...node.outputs].find((item) => item.id === portId)
-      : null;
+      : runtimeRef.current.blackHoles[nodeId] && portId === BLACK_HOLE_INPUT_PORT.id
+        ? BLACK_HOLE_INPUT_PORT
+        : runtimeRef.current.lakes[nodeId] && portId
+          ? getLakeWaterOutputPort(portId)
+        : null;
     const port = portSpec
       ? getRuntimeAwarePort(nodeId, portSpec, connectionsRef.current, runtimeRef.current)
       : null;
@@ -6194,15 +9932,160 @@ export default function Home() {
     return true;
   }, []);
 
-  const finishNodePlacement = useCallback((
-    allowWireInsertion: boolean,
-    repeatPlacement: boolean,
+  const pairRoadAcrossMapEdge = useCallback((
+    roadNode: NodeSpec,
+    sourcePosition: Position,
+    placementUndo: { nodeId: NodeId; snapshot: GraphUndoSnapshot } | null,
   ) => {
+    if (roadNode.kind !== "road") return true;
+    const sourceSector = activeMapSectorRef.current;
+    const sourceSize = getEstimatedNodeSize(roadNode);
+    const sourcePlayArea = getPlayAreaWorldSize(runtimeRef.current.research, sourceSector);
+    const placement = getRoadEdgePlacement(
+      sourcePosition,
+      sourceSize,
+      sourcePlayArea,
+      sourceSector,
+      mapNodeProgressRef.current,
+    );
+    if (!placement) return false;
+    const destinationFactory = mapFactoriesRef.current[placement.adjacentSector];
+    if (!destinationFactory) return false;
+
+    const destinationPlayArea = getPlayAreaWorldSize(
+      runtimeRef.current.research,
+      placement.adjacentSector,
+    );
+    const pairId = `road-pair-${roadNode.id}`;
+    const nextSequence = (destinationFactory.buildSequence.road ?? 0) + 1;
+    const pairNode = createBuildableNode("road", pairId, nextSequence);
+    const pairSize = getEstimatedNodeSize(pairNode);
+    const oppositeEdge = OPPOSITE_MAP_EDGE[placement.edge];
+    const sourceCenterX = placement.position.x + sourceSize.width / 2;
+    const sourceCenterY = placement.position.y + sourceSize.height / 2;
+    const proportionalCenter = placement.edge === "east" || placement.edge === "west"
+      ? sourceCenterY / sourcePlayArea.height * destinationPlayArea.height
+      : sourceCenterX / sourcePlayArea.width * destinationPlayArea.width;
+    const baseParallelPosition = placement.edge === "east" || placement.edge === "west"
+      ? proportionalCenter - pairSize.height / 2
+      : proportionalCenter - pairSize.width / 2;
+    const destinationNodes = getMapFactoryNodes(destinationFactory);
+    const isDestinationBlocked = (candidate: Position) => {
+      const candidateRect = { ...candidate, ...pairSize };
+      if (Object.values(destinationFactory.runtime.blackHoles ?? {}).some((hole) =>
+        rectangleIntersectsBlackHole(candidateRect, hole)
+      )) return true;
+      if (Object.values(destinationFactory.runtime.lakes ?? {}).some((lake) =>
+        rectangleIntersectsLake(candidateRect, lake)
+      )) return true;
+      return destinationNodes.some((destinationNode) => {
+        const nodePosition = destinationFactory.positions[destinationNode.id];
+        return Boolean(
+          nodePosition && rectanglesOverlap(
+            candidateRect,
+            { ...nodePosition, ...getEstimatedNodeSize(destinationNode) },
+          )
+        );
+      });
+    };
+    const candidateOffsets = [
+      0,
+      ...Array.from({ length: 30 }, (_, index) => (index + 1) * 80)
+        .flatMap((offset) => [-offset, offset]),
+    ];
+    const pairPosition = candidateOffsets.flatMap((offset) => {
+      if (oppositeEdge === "west" || oppositeEdge === "east") {
+        return [{
+          x: oppositeEdge === "west" ? 0 : destinationPlayArea.width - pairSize.width,
+          y: Math.max(
+            12,
+            Math.min(destinationPlayArea.height - pairSize.height - 12, baseParallelPosition + offset),
+          ),
+        }];
+      }
+      return [{
+        x: Math.max(
+          12,
+          Math.min(destinationPlayArea.width - pairSize.width - 12, baseParallelPosition + offset),
+        ),
+        y: oppositeEdge === "north" ? 0 : destinationPlayArea.height - pairSize.height,
+      }];
+    }).find((candidate) => !isDestinationBlocked(candidate));
+    if (!pairPosition) return false;
+
+    if (placementUndo) {
+      placementUndo.snapshot.mapFactoryStates = {
+        ...(placementUndo.snapshot.mapFactoryStates ?? {}),
+        [placement.adjacentSector]: structuredClone(destinationFactory),
+      };
+    }
+    const destinationRuntime = cloneStoredMaterialRuntime(destinationFactory.runtime);
+    destinationRuntime.roads[pairId] = {
+      outboundType: null,
+      inboundType: null,
+      pairedSector: sourceSector,
+      pairedRoadId: roadNode.id,
+      edge: oppositeEdge,
+    };
+    destinationRuntime.construction[pairId] = { progress: 100, complete: true };
+    mapFactoriesRef.current = {
+      ...mapFactoriesRef.current,
+      [placement.adjacentSector]: {
+        ...destinationFactory,
+        nodes: [...destinationFactory.nodes, serializeNode(pairNode)],
+        positions: { ...destinationFactory.positions, [pairId]: pairPosition },
+        runtime: destinationRuntime,
+        buildSequence: {
+          ...destinationFactory.buildSequence,
+          road: nextSequence,
+        },
+      },
+    };
+    const activeRuntime = cloneStoredMaterialRuntime(runtimeRef.current);
+    activeRuntime.roads[roadNode.id] = {
+      ...(activeRuntime.roads[roadNode.id] ?? {
+        outboundType: null,
+        inboundType: null,
+        pairedSector: null,
+        pairedRoadId: null,
+        edge: null,
+      }),
+      pairedSector: placement.adjacentSector,
+      pairedRoadId: pairId,
+      edge: placement.edge,
+    };
+    runtimeRef.current = activeRuntime;
+    setRuntime(activeRuntime);
+    return true;
+  }, []);
+
+  const finishNodePlacement = useCallback((repeatPlacement: boolean) => {
     const nodeId = placingNodeRef.current;
     if (!nodeId) return false;
     const node = nodesRef.current.find((item) => item.id === nodeId);
-    const position = positionsRef.current[nodeId];
+    let position = positionsRef.current[nodeId];
     if (!node || !position) return false;
+
+    if (node.kind === "road") {
+      const roadPlacement = getRoadEdgePlacement(
+        position,
+        getEstimatedNodeSize(node),
+        getPlayAreaWorldSize(runtimeRef.current.research, activeMapSectorRef.current),
+        activeMapSectorRef.current,
+        mapNodeProgressRef.current,
+      );
+      if (!roadPlacement) {
+        updatePlacementBlocked(true);
+        toast.error("Road needs an adjacent map", {
+          description: "Place it on an edge shared with an unlocked adjacent map node.",
+        });
+        return false;
+      }
+      position = roadPlacement.position;
+      const snappedPositions = { ...positionsRef.current, [nodeId]: position };
+      positionsRef.current = snappedPositions;
+      setPositions(snappedPositions);
+    }
 
     const blocked = overlapsAnotherNode(node, position);
     updatePlacementBlocked(blocked);
@@ -6211,21 +10094,30 @@ export default function Home() {
     const repeatPreview = repeatPlacementPreviewRef.current?.nodeId === nodeId
       ? repeatPlacementPreviewRef.current
       : null;
+    const continueReplication = continuousReplicationRef.current;
     const placementUndo = pendingPlacementUndoRef.current?.nodeId === nodeId
       ? pendingPlacementUndoRef.current
       : null;
+    let repeatPaymentRollback: {
+      runtime: Runtime;
+      mapFactories: MapFactoriesBySector;
+    } | null = null;
     if (repeatPreview) {
       const catalogItem = BUILD_CATALOG.find((item) => item.kind === node.kind);
+      const payment = !removeBuildCosts && catalogItem
+        ? consumeGlobalBuildIngredients(
+            runtimeRef.current,
+            catalogItem.recipe,
+            nodesRef.current,
+            connectionsRef.current,
+            activeMapSectorRef.current,
+            mapFactoriesRef.current,
+            mapNodeProgressRef.current,
+          )
+        : null;
       const paidRuntime = removeBuildCosts
         ? runtimeRef.current
-        : catalogItem
-          ? consumeBuildIngredients(
-              runtimeRef.current,
-              catalogItem.recipe,
-              nodesRef.current,
-              connectionsRef.current,
-            )
-          : null;
+        : payment?.activeRuntime ?? null;
       if (!paidRuntime) {
         cancelRepeatPlacementPreview();
         toast.error("Repeat placement ended", {
@@ -6233,20 +10125,44 @@ export default function Home() {
         });
         return false;
       }
+      if (payment) {
+        repeatPaymentRollback = {
+          runtime: runtimeRef.current,
+          mapFactories: mapFactoriesRef.current,
+        };
+        if (placementUndo) {
+          placementUndo.snapshot.mapFactoryRuntimes = payment.previousFactoryRuntimes;
+        }
+        mapFactoriesRef.current = payment.mapFactories;
+      }
       runtimeRef.current = paidRuntime;
       setRuntime(paidRuntime);
       repeatPlacementPreviewRef.current = null;
     }
 
-    const connectionId = allowWireInsertion && node.kind === "joint"
-      ? insertionTargetRef.current ?? findInsertionTarget(nodeId, position)
-      : null;
+    if (!pairRoadAcrossMapEdge(node, position, placementUndo)) {
+      if (repeatPaymentRollback) {
+        runtimeRef.current = repeatPaymentRollback.runtime;
+        mapFactoriesRef.current = repeatPaymentRollback.mapFactories;
+        setRuntime(repeatPaymentRollback.runtime);
+        repeatPlacementPreviewRef.current = repeatPreview;
+      }
+      updatePlacementBlocked(true);
+      toast.error("Road endpoint blocked", {
+        description: "There is no open matching position on the opposite edge of the adjacent map.",
+      });
+      return false;
+    }
+
+    if (node.kind === "splitter" && insertionTargetRef.current) {
+      insertNodeIntoConnection(nodeId, insertionTargetRef.current);
+    }
+
     placingNodeRef.current = null;
     repeatPlacementPreviewRef.current = null;
     setPlacingNodeId(null);
     setSelectedNodes([nodeId]);
     setSelectedConnection(null);
-    if (connectionId) insertNodeIntoConnection(nodeId, connectionId);
     insertionTargetRef.current = null;
     setInsertionTarget(null);
     updatePlacementBlocked(false);
@@ -6254,24 +10170,43 @@ export default function Home() {
       const placedKind = node.kind;
       setPlacedBuildKinds((current) => new Set(current).add(placedKind));
     }
+    if (node.kind === "miningDrill" && !skipMiningDrillCompletionWarning) {
+      setSuppressFutureMiningDrillWarnings(false);
+      setMiningDrillWarningOpen(true);
+    }
     if (isExtractorKind(node.kind)) unlockLogisticsBuildings();
     if (placementUndo) {
       pushUndoEntry({ kind: "graph", snapshot: placementUndo.snapshot });
       pendingPlacementUndoRef.current = null;
     }
-    if (repeatPlacement) {
+    if (repeatPlacement || continueReplication) {
       const catalogItem = BUILD_CATALOG.find((item) => item.kind === node.kind);
-      if (catalogItem) buildNode(catalogItem.kind, catalogItem.recipe, nodeId);
+      const nextPlacementStarted = catalogItem
+        ? buildNode(catalogItem.kind, catalogItem.recipe, nodeId)
+        : false;
+      if (!nextPlacementStarted && continueReplication) {
+        continuousReplicationRef.current = false;
+        const pointer = lastCanvasPointerRef.current ?? {
+          x: window.innerWidth / 2,
+          y: window.innerHeight / 2,
+        };
+        setReplicationResourceWarning({
+          clientX: pointer.x,
+          clientY: pointer.y,
+          token: Date.now(),
+        });
+      }
     }
     return true;
   }, [
     buildNode,
     cancelRepeatPlacementPreview,
-    findInsertionTarget,
     insertNodeIntoConnection,
     overlapsAnotherNode,
+    pairRoadAcrossMapEdge,
     pushUndoEntry,
     removeBuildCosts,
+    skipMiningDrillCompletionWarning,
     unlockLogisticsBuildings,
     updatePlacementBlocked,
   ]);
@@ -6304,7 +10239,9 @@ export default function Home() {
     ) => {
       const hits = getSelectionBoxHits(start, end);
       const hitNodeIds = new Set(hits);
-      const representedGroups = end.x >= start.x && end.y >= start.y
+      const prioritizesHighlightedNodes = end.x < start.x && end.y < start.y;
+      const selectsControlGroups = end.x >= start.x && end.y >= start.y;
+      const representedGroups = selectsControlGroups
         ? controlGroupsRef.current.filter((group) =>
             group.nodeIds.some((nodeId) => hitNodeIds.has(nodeId)),
           )
@@ -6316,7 +10253,7 @@ export default function Home() {
         ...hits,
         ...representedGroupNodeIds,
       ])).filter((nodeId) => availableNodeIds.has(nodeId));
-      return { selectedNodeIds, representedGroups };
+      return { selectedNodeIds, representedGroups, prioritizesHighlightedNodes };
     };
 
     let connectionAutoScrollFrame: number | null = null;
@@ -6419,6 +10356,10 @@ export default function Home() {
     };
 
     const onPointerMove = (event: PointerEvent) => {
+      setReplicationResourceWarning((current) => current
+        ? { ...current, clientX: event.clientX, clientY: event.clientY }
+        : current,
+      );
       const viewport = workspaceRef.current;
       const bounds = viewport?.getBoundingClientRect();
       if (
@@ -6435,27 +10376,42 @@ export default function Home() {
         const placingNode = nodesRef.current.find((node) => node.id === nodeId);
         if (!placingNode) return;
         const { width: placementWidth, height: placementHeight } = getNodeSize(nodeId, placingNode);
-        const placementOffsetY = placingNode?.kind === "joint" || placingNode?.kind === "powerSplitter"
+        const placementOffsetY = placingNode?.kind === "joint" || placingNode?.kind === "road" || placingNode?.kind === "powerSplitter"
           ? placementHeight / 2
           : 42;
         const point = pointFromEvent(event.clientX, event.clientY);
-        const position = {
-          x: Math.max(12, Math.min(WORLD_SIZE.width - placementWidth - 12, point.x - placementWidth / 2)),
-          y: Math.max(52, Math.min(WORLD_SIZE.height - placementHeight - 12, point.y - placementOffsetY)),
+        const playAreaWorldSize = getPlayAreaWorldSize(
+          runtimeRef.current.research,
+          activeMapSectorRef.current,
+        );
+        let position = {
+          x: Math.max(12, Math.min(playAreaWorldSize.width - placementWidth - 12, point.x - placementWidth / 2)),
+          y: Math.max(52, Math.min(playAreaWorldSize.height - placementHeight - 12, point.y - placementOffsetY)),
         };
+        const roadPlacement = placingNode.kind === "road"
+          ? getRoadEdgePlacement(
+              position,
+              { width: placementWidth, height: placementHeight },
+              playAreaWorldSize,
+              activeMapSectorRef.current,
+              mapNodeProgressRef.current,
+            )
+          : null;
+        if (roadPlacement) position = roadPlacement.position;
         const nextPositions = {
           ...positionsRef.current,
           [nodeId]: position,
         };
         positionsRef.current = nextPositions;
         setPositions(nextPositions);
-        const blocked = overlapsAnotherNode(placingNode, position);
+        const blocked = overlapsAnotherNode(placingNode, position) ||
+          (placingNode.kind === "road" && !roadPlacement);
         updatePlacementBlocked(blocked);
-        const insertionTarget = !blocked && placingNode.kind === "joint" && hasPlatformInsertModifier(event)
-          ? findInsertionTarget(nodeId, nextPositions[nodeId])
+        const splitterInsertionTarget = placingNode.kind === "splitter" && !blocked
+          ? findInsertionTarget(nodeId, position)
           : null;
-        insertionTargetRef.current = insertionTarget;
-        setInsertionTarget(insertionTarget);
+        insertionTargetRef.current = splitterInsertionTarget;
+        setInsertionTarget(splitterInsertionTarget);
         return;
       }
       if (panRef.current) {
@@ -6480,12 +10436,19 @@ export default function Home() {
         setSelectionBox({ start: box.start, end });
 
         if (box.moved) {
-          const { selectedNodeIds, representedGroups } = getSelectionBoxResult(
+          const {
+            selectedNodeIds,
+            representedGroups,
+            prioritizesHighlightedNodes,
+          } = getSelectionBoxResult(
             box.start,
             end,
             box.baseSelection,
           );
           box.currentSelection = selectedNodeIds;
+          prioritizedBoxSelectionRef.current = prioritizesHighlightedNodes
+            ? selectedNodeIds
+            : [];
           selectedNodesRef.current = selectedNodeIds;
           setSelectedNodes(selectedNodeIds);
           setActiveControlGroupId(
@@ -6503,8 +10466,12 @@ export default function Home() {
         if (Math.abs(requestedTotalDx) + Math.abs(requestedTotalDy) > 4) drag.moved = true;
 
         const canvas = canvasRef.current;
-        const canvasWidth = canvas?.clientWidth ?? WORLD_SIZE.width;
-        const canvasHeight = canvas?.clientHeight ?? WORLD_SIZE.height;
+        const playAreaWorldSize = getPlayAreaWorldSize(
+          runtimeRef.current.research,
+          activeMapSectorRef.current,
+        );
+        const canvasWidth = canvas?.clientWidth ?? playAreaWorldSize.width;
+        const canvasHeight = canvas?.clientHeight ?? playAreaWorldSize.height;
         const minimumDx = Math.max(...drag.nodeIds.map((nodeId) => {
           const origin = drag.origins[nodeId];
           return origin ? 12 - origin.x : 0;
@@ -6539,8 +10506,13 @@ export default function Home() {
           const position = nextPositions[nodeId];
           return Boolean(node && position && overlapsAnotherNode(node, position, movingNodeIds));
         });
-        drag.overlapping = blockedByNode;
-        if (!blockedByNode) {
+        const blockedByBlackHoleCable = !blockedByNode && movedConnectionsCrossBlackHole(
+          nextPositions,
+          movingNodeIds,
+        );
+        const movementBlocked = blockedByNode || blockedByBlackHoleCable;
+        drag.overlapping = movementBlocked;
+        if (!movementBlocked) {
           drag.lastValidPositions = Object.fromEntries(
             drag.nodeIds.flatMap((nodeId) => {
               const position = nextPositions[nodeId];
@@ -6552,12 +10524,15 @@ export default function Home() {
         positionsRef.current = nextPositions;
         setPositions(nextPositions);
         const primaryPosition = nextPositions[drag.primaryNodeId];
-        setDragCollisionBlocked(blockedByNode);
+        setDragCollisionBlocked(movementBlocked);
+        const allowsDirectSplitterInsertion = nodesRef.current.find(
+          (node) => node.id === drag.primaryNodeId,
+        )?.kind === "splitter";
         const target =
           drag.nodeIds.length === 1 &&
           drag.moved &&
-          !blockedByNode &&
-          hasPlatformInsertModifier(event)
+          !movementBlocked &&
+          (allowsDirectSplitterInsertion || hasControlModifier(event))
             ? findInsertionTarget(drag.primaryNodeId, primaryPosition)
             : null;
         insertionTargetRef.current = target;
@@ -6618,12 +10593,19 @@ export default function Home() {
           if (Math.hypot(end.x - box.start.x, end.y - box.start.y) > 3) box.moved = true;
 
           if (box.moved) {
-            const { selectedNodeIds, representedGroups } = getSelectionBoxResult(
+            const {
+              selectedNodeIds,
+              representedGroups,
+              prioritizesHighlightedNodes,
+            } = getSelectionBoxResult(
               box.start,
               end,
               box.baseSelection,
             );
             box.currentSelection = selectedNodeIds;
+            prioritizedBoxSelectionRef.current = prioritizesHighlightedNodes
+              ? selectedNodeIds
+              : [];
             selectedNodesRef.current = selectedNodeIds;
             setSelectedNodes(selectedNodeIds);
             setActiveControlGroupId(
@@ -6632,9 +10614,12 @@ export default function Home() {
             individualControlNodeRef.current = null;
             setIndividualControlNodeId(null);
             announceMultiNodeSelection(selectedNodeIds);
+          } else if (event.button === 0 && !event.ctrlKey && !event.shiftKey) {
+            recordRapidFieldClick(end, event.target);
           }
         } else {
           selectedNodesRef.current = box.baseSelection;
+          prioritizedBoxSelectionRef.current = box.basePrioritySelection;
           setSelectedNodes(box.baseSelection);
         }
         selectionBoxRef.current = null;
@@ -6654,7 +10639,10 @@ export default function Home() {
           drag.nodeIds.length === 1 &&
           drag.moved &&
           insertionTargetRef.current &&
-          hasPlatformInsertModifier(event)
+          (
+            nodesRef.current.find((node) => node.id === drag.primaryNodeId)?.kind === "splitter" ||
+            hasControlModifier(event)
+          )
         ) {
           const insertionUndoSnapshot = captureGraphUndoSnapshot();
           Object.entries(drag.origins).forEach(([nodeId, position]) => {
@@ -6750,10 +10738,12 @@ export default function Home() {
     findPortHandle,
     getNodeSize,
     insertNodeIntoConnection,
+    movedConnectionsCrossBlackHole,
     openMultiConnectionManager,
     overlapsAnotherNode,
     pointFromEvent,
     pushUndoEntry,
+    recordRapidFieldClick,
     updateSnappedPort,
     updatePlacementBlocked,
     updateGridPosition,
@@ -6815,6 +10805,7 @@ export default function Home() {
           Object.entries(previous.researchFoundries ?? {}).map(([id, state]) => [id, {
             ...state,
             cores: getResearchFoundryCores(state),
+            coreItems: getResearchFoundryCoreItems(state),
             coreLoaded: undefined,
           }]),
         ),
@@ -6827,6 +10818,9 @@ export default function Home() {
         minedDeposits: Object.fromEntries(
           Object.entries(previous.minedDeposits ?? {}).map(([id, state]) => [id, { ...state }]),
         ),
+        blackHoles: normalizeBlackHoles(previous.blackHoles),
+        lakes: normalizeLakes(previous.lakes),
+        mapPoints: Math.max(0, Math.floor(previous.mapPoints ?? 0)),
         research: {
           ...makeResearchState(),
           ...previous.research,
@@ -6843,6 +10837,9 @@ export default function Home() {
         ),
         joints: Object.fromEntries(
           Object.entries(previous.joints ?? {}).map(([id, state]) => [id, { ...state }]),
+        ),
+        roads: Object.fromEntries(
+          Object.entries(previous.roads ?? {}).map(([id, state]) => [id, { ...state }]),
         ),
         inventorySources: Object.fromEntries(
           Object.entries(previous.inventorySources ?? {}).map(([id, state]) => [
@@ -6877,6 +10874,7 @@ export default function Home() {
         produced: { ...makeEmptyItemStore(), ...(previous.produced ?? {}) },
       };
       const fired: string[] = [];
+      const completedProductionNodeIds = new Set<NodeId>();
       const edges = connectionsRef.current;
       const simulationNodes = nodesRef.current;
       const simulationNodeById = new Map(
@@ -6996,6 +10994,23 @@ export default function Home() {
         const targetNode = simulationNodeById.get(edge.targetNode);
         const targetConstruction = next.construction[edge.targetNode];
         const targetReady = !targetConstruction || targetConstruction.complete;
+        const targetBlackHole = next.blackHoles[edge.targetNode];
+
+        if (
+          targetBlackHole &&
+          edge.targetPort === BLACK_HOLE_INPUT_PORT.id &&
+          product === ResourceType.STONE
+        ) {
+          const requiredStone = getBlackHoleStoneRequirement(targetBlackHole);
+          if (targetBlackHole.stoneFilled < requiredStone) {
+            targetBlackHole.stoneFilled = Math.min(
+              requiredStone,
+              targetBlackHole.stoneFilled + 1,
+            );
+            fired.push(edge.id);
+            return true;
+          }
+        }
 
         if (
           targetNode?.kind === "generator" &&
@@ -7016,17 +11031,47 @@ export default function Home() {
           targetNode?.kind === "researchFoundry" &&
           targetReady &&
           edge.targetPort === "research-core-in" &&
-          product === ResourceType.AUTOMATA_CORE
+          isCoreType(product)
         ) {
           const foundry = next.researchFoundries[edge.targetNode] ?? {
             progress: 0,
             cores: 0,
+            coreItems: [],
           };
           next.researchFoundries[edge.targetNode] = foundry;
-          if (foundry.cores < PRODUCTION_INGREDIENT_CAPACITY) {
-            foundry.cores += 1;
+          const coreItems = getResearchFoundryCoreItems(foundry);
+          if (coreItems.length < PRODUCTION_INGREDIENT_CAPACITY) {
+            const nextCoreItems = [...coreItems, product as CoreType];
+            foundry.coreItems = nextCoreItems;
+            foundry.cores = nextCoreItems.length;
             foundry.coreLoaded = undefined;
             next.research.available = true;
+            fired.push(edge.id);
+            return true;
+          }
+        }
+
+        if (
+          targetNode?.kind === "miningDrill" &&
+          targetReady &&
+          edge.targetPort === "motor-in" &&
+          product === ResourceType.MOTOR
+        ) {
+          const drill = next.miningDrills[edge.targetNode] ?? {
+            progress: 0,
+            iterations: 0,
+            selectedType: null,
+          };
+          next.miningDrills[edge.targetNode] = drill;
+          if (
+            drill.selectedType &&
+            drill.iterations < MINING_DRILL_ITERATIONS
+          ) {
+            drill.progress = 0;
+            drill.iterations = Math.min(
+              MINING_DRILL_ITERATIONS,
+              drill.iterations + 1,
+            );
             fired.push(edge.id);
             return true;
           }
@@ -7246,6 +11291,48 @@ export default function Home() {
         return false;
       };
 
+      Object.values(next.lakes).forEach((lake) => {
+        const waterRoutes = LAKE_WATER_OUTPUT_PORTS.flatMap((port) =>
+          outgoingEdgesByPort.get(`${lake.id}:${port.id}`) ?? []
+        );
+        const accumulated = lake.productionElapsed + elapsed;
+        const waterUnits = Math.floor(accumulated / LAKE_PRODUCTION_DURATION);
+        lake.productionElapsed = accumulated % LAKE_PRODUCTION_DURATION;
+        for (let unit = 0; unit < waterUnits && waterRoutes.length > 0; unit += 1) {
+          const startingIndex = lake.nextOutputIndex % waterRoutes.length;
+          for (let attempt = 0; attempt < waterRoutes.length; attempt += 1) {
+            const routeIndex = (startingIndex + attempt) % waterRoutes.length;
+            const route = waterRoutes[routeIndex];
+            if (
+              deliverProduct(
+                lake.id,
+                route.sourcePort,
+                ResourceType.WATER,
+                route.id,
+              )
+            ) {
+              lake.nextOutputIndex = (routeIndex + 1) % waterRoutes.length;
+              next.produced[ResourceType.WATER] += 1;
+              break;
+            }
+          }
+        }
+
+        if (
+          targetNode?.kind === "road" &&
+          targetReady &&
+          edge.targetPort === "road-in" &&
+          isInventoryItemType(product)
+        ) {
+          const road = next.roads[edge.targetNode];
+          if (road && road.outboundType === null && road.pairedRoadId && road.pairedSector) {
+            road.outboundType = product;
+            fired.push(edge.id);
+            return true;
+          }
+        }
+      });
+
       processorNodes
         .forEach((node) => {
           if (!isProcessorKind(node.kind)) return;
@@ -7324,11 +11411,7 @@ export default function Home() {
         if (extractor.stored === 0) extractor.materialType = recipe.product;
 
         if (sourceAvailable && extractor.stored < EXTRACTOR_CAPACITY) {
-          const cycleDuration = recipe.duration * (
-            next.research.extractor2Unlocked
-              ? EXTRACTOR_RESEARCH_CYCLE_MULTIPLIER
-              : 1
-          );
+          const cycleDuration = recipe.duration * getExtractorResearchCycleMultiplier(next.research);
           extractor.progress = Math.min(
             100,
             extractor.progress + (elapsed / cycleDuration) * 100,
@@ -7341,6 +11424,7 @@ export default function Home() {
             next.produced[recipe.product] += 1;
             consumeResource(next, resourceEdge.sourceNode, resourceEdge.type, edges);
             fired.push(resourceEdge.id);
+            completedProductionNodeIds.add(extractorId);
           }
         } else if (!sourceAvailable) {
           extractor.progress = 0;
@@ -7366,7 +11450,6 @@ export default function Home() {
           const recipe = getProcessorRecipe(node.kind, processor);
           if (!recipe) {
             processor.progress = 0;
-            processor.powerCommitted = false;
             next.processors[node.id] = processor;
             return;
           }
@@ -7415,7 +11498,6 @@ export default function Home() {
           if (!output) {
             processor.progress = 0;
             processor.full = getProcessorStored(processor) >= PROCESSOR_CAPACITY;
-            processor.powerCommitted = false;
             return;
           }
 
@@ -7438,22 +11520,6 @@ export default function Home() {
             return;
           }
 
-          const powerCost = POWER_COSTS[node.kind] ?? 0;
-          if (powerCost > 0 && !processor.powerCommitted) {
-            const powerEdge = incomingEdgeByPort.get(`${node.id}:power-in`);
-            const generatorId = powerEdge
-              ? resolvePowerGenerator(powerEdge.sourceNode)
-              : null;
-            const generator = generatorId ? next.generators[generatorId] : null;
-            if (!powerEdge || !generator || generator.power < powerCost) {
-              processor.progress = 0;
-              return;
-            }
-            generator.power -= powerCost;
-            processor.powerCommitted = true;
-            markPowerTransfer(powerEdge);
-          }
-
           processor.progress = Math.min(
             100,
             processor.progress + (elapsed / recipe.duration) * 100,
@@ -7462,10 +11528,10 @@ export default function Home() {
             processor.progress = 0;
             processor.stored = Math.min(PROCESSOR_CAPACITY, processor.stored + 1);
             processor.full = processor.stored >= PROCESSOR_CAPACITY;
-            processor.powerCommitted = false;
             if (isInventoryItemType(output.type)) {
               next.produced[output.type] += 1;
             }
+            completedProductionNodeIds.add(node.id);
             recipe.inputs.forEach((input) => {
               processor.inputs[input.id] = Math.max(
                 0,
@@ -7481,21 +11547,26 @@ export default function Home() {
           const foundry = next.researchFoundries[node.id] ?? {
             progress: 0,
             cores: 0,
+            coreItems: [],
           };
           next.researchFoundries[node.id] = foundry;
+          const coreItems = getResearchFoundryCoreItems(foundry);
+          foundry.coreItems = coreItems;
+          foundry.cores = coreItems.length;
 
           if (construction && !construction.complete) {
             foundry.progress = 0;
             foundry.cores = 0;
+            foundry.coreItems = [];
             return;
           }
-          if (foundry.cores <= 0) {
+          const activeProject = next.research.activeProject;
+          if (!activeProject || isResearchProjectUnlocked(next.research, activeProject)) {
             foundry.progress = 0;
             return;
           }
-
-          const activeProject = next.research.activeProject;
-          if (!activeProject || isResearchProjectUnlocked(next.research, activeProject)) {
+          const activeProjectProgress = next.research.progress[activeProject];
+          if (getResearchFoundryProjectCoreCount(foundry, activeProject, activeProjectProgress) <= 0) {
             foundry.progress = 0;
             return;
           }
@@ -7506,19 +11577,52 @@ export default function Home() {
           );
           if (foundry.progress >= 100) {
             foundry.progress = 0;
-            foundry.cores = Math.max(0, foundry.cores - 1);
+            const requiredCoreType = getResearchProjectRequiredCoreType(
+              activeProject,
+              activeProjectProgress,
+            );
+            const consumedCoreIndex = requiredCoreType
+              ? coreItems.findIndex((coreType) => coreType === requiredCoreType)
+              : 0;
+            const remainingCoreItems = coreItems.filter((_, index) => index !== consumedCoreIndex);
+            foundry.coreItems = remainingCoreItems;
+            foundry.cores = remainingCoreItems.length;
+            const projectCost = getResearchProjectCost(activeProject);
             next.research.progress[activeProject] = Math.min(
-              RESEARCH_UNLOCK_COST,
+              projectCost,
               next.research.progress[activeProject] + 1,
             );
-            if (next.research.progress[activeProject] >= RESEARCH_UNLOCK_COST) {
-              if (activeProject === "extractor2") {
+            if (next.research.progress[activeProject] >= projectCost) {
+              if (activeProject === "logistics") {
+                next.research.logisticsUnlocked = true;
+              } else if (activeProject === "kiln") {
+                next.research.kilnUnlocked = true;
+              } else if (activeProject === "charcoalGenerator") {
+                next.research.charcoalGeneratorUnlocked = true;
+              } else if (activeProject === "furnace") {
+                next.research.furnaceUnlocked = true;
+              } else if (activeProject === "refiner") {
+                next.research.refinerUnlocked = true;
+              } else if (activeProject === "assembler") {
+                next.research.assemblerUnlocked = true;
+              } else if (activeProject === "researchCenter") {
+                next.research.researchCenterUnlocked = true;
+              } else if (activeProject === "road") {
+                next.research.roadUnlocked = true;
+              } else if (activeProject === "areaExpansion1") {
+                next.research.areaExpansion1Unlocked = true;
+              } else if (activeProject === "extractor2") {
                 next.research.extractor2Unlocked = true;
+              } else if (activeProject === "extractor3") {
+                next.research.extractor3Unlocked = true;
               } else if (activeProject === "treePlanter") {
                 next.research.treePlanterUnlocked = true;
               } else if (activeProject === "miningDrill") {
                 next.research.miningDrillUnlocked = true;
               } else {
+                if (!next.research.explorationUnlocked) {
+                  next.mapPoints = Math.max(0, next.mapPoints) + 1;
+                }
                 next.research.explorationUnlocked = true;
               }
               announceResearchCompletion(activeProject);
@@ -7567,6 +11671,7 @@ export default function Home() {
             planter.progress = 0;
             generator.power -= TREE_PLANTER_POWER_COST;
             markPowerTransfer(powerEdge);
+            completedProductionNodeIds.add(node.id);
           }
         });
 
@@ -7578,50 +11683,21 @@ export default function Home() {
             progress: 0,
             iterations: 0,
             selectedType: null,
-            powerCommitted: false,
           };
           next.miningDrills[node.id] = drill;
 
           if (construction && !construction.complete) {
             drill.progress = 0;
             drill.iterations = 0;
-            drill.powerCommitted = false;
             return;
           }
+          drill.progress = 0;
           if (!drill.selectedType) {
-            drill.progress = 0;
             drill.iterations = 0;
-            drill.powerCommitted = false;
             return;
           }
-
-          const powerEdge = incomingEdgeByPort.get(`${node.id}:power-in`);
-          const generatorId = powerEdge
-            ? resolvePowerGenerator(powerEdge.sourceNode)
-            : null;
-          const generator = generatorId ? next.generators[generatorId] : null;
-
-          if (!drill.powerCommitted) {
-            if (!powerEdge || !generator || generator.power < MINING_DRILL_POWER_COST) {
-              drill.progress = 0;
-              return;
-            }
-            generator.power -= MINING_DRILL_POWER_COST;
-            drill.powerCommitted = true;
-            markPowerTransfer(powerEdge);
-          }
-
-          drill.progress = Math.min(
-            100,
-            drill.progress + (elapsed / MINING_DRILL_CYCLE_DURATION) * 100,
-          );
-          if (drill.progress >= 100) {
-            drill.progress = 0;
-            drill.iterations = Math.min(MINING_DRILL_ITERATIONS, drill.iterations + 1);
-            drill.powerCommitted = false;
-            if (drill.iterations >= MINING_DRILL_ITERATIONS) {
-              completedMiningDrills.push({ nodeId: node.id, type: drill.selectedType });
-            }
+          if (drill.iterations >= MINING_DRILL_ITERATIONS) {
+            completedMiningDrills.push({ nodeId: node.id, type: drill.selectedType });
           }
         });
 
@@ -7808,7 +11884,61 @@ export default function Home() {
           }
         });
 
+      (simulationNodesByKind.get("road") ?? [])
+        .forEach((node) => {
+          const construction = next.construction[node.id];
+          const road = next.roads[node.id];
+          if (!road || (construction && !construction.complete)) return;
+          if (road.inboundType && deliverProduct(node.id, "road-out", road.inboundType)) {
+            road.inboundType = null;
+          }
+        });
+
+      const collapsedResources = collapseDepletedResourceNodes(
+        nodesRef.current,
+        positionsRef.current,
+        edges,
+        next,
+      );
+      if (collapsedResources.depletedNodes.length > 0) {
+        nodesRef.current = collapsedResources.nodes;
+        positionsRef.current = collapsedResources.positions;
+        connectionsRef.current = collapsedResources.connections;
+        setNodes(collapsedResources.nodes);
+        setPositions(collapsedResources.positions);
+        setConnections(collapsedResources.connections);
+        const remainingNodeIds = new Set(collapsedResources.nodes.map((node) => node.id));
+        const remainingSelectedNodes = selectedNodesRef.current.filter((nodeId) =>
+          remainingNodeIds.has(nodeId)
+        );
+        selectedNodesRef.current = remainingSelectedNodes;
+        setSelectedNodes(remainingSelectedNodes);
+        setSelectedConnection((current) =>
+          current && !collapsedResources.connections.some((connection) => connection.id === current)
+            ? null
+            : current
+        );
+        collapsedResources.depletedNodes.forEach((node) => {
+          toast.warning(`${node.title} collapsed`, {
+            description: "The depleted resource node became a Black Hole.",
+          });
+        });
+        window.requestAnimationFrame(measureAnchors);
+      }
+      const currentSimulationEdges = collapsedResources.depletedNodes.length > 0
+        ? collapsedResources.connections
+        : edges;
+
       runtimeRef.current = next;
+      if (completedProductionNodeIds.size > 0) {
+        setProductionFlashTokens((current) => {
+          const updated = { ...current };
+          completedProductionNodeIds.forEach((nodeId) => {
+            updated[nodeId] = (updated[nodeId] ?? 0) + 1;
+          });
+          return updated;
+        });
+      }
       if (wireAnimationsEnabledRef.current) {
         fired.forEach((edgeId) => pendingActiveFlowIdsRef.current.add(edgeId));
       } else {
@@ -7816,11 +11946,11 @@ export default function Home() {
       }
       if (dynamicConnectionsDirty) {
         const normalizedEdges = normalizeDynamicConnections(
-          edges,
+          currentSimulationEdges,
           nodesRef.current,
           next,
         );
-        if (!connectionsAreEqual(edges, normalizedEdges)) {
+        if (!connectionsAreEqual(currentSimulationEdges, normalizedEdges)) {
           connectionsRef.current = normalizedEdges;
           setConnections(normalizedEdges);
         }
@@ -7880,7 +12010,7 @@ export default function Home() {
       if (
         !isEditing &&
         !event.shiftKey &&
-        (event.ctrlKey || event.metaKey) &&
+        event.ctrlKey &&
         event.key.toLowerCase() === "z"
       ) {
         if (undoLastAction()) event.preventDefault();
@@ -7917,6 +12047,7 @@ export default function Home() {
       }
       if (event.key === "Escape") {
         cancelRepeatPlacementPreview();
+        continuousReplicationRef.current = false;
         updateSnappedPort(null);
         setConnecting(null);
         setWirePointer(null);
@@ -7926,6 +12057,7 @@ export default function Home() {
         setSelectionBox(null);
         setSelectedConnection(null);
         selectedNodesRef.current = [];
+        prioritizedBoxSelectionRef.current = [];
         setSelectedNodes([]);
         setActiveControlGroupId(null);
         individualControlNodeRef.current = null;
@@ -7939,6 +12071,7 @@ export default function Home() {
     const onBlur = () => {
       spacePressedRef.current = false;
       cancelRepeatPlacementPreview();
+      continuousReplicationRef.current = false;
       updateSnappedPort(null);
       panRef.current = null;
       suppressedNodeContextMenuRef.current = null;
@@ -7981,7 +12114,7 @@ export default function Home() {
     if (placingNodeRef.current) {
       event.preventDefault();
       event.stopPropagation();
-      finishNodePlacement(hasPlatformInsertModifier(event), event.shiftKey);
+      finishNodePlacement(event.shiftKey);
       return;
     }
     event.preventDefault();
@@ -7989,6 +12122,7 @@ export default function Home() {
     const clickedNode = nodesRef.current.find((node) => node.id === nodeId);
     if (clickedNode && isResourceNodeKind(clickedNode.kind)) {
       selectedNodesRef.current = [nodeId];
+      prioritizedBoxSelectionRef.current = [];
       setSelectedNodes([nodeId]);
       setSelectedConnection(null);
       setActiveControlGroupId(null);
@@ -7996,29 +12130,45 @@ export default function Home() {
       setIndividualControlNodeId(null);
       return;
     }
-    if (hasPlatformInsertModifier(event)) {
-      const currentSelection = selectedNodesRef.current;
-      const nodeIds = (
-        currentSelection.includes(nodeId)
-          ? currentSelection.filter((selectedNodeId) => selectedNodeId !== nodeId)
-          : [...currentSelection, nodeId]
-      ).filter((selectedNodeId) => {
-        const selectedNode = nodesRef.current.find((node) => node.id === selectedNodeId);
-        return Boolean(selectedNode && !isResourceNodeKind(selectedNode.kind));
-      });
-      selectedNodesRef.current = nodeIds;
-      setSelectedNodes(nodeIds);
+    if (hasControlModifier(event)) {
+      const catalogItem = clickedNode && isPurchasableKind(clickedNode.kind)
+        ? VISIBLE_BUILD_CATALOG.find((item) => item.kind === clickedNode.kind) ?? null
+        : null;
+      continuousReplicationRef.current = false;
+      if (catalogItem) {
+        const replicationStarted = buildNode(catalogItem.kind, catalogItem.recipe);
+        continuousReplicationRef.current = replicationStarted;
+        if (!replicationStarted) {
+          setReplicationResourceWarning({
+            clientX: event.clientX,
+            clientY: event.clientY,
+            token: Date.now(),
+          });
+        }
+      }
+      return;
+    }
+    if (clickedNode?.kind === "road") {
+      selectedNodesRef.current = [nodeId];
+      prioritizedBoxSelectionRef.current = [];
+      setSelectedNodes([nodeId]);
       setSelectedConnection(null);
       setActiveControlGroupId(null);
-      individualControlNodeRef.current = null;
-      setIndividualControlNodeId(null);
+      individualControlNodeRef.current = nodeId;
+      setIndividualControlNodeId(nodeId);
       return;
     }
 
     const controlGroup = controlGroupsRef.current.find((group) => group.nodeIds.includes(nodeId));
     const isIndividualControl = individualControlNodeRef.current === nodeId || event.detail >= 2;
+    const currentSelection = selectedNodesRef.current;
+    const prioritySelection = prioritizedBoxSelectionRef.current;
+    const prioritizesHighlightedSelection =
+      currentSelection.includes(nodeId) &&
+      prioritySelection.length === currentSelection.length &&
+      currentSelection.every((selectedNodeId) => prioritySelection.includes(selectedNodeId));
     let nodeIds: NodeId[];
-    if (controlGroup && !isIndividualControl) {
+    if (controlGroup && !isIndividualControl && !prioritizesHighlightedSelection) {
       const availableNodeIds = new Set(nodesRef.current.map((node) => node.id));
       nodeIds = controlGroup.nodeIds.filter((groupNodeId) => availableNodeIds.has(groupNodeId));
       setActiveControlGroupId(controlGroup.id);
@@ -8030,7 +12180,6 @@ export default function Home() {
       individualControlNodeRef.current = nodeId;
       setIndividualControlNodeId(nodeId);
     } else {
-      const currentSelection = selectedNodesRef.current;
       nodeIds = currentSelection.includes(nodeId)
         ? currentSelection
         : event.shiftKey
@@ -8048,6 +12197,7 @@ export default function Home() {
       nodeIds.map((selectedNodeId) => [selectedNodeId, { ...positionsRef.current[selectedNodeId] }]),
     ) as Partial<Positions>;
     selectedNodesRef.current = nodeIds;
+    if (!prioritizesHighlightedSelection) prioritizedBoxSelectionRef.current = [];
     setSelectedNodes(nodeIds);
     setSelectedConnection(null);
     dragRef.current = {
@@ -8064,10 +12214,26 @@ export default function Home() {
     setDragCollisionBlocked(false);
   };
 
+  const handleCanvasPointerDownCapture = (event: React.PointerEvent) => {
+    if (event.button !== 2 || !placingNodeRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (cancelNodeInHand()) {
+      placementCancelContextMenuUntilRef.current = performance.now() + 500;
+    }
+  };
+
+  const handleCanvasContextMenuCapture = (event: React.MouseEvent) => {
+    if (performance.now() > placementCancelContextMenuUntilRef.current) return;
+    placementCancelContextMenuUntilRef.current = 0;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
   const beginCanvasPan = (event: React.PointerEvent, nodeId?: NodeId) => {
     if (event.button === 0 && placingNodeRef.current) {
       event.preventDefault();
-      finishNodePlacement(hasPlatformInsertModifier(event), event.shiftKey);
+      finishNodePlacement(event.shiftKey);
       return;
     }
     if (event.button === 1 || event.button === 2 || (event.button === 0 && spacePressedRef.current)) {
@@ -8090,10 +12256,14 @@ export default function Home() {
       event.preventDefault();
       const start = pointFromEvent(event.clientX, event.clientY);
       const baseSelection = event.shiftKey ? selectedNodes : [];
+      const basePrioritySelection = event.shiftKey
+        ? prioritizedBoxSelectionRef.current
+        : [];
       selectionBoxRef.current = {
         start,
         end: start,
         baseSelection,
+        basePrioritySelection,
         currentSelection: baseSelection,
         moved: false,
       };
@@ -8104,6 +12274,7 @@ export default function Home() {
       setIndividualControlNodeId(null);
       if (!event.shiftKey) {
         selectedNodesRef.current = [];
+        prioritizedBoxSelectionRef.current = [];
         setSelectedNodes([]);
       }
     }
@@ -8114,7 +12285,7 @@ export default function Home() {
     if (placingNodeRef.current) {
       event.preventDefault();
       event.stopPropagation();
-      finishNodePlacement(hasPlatformInsertModifier(event), event.shiftKey);
+      finishNodePlacement(event.shiftKey);
       return;
     }
     event.preventDefault();
@@ -8158,23 +12329,8 @@ export default function Home() {
     };
     setWirePointer(pointFromEvent(event.clientX, event.clientY));
     setSelectedConnection(null);
+    prioritizedBoxSelectionRef.current = [];
     setSelectedNodes([nodeId]);
-  };
-
-  const handlePortKeyboard = (event: React.KeyboardEvent, nodeId: NodeId, port: Port) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    setSelectedNodes([nodeId]);
-    setSelectedConnection(null);
-    connectionDragRef.current = null;
-    if (!connecting) {
-      setConnecting({ nodeId, port });
-      return;
-    }
-    connectPorts(connecting, { nodeId, port });
-    updateSnappedPort(null);
-    setConnecting(null);
-    setWirePointer(null);
   };
 
   const setProductionRunning = useCallback((running: boolean) => {
@@ -8198,7 +12354,9 @@ export default function Home() {
   const chooseResearchProject = useCallback((projectId: ResearchProjectId) => {
     const current = runtimeRef.current;
     if (
-      !current.research.available ||
+      getResearchMilestoneRequirement(projectId) ||
+      !canSelectResearchProject(current, nodesRef.current) ||
+      !isResearchProjectPrerequisiteSatisfied(current.research, projectId) ||
       isResearchProjectUnlocked(current.research, projectId)
     ) return;
     const next: Runtime = {
@@ -8218,6 +12376,200 @@ export default function Home() {
     runtimeRef.current = next;
     setRuntime(next);
   }, []);
+
+  const unlockSelectedMapNode = useCallback(() => {
+    if (!selectedMapSector || !canUnlockMapNode(mapNodeProgress, selectedMapSector)) return;
+    const current = runtimeRef.current;
+    if (current.mapPoints <= 0) return;
+    const playAreaSize = getPlayAreaWorldSize(current.research, selectedMapSector);
+    const mapNodeValue = getMapNodeValue(selectedMapSector);
+    const next: Runtime = {
+      ...current,
+      mapPoints: current.mapPoints - 1,
+    };
+    runtimeRef.current = next;
+    setRuntime(next);
+    setMapNodeProgress((progress) => ({
+      ...progress,
+      [selectedMapSector]: {
+        ...progress[selectedMapSector],
+        explored: true,
+        customName: progress[selectedMapSector]?.customName ?? null,
+      },
+    }));
+    setSelectedMapSector(null);
+    toast.success("Map node unlocked", {
+      description: `Node Value ${mapNodeValue} · Field Size ${playAreaSize.width.toLocaleString()} × ${playAreaSize.height.toLocaleString()}`,
+    });
+  }, [mapNodeProgress, selectedMapSector]);
+
+  const captureActiveMapFactory = useCallback((): MapFactoryState => {
+    const viewport = workspaceRef.current;
+    const currentRuntime = runtimeRef.current;
+    return {
+      nodes: nodesRef.current.map(serializeNode),
+      positions: Object.fromEntries(
+        Object.entries(positionsRef.current).map(([nodeId, position]) => [nodeId, { ...position }]),
+      ),
+      connections: connectionsRef.current.map((connection) => ({ ...connection })),
+      runtime: cloneStoredMaterialRuntime(currentRuntime),
+      controlGroups: controlGroupsRef.current.map((group) => ({
+        ...group,
+        nodeIds: [...group.nodeIds],
+      })),
+      buildSequence: { ...buildSequenceRef.current },
+      zoom: zoomRef.current,
+      viewport: {
+        scrollLeft: viewport?.scrollLeft ?? 0,
+        scrollTop: viewport?.scrollTop ?? 0,
+      },
+      lastSimulatedAt: Date.now(),
+      producedBaseline: { ...currentRuntime.produced },
+    };
+  }, []);
+
+  const openMapNodeDialog = useCallback((sectorKey: string) => {
+    if (!isMapNodeUnlocked(mapNodeProgress, sectorKey)) return;
+    const existingName = mapNodeProgress[sectorKey]?.customName?.trim();
+    setMapNodeDialogSector(sectorKey);
+    setMapNodeDraftName(existingName || (sectorKey === MAP_HOME_SECTOR ? "Home Factory" : ""));
+    setMapNodeDialogOpen(true);
+  }, [mapNodeProgress]);
+
+  const saveMapNodeName = useCallback(() => {
+    if (!mapNodeDialogSector) return;
+    const customName = mapNodeDraftName.trim().slice(0, 80);
+    setMapNodeProgress((progress) => ({
+      ...progress,
+      [mapNodeDialogSector]: {
+        ...progress[mapNodeDialogSector],
+        explored: true,
+        customName: customName || null,
+      },
+    }));
+    toast.success("Map node renamed", {
+      description: customName || "The node will use its default name.",
+    });
+  }, [mapNodeDialogSector, mapNodeDraftName]);
+
+  const travelToMapNode = useCallback((sectorKey: string) => {
+    if (
+      sectorKey === activeMapSectorRef.current ||
+      !isMapNodeUnlocked(mapNodeProgress, sectorKey)
+    ) {
+      setMapNodeDialogOpen(false);
+      return;
+    }
+
+    const currentRuntime = runtimeRef.current;
+    const currentSector = activeMapSectorRef.current;
+    const currentFactory = captureActiveMapFactory();
+    const storedFactories = {
+      ...mapFactoriesRef.current,
+      [currentSector]: currentFactory,
+    };
+    const destinationSnapshot = storedFactories[sectorKey];
+    if (!destinationSnapshot) {
+      toast.error("Map terrain unavailable", {
+        description: "This map node was not generated when the game began.",
+      });
+      return;
+    }
+    const destination = advanceMapFactoryInBackground(
+      destinationSnapshot,
+      Date.now() - destinationSnapshot.lastSimulatedAt,
+      currentRuntime.research,
+    );
+    const destinationRuntime = cloneStoredMaterialRuntime(destination.runtime);
+    destinationRuntime.research = {
+      ...currentRuntime.research,
+      progress: { ...currentRuntime.research.progress },
+    };
+    destinationRuntime.mapPoints = currentRuntime.mapPoints;
+    destinationRuntime.produced = Object.fromEntries(
+      INVENTORY_ITEMS.map(({ type }) => [
+        type,
+        (currentRuntime.produced[type] ?? 0) + Math.max(
+          0,
+          (destination.runtime.produced[type] ?? 0) - (destination.producedBaseline[type] ?? 0),
+        ),
+      ]),
+    ) as Record<InventoryItemType, number>;
+    const destinationNodes = destination.nodes
+      .filter((node) => isNodeKind(node.kind))
+      .map((node) => hydrateNode(node as SerializedNode));
+    const validNodeIds = new Set([
+      ...destinationNodes.map((node) => node.id),
+      ...Object.keys(destinationRuntime.blackHoles ?? {}),
+    ]);
+    const destinationPositions = Object.fromEntries(
+      Object.entries(destination.positions).filter(([nodeId]) => validNodeIds.has(nodeId)),
+    );
+    const destinationConnections = destination.connections.filter(
+      (connection) => validNodeIds.has(connection.sourceNode) && validNodeIds.has(connection.targetNode),
+    );
+    const destinationControlGroups = destination.controlGroups
+      .map((group) => ({
+        ...group,
+        nodeIds: group.nodeIds.filter((nodeId) => validNodeIds.has(nodeId)),
+      }))
+      .filter((group) => group.nodeIds.length > 0);
+
+    mapFactoriesRef.current = {
+      ...storedFactories,
+      [sectorKey]: {
+        ...destination,
+        runtime: destinationRuntime,
+        lastSimulatedAt: Date.now(),
+        producedBaseline: { ...destinationRuntime.produced },
+      },
+    };
+    activeMapSectorRef.current = sectorKey;
+    setActiveMapSector(sectorKey);
+    nodesRef.current = destinationNodes;
+    setNodes(destinationNodes);
+    positionsRef.current = destinationPositions;
+    setPositions(destinationPositions);
+    connectionsRef.current = destinationConnections;
+    setConnections(destinationConnections);
+    runtimeRef.current = destinationRuntime;
+    setRuntime(destinationRuntime);
+    controlGroupsRef.current = destinationControlGroups;
+    setControlGroups(destinationControlGroups);
+    buildSequenceRef.current = {
+      ...makeBuildSequence(),
+      ...destination.buildSequence,
+    };
+    selectedNodesRef.current = [];
+    setSelectedNodes([]);
+    setSelectedConnection(null);
+    setConnecting(null);
+    setHoveredPort(null);
+    setSnappedPort(null);
+    setWirePointer(null);
+    setActiveFlows({});
+    anchorsRef.current = {};
+    setAnchors({});
+    setActiveControlGroupId(null);
+    setIndividualControlNodeId(null);
+    setSelectedMapSector(null);
+    setMapNodeDialogOpen(false);
+    setMapOpen(false);
+    zoomRef.current = destination.zoom;
+    pinchTargetZoomRef.current = destination.zoom;
+    setZoom(destination.zoom);
+    lastSimulationTickRef.current = performance.now();
+    lastPublishedRuntimeSignatureRef.current = null;
+    window.requestAnimationFrame(() => {
+      const viewport = workspaceRef.current;
+      if (!viewport) return;
+      viewport.scrollLeft = destination.viewport.scrollLeft;
+      viewport.scrollTop = destination.viewport.scrollTop;
+      window.requestAnimationFrame(measureAnchors);
+    });
+    const destinationName = mapNodeProgress[sectorKey]?.customName?.trim() || "Unnamed Node";
+    toast.success(`Traveled to ${destinationName}`);
+  }, [captureActiveMapFactory, mapNodeProgress, measureAnchors]);
 
   const resetFactory = useCallback(() => {
     undoHistoryRef.current = [];
@@ -8239,6 +12591,7 @@ export default function Home() {
     setRewiringConnectionId(null);
     setSelectedConnection(null);
     selectedNodesRef.current = [];
+    prioritizedBoxSelectionRef.current = [];
     setSelectedNodes([]);
     controlGroupsRef.current = [];
     setControlGroups([]);
@@ -8258,6 +12611,7 @@ export default function Home() {
     setIsPanning(false);
     placingNodeRef.current = null;
     repeatPlacementPreviewRef.current = null;
+    continuousReplicationRef.current = false;
     setPlacingNodeId(null);
     updatePlacementBlocked(false);
     dragRef.current = null;
@@ -8275,6 +12629,11 @@ export default function Home() {
     setPendingAssemblerRecipeChange(null);
     setAssemblerRecipeChangeDialogOpen(false);
     setSuppressFutureAssemblerRecipeWarnings(false);
+    setMiningDrillWarningOpen(false);
+    setSuppressFutureMiningDrillWarnings(false);
+    setSkipMiningDrillCompletionWarning(false);
+    setSkipMultiConnectionTooltip(false);
+    setSkipShortcutBarGroupTooltip(false);
     setSuppressFutureNodeDestructionWarnings(false);
     setPendingDeletionNodeIds([]);
     setPendingDeletionIsHighlightedGroup(false);
@@ -8284,14 +12643,41 @@ export default function Home() {
     setConnectionDeleteDialogOpen(false);
     setBuildOpen(false);
     setResearchOpen(false);
+    setHoveredResearchProject(null);
     setMapOpen(false);
     setOptionsOpen(false);
+    setShortcutsOpen(false);
+    setRecipesOpen(false);
     setSaveOpen(false);
-    setShortcutBars(makeDefaultShortcutBars());
+    const defaultShortcutBars = makeDefaultShortcutBars();
+    shortcutBarsRef.current = defaultShortcutBars;
+    shortcutBarGroupsRef.current = [];
+    shortcutBarDragRef.current = null;
+    setShortcutBars(defaultShortcutBars);
+    setShortcutBarGroups([]);
+    setShortcutBarSnapTarget(null);
     setRemoveBuildCosts(false);
     setDevOpen(false);
     setSelectedMapSector(null);
-    setMapNodeProgress(makeInitialMapNodeProgress());
+    activeMapSectorRef.current = MAP_HOME_SECTOR;
+    mapFactoriesGeneratedAtStartRef.current = true;
+    mapFactoriesRef.current = generateMapFactoriesAtGameStart(fresh, MIN_ZOOM);
+    setActiveMapSector(MAP_HOME_SECTOR);
+    setMapNodeDialogSector(null);
+    setMapNodeDialogOpen(false);
+    setMapNodeDraftName("");
+    const initialMapProgress = makeInitialMapNodeProgress();
+    mapNodeProgressRef.current = initialMapProgress;
+    setMapNodeProgress(initialMapProgress);
+    rapidClickTimestampsRef.current = {};
+    rapidClickSequenceRef.current = { count: 0, lastAt: 0 };
+    rapidFieldClicksRef.current = { timestamps: [], center: null };
+    Object.values(rapidClickAnimationTimeoutsRef.current).forEach((timeout) => {
+      window.clearTimeout(timeout);
+    });
+    rapidClickAnimationTimeoutsRef.current = {};
+    setRapidClickAnimations({});
+    setRapidClickWarningOpen(false);
     buildOpenRef.current = false;
     setShowBuildableOnly(false);
     setShowNeverBuiltOnly(false);
@@ -8307,6 +12693,7 @@ export default function Home() {
     setPlacedBuildKinds(new Set());
     setNewBuildKinds(new Set());
     gameElapsedMsRef.current = 0;
+    lastTemporarySaveElapsedRef.current = 0;
     setUnlockTimes({ extractor: 0, woodenChest: 0 });
     setBuildAttention(false);
     setJournalAttention(false);
@@ -8316,64 +12703,95 @@ export default function Home() {
     insertionTargetRef.current = null;
     setInsertionTarget(null);
     setProductionRunning(true);
-    zoomRef.current = MIN_ZOOM;
-    pinchTargetZoomRef.current = MIN_ZOOM;
-    setZoom(MIN_ZOOM);
     focusHome();
     toast.success("Foundry reset");
   }, [focusHome, setProductionRunning, updatePlacementBlocked, updateSnappedPort]);
 
+  const createCurrentSave = useCallback((name: string): SaveGameSlot => {
+    const viewport = workspaceRef.current;
+    const gameElapsedMs = Math.max(0, gameElapsedMsRef.current);
+    const savedUnlockTimes = { ...unlockTimes };
+    revealedBuildKinds.forEach((kind) => {
+      if (savedUnlockTimes[kind] === undefined) savedUnlockTimes[kind] = gameElapsedMs;
+    });
+    const savedMapFactories = {
+      ...mapFactoriesRef.current,
+      [activeMapSectorRef.current]: captureActiveMapFactory(),
+    };
+    return JSON.parse(JSON.stringify({
+      name,
+      savedAt: new Date().toISOString(),
+      data: {
+        version: 1,
+        nodes: nodesRef.current.map(serializeNode),
+        positions: positionsRef.current,
+        connections: connectionsRef.current,
+        runtime: runtimeRef.current,
+        controlGroups: controlGroupsRef.current,
+        revealedBuildKinds: [...revealedBuildKinds],
+        builtBuildKinds: [...builtBuildKinds],
+        placedBuildKinds: [...placedBuildKinds],
+        newBuildKinds: [...newBuildKinds],
+        unlockTimes: savedUnlockTimes,
+        logisticsUnlocked: logisticsUnlockedRef.current,
+        selectedMapSector,
+        mapNodeProgress,
+        activeMapSector: activeMapSectorRef.current,
+        mapFactories: savedMapFactories,
+        gameElapsedMs,
+        zoom: zoomRef.current,
+        viewport: {
+          scrollLeft: viewport?.scrollLeft ?? HOME_OFFSET.x * zoomRef.current,
+          scrollTop: viewport?.scrollTop ?? HOME_OFFSET.y * zoomRef.current,
+        },
+        buildSequence: buildSequenceRef.current,
+        controlGroupSequence: controlGroupSequenceRef.current,
+        isRunning: isRunningRef.current,
+        buildAttention,
+        journalAttention,
+        shortcutBars,
+        shortcutBarGroups,
+        removeBuildCosts,
+        promptPreferences: {
+          skipConnectionDeleteConfirmation: alwaysDeleteConnections,
+          automaticallyDestroyInventoryOverflow:
+            inventoryOverflowWarningSuppressedRef.current,
+          skipNodeDestructionConfirmation: alwaysApproveNodeDestruction,
+          skipHighlightedGroupDeleteConfirmation: alwaysApproveNodeDestruction,
+          skipControlGroupTutorial: controlGroupTutorialSuppressedRef.current,
+          skipAssemblerRecipeChangeConfirmation: alwaysApproveAssemblerRecipeChanges,
+          skipMiningDrillCompletionWarning,
+          skipMultiConnectionTooltip,
+          skipShortcutBarGroupTooltip,
+        },
+      },
+    })) as SaveGameSlot;
+  }, [
+    alwaysApproveAssemblerRecipeChanges,
+    alwaysApproveNodeDestruction,
+    alwaysDeleteConnections,
+    builtBuildKinds,
+    buildAttention,
+    captureActiveMapFactory,
+    journalAttention,
+    mapNodeProgress,
+    newBuildKinds,
+    placedBuildKinds,
+    removeBuildCosts,
+    revealedBuildKinds,
+    selectedMapSector,
+    shortcutBarGroups,
+    shortcutBars,
+    skipMiningDrillCompletionWarning,
+    skipMultiConnectionTooltip,
+    skipShortcutBarGroupTooltip,
+    unlockTimes,
+  ]);
+
   const saveGameToSlot = useCallback((slotIndex: number) => {
     try {
-      const viewport = workspaceRef.current;
       const name = saveNames[slotIndex]?.trim() || `Save ${slotIndex + 1}`;
-      const gameElapsedMs = Math.max(0, gameElapsedMsRef.current);
-      const savedUnlockTimes = { ...unlockTimes };
-      revealedBuildKinds.forEach((kind) => {
-        if (savedUnlockTimes[kind] === undefined) savedUnlockTimes[kind] = gameElapsedMs;
-      });
-      const slot = JSON.parse(JSON.stringify({
-        name,
-        savedAt: new Date().toISOString(),
-        data: {
-          version: 1,
-          nodes: nodesRef.current.map(serializeNode),
-          positions: positionsRef.current,
-          connections: connectionsRef.current,
-          runtime: runtimeRef.current,
-          controlGroups: controlGroupsRef.current,
-          revealedBuildKinds: [...revealedBuildKinds],
-          builtBuildKinds: [...builtBuildKinds],
-          placedBuildKinds: [...placedBuildKinds],
-          newBuildKinds: [...newBuildKinds],
-          unlockTimes: savedUnlockTimes,
-          logisticsUnlocked: logisticsUnlockedRef.current,
-          selectedMapSector,
-          mapNodeProgress,
-          gameElapsedMs,
-          zoom: zoomRef.current,
-          viewport: {
-            scrollLeft: viewport?.scrollLeft ?? HOME_OFFSET.x * zoomRef.current,
-            scrollTop: viewport?.scrollTop ?? HOME_OFFSET.y * zoomRef.current,
-          },
-          buildSequence: buildSequenceRef.current,
-          controlGroupSequence: controlGroupSequenceRef.current,
-          isRunning: isRunningRef.current,
-          buildAttention,
-          journalAttention,
-          shortcutBars,
-          removeBuildCosts,
-          promptPreferences: {
-            skipConnectionDeleteConfirmation: alwaysDeleteConnections,
-            automaticallyDestroyInventoryOverflow:
-              inventoryOverflowWarningSuppressedRef.current,
-            skipNodeDestructionConfirmation: alwaysApproveNodeDestruction,
-            skipHighlightedGroupDeleteConfirmation: alwaysApproveNodeDestruction,
-            skipControlGroupTutorial: controlGroupTutorialSuppressedRef.current,
-            skipAssemblerRecipeChangeConfirmation: alwaysApproveAssemblerRecipeChanges,
-          },
-        },
-      })) as SaveGameSlot;
+      const slot = createCurrentSave(name);
       const nextSlots = [...saveSlots];
       nextSlots[slotIndex] = slot;
       window.localStorage.setItem(SAVE_STORAGE_KEY, JSON.stringify(nextSlots));
@@ -8389,27 +12807,86 @@ export default function Home() {
           : "The browser could not write this save to local storage.",
       });
     }
-  }, [
-    alwaysApproveAssemblerRecipeChanges,
-    alwaysApproveNodeDestruction,
-    alwaysDeleteConnections,
-    builtBuildKinds,
-    buildAttention,
-    journalAttention,
-    mapNodeProgress,
-    newBuildKinds,
-    placedBuildKinds,
-    removeBuildCosts,
-    revealedBuildKinds,
-    saveNames,
-    saveSlots,
-    selectedMapSector,
-    shortcutBars,
-    unlockTimes,
-  ]);
+  }, [createCurrentSave, saveNames, saveSlots]);
 
-  const loadGameFromSlot = useCallback((slotIndex: number) => {
-    const slot = saveSlots[slotIndex];
+  const copyTemporarySaveToSlot = useCallback((slotIndex: number) => {
+    if (!temporarySave || !isSaveGameSlot(temporarySave)) return;
+    try {
+      const name = saveNames[slotIndex]?.trim() || `Save ${slotIndex + 1}`;
+      const slot = JSON.parse(JSON.stringify({
+        ...temporarySave,
+        name,
+      })) as SaveGameSlot;
+      const nextSlots = [...saveSlots];
+      nextSlots[slotIndex] = slot;
+      window.localStorage.setItem(SAVE_STORAGE_KEY, JSON.stringify(nextSlots));
+      setSaveSlots(nextSlots);
+      setSaveNames((current) => current.map(
+        (value, index) => index === slotIndex ? name : value,
+      ));
+      toast.success(`Temporary save copied to Slot ${slotIndex + 1}`, {
+        description: `${name} · ${formatSaveDate(slot.savedAt)}`,
+      });
+    } catch (error) {
+      toast.error("Copy failed", {
+        description: error instanceof Error
+          ? error.message
+          : "The browser could not write this save to local storage.",
+      });
+    }
+  }, [saveNames, saveSlots, temporarySave]);
+
+  const applyTemporarySaveFrequency = useCallback(() => {
+    const frequency = Math.min(
+      MAX_TEMPORARY_SAVE_FREQUENCY_MINUTES,
+      Math.max(
+        MIN_TEMPORARY_SAVE_FREQUENCY_MINUTES,
+        Math.round(temporarySaveFrequencyDraft),
+      ),
+    );
+    try {
+      window.localStorage.setItem(
+        TEMPORARY_SAVE_FREQUENCY_STORAGE_KEY,
+        String(frequency),
+      );
+      setTemporarySaveFrequencyMinutes(frequency);
+      setTemporarySaveFrequencyDraft(frequency);
+      setTemporarySaveFrequencyOpen(false);
+      toast.success("Temporary save frequency updated", {
+        description: describeTemporarySaveFrequency(frequency),
+      });
+    } catch {
+      toast.error("Frequency could not be saved", {
+        description: "The browser could not store this temporary save preference.",
+      });
+    }
+  }, [temporarySaveFrequencyDraft]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!isRunningRef.current) return;
+      const elapsed = Math.max(0, gameElapsedMsRef.current);
+      const interval = temporarySaveFrequencyMinutes * 60 * 1000;
+      if (elapsed - lastTemporarySaveElapsedRef.current < interval) return;
+      try {
+        const slot = createCurrentSave(formatTemporarySaveName());
+        window.localStorage.setItem(TEMPORARY_SAVE_STORAGE_KEY, JSON.stringify(slot));
+        setTemporarySave(slot);
+      } catch (error) {
+        toast.error("Temporary save failed", {
+          description: error instanceof Error
+            ? error.message
+            : "The browser could not write the temporary save to local storage.",
+        });
+      } finally {
+        lastTemporarySaveElapsedRef.current = elapsed;
+      }
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [createCurrentSave, temporarySaveFrequencyMinutes]);
+
+  const loadGameFromSlot = useCallback((slotIndex: number | "temporary") => {
+    const slot = slotIndex === "temporary" ? temporarySave : saveSlots[slotIndex];
     if (!slot || !isSaveGameSlot(slot)) {
       toast.error("This save slot cannot be loaded");
       return;
@@ -8417,14 +12894,80 @@ export default function Home() {
 
     try {
       const payload = slot.data;
-      let nextNodes = payload.nodes.map(hydrateNode);
-      const validNodeIds = new Set(nextNodes.map((node) => node.id));
-      const nextConnections = payload.connections.filter(
-        (connection) => validNodeIds.has(connection.sourceNode) && validNodeIds.has(connection.targetNode),
+      const migrateLegacyMapCoordinates = hasLegacyMapCoordinates(payload.mapFactories);
+      const nextMapNodeProgress = normalizeMapNodeProgress(
+        payload.mapNodeProgress,
+        migrateLegacyMapCoordinates,
       );
+      const normalizedActiveMapSector = payload.activeMapSector
+        ? normalizeStoredMapSectorKey(payload.activeMapSector, migrateLegacyMapCoordinates)
+        : null;
+      const loadedActiveMapSector = (
+        normalizedActiveMapSector &&
+        isMapNodeUnlocked(nextMapNodeProgress, normalizedActiveMapSector)
+      ) ? normalizedActiveMapSector : MAP_HOME_SECTOR;
+      const loadedMapFactories = Object.fromEntries(
+        Object.entries(payload.mapFactories ?? {}).map(([sectorKey, factory]) => {
+          const normalizedSectorKey = normalizeStoredMapSectorKey(
+            sectorKey,
+            migrateLegacyMapCoordinates,
+          );
+          if (!(
+            normalizedSectorKey &&
+            factory &&
+            Array.isArray(factory.nodes) &&
+            Array.isArray(factory.connections) &&
+            factory.runtime
+          )) return null;
+          return [normalizedSectorKey, {
+            ...factory,
+            runtime: {
+              ...factory.runtime,
+              blackHoles: normalizeBlackHoles(factory.runtime.blackHoles),
+              lakes: normalizeLakes(factory.runtime.lakes),
+            },
+            lastSimulatedAt: Number(factory.lastSimulatedAt) || Date.now(),
+            producedBaseline: normalizeItemStore(factory.producedBaseline),
+          }] as const;
+        }).filter((entry): entry is readonly [string, MapFactoryState] => entry !== null),
+      ) as MapFactoriesBySector;
+      const normalizedSelectedMapSector = payload.selectedMapSector
+        ? normalizeStoredMapSectorKey(payload.selectedMapSector, migrateLegacyMapCoordinates)
+        : null;
+      let nextNodes = payload.nodes
+        .filter((node): node is SerializedNode => isNodeKind(node.kind))
+        .map(hydrateNode);
+      const nextBlackHoles = normalizeBlackHoles(payload.runtime.blackHoles);
+      const nextLakes = normalizeLakes(payload.runtime.lakes);
+      const validNodeIds = new Set([
+        ...nextNodes.map((node) => node.id),
+        ...Object.keys(nextBlackHoles),
+        ...Object.keys(nextLakes),
+      ]);
+      const nodeKindsById = new Map(nextNodes.map((node) => [node.id, node.kind]));
+      const nextConnections = payload.connections.filter(
+        (connection) =>
+          validNodeIds.has(connection.sourceNode) &&
+          validNodeIds.has(connection.targetNode) &&
+          !(
+            connection.targetPort === "power-in" &&
+            (
+              isProcessorKind(nodeKindsById.get(connection.targetNode) ?? "forest") ||
+              nodeKindsById.get(connection.targetNode) === "miningDrill"
+            )
+          ),
+      );
+      const nextControlGroups = (payload.controlGroups ?? [])
+        .map((group) => ({
+          ...group,
+          nodeIds: group.nodeIds.filter((nodeId) => validNodeIds.has(nodeId)),
+        }))
+        .filter((group) => group.nodeIds.length > 0);
       const legacyInventory = normalizeItemStore(payload.runtime.inventory);
       const hasLegacyItems = INVENTORY_ITEMS.some(({ type }) => legacyInventory[type] > 0);
-      const nextPositions = { ...payload.positions };
+      const nextPositions = Object.fromEntries(
+        Object.entries(payload.positions).filter(([nodeId]) => validNodeIds.has(nodeId)),
+      );
       const nextWoodenChests = Object.fromEntries(
         Object.entries(payload.runtime.woodenChests ?? {}).map(([id, chest]) => [
           id,
@@ -8492,6 +13035,14 @@ export default function Home() {
       const nextRuntime: Runtime = {
         ...makeRuntime(),
         ...payload.runtime,
+        blackHoles: nextBlackHoles,
+        lakes: nextLakes,
+        mapPoints: Math.max(
+          0,
+          Math.floor(Number(
+            payload.runtime.mapPoints ?? (payload.runtime.research?.explorationUnlocked ? 1 : 0),
+          ) || 0),
+        ),
         forest: {
           ...makeRuntime().forest,
           ...(payload.runtime.forest ?? {}),
@@ -8500,25 +13051,47 @@ export default function Home() {
           ...makeEmptyItemStore(),
           ...(payload.runtime.produced ?? {}),
         },
+        research: {
+          ...makeResearchState(),
+          ...(payload.runtime.research ?? {}),
+          progress: {
+            ...makeResearchState().progress,
+            ...(payload.runtime.research?.progress ?? {}),
+          },
+        },
         processors: Object.fromEntries(
-          Object.entries(payload.runtime.processors ?? {}).map(([id, processor]) => [id, {
-            ...processor,
-            assemblerRecipe: isAssemblerRecipeId(processor.assemblerRecipe)
-              ? processor.assemblerRecipe
-              : null,
-            refinerRecipe: isRefinerRecipeId(processor.refinerRecipe)
-              ? processor.refinerRecipe
-              : null,
-            inputs: Object.fromEntries(
-              Object.entries(processor.inputs ?? {}).map(([portId, amount]) => [
-                portId,
-                Math.min(
-                  PRODUCTION_INGREDIENT_CAPACITY,
-                  Math.max(0, Math.floor(Number(amount) || 0)),
-                ),
-              ]),
-            ),
-          }]),
+          Object.entries(payload.runtime.processors ?? {})
+            .filter(([id]) => validNodeIds.has(id))
+            .map(([id, processor]) => [id, {
+              ...processor,
+              assemblerRecipe: isAssemblerRecipeId(processor.assemblerRecipe)
+                ? processor.assemblerRecipe
+                : null,
+              refinerRecipe: isRefinerRecipeId(processor.refinerRecipe)
+                ? processor.refinerRecipe
+                : null,
+              inputs: Object.fromEntries(
+                Object.entries(processor.inputs ?? {}).map(([portId, amount]) => [
+                  portId,
+                  Math.min(
+                    PRODUCTION_INGREDIENT_CAPACITY,
+                    Math.max(0, Math.floor(Number(amount) || 0)),
+                  ),
+                ]),
+              ),
+            }]),
+        ),
+        miningDrills: Object.fromEntries(
+          Object.entries(payload.runtime.miningDrills ?? {})
+            .filter(([id]) => validNodeIds.has(id))
+            .map(([id, drill]) => [id, {
+              progress: 0,
+              iterations: Math.min(
+                MINING_DRILL_ITERATIONS,
+                Math.max(0, Math.floor(Number(drill.iterations) || 0)),
+              ),
+              selectedType: getMiningTarget(drill.selectedType)?.type ?? null,
+            }]),
         ),
         generators: Object.fromEntries(
           Object.entries(payload.runtime.generators ?? {}).map(([id, generator]) => [id, {
@@ -8533,6 +13106,7 @@ export default function Home() {
           Object.entries(payload.runtime.researchFoundries ?? {}).map(([id, foundry]) => [id, {
             ...foundry,
             cores: getResearchFoundryCores(foundry),
+            coreItems: getResearchFoundryCoreItems(foundry),
             coreLoaded: undefined,
           }]),
         ),
@@ -8544,7 +13118,14 @@ export default function Home() {
         ),
         woodenChests: nextWoodenChests,
         storages: nextStorages,
-        pausedOutputs: payload.runtime.pausedOutputs ?? {},
+        construction: Object.fromEntries(
+          Object.entries(payload.runtime.construction ?? {})
+            .filter(([id]) => validNodeIds.has(id)),
+        ),
+        pausedOutputs: Object.fromEntries(
+          Object.entries(payload.runtime.pausedOutputs ?? {})
+            .filter(([id]) => validNodeIds.has(id)),
+        ),
       };
       delete nextRuntime.inventory;
       delete nextRuntime.inventoryCapacity;
@@ -8559,6 +13140,14 @@ export default function Home() {
       const filterBuildKinds = (kinds: PurchasableKind[]) =>
         kinds.filter((kind) => validBuildKinds.has(kind));
       const nextRevealed = new Set(filterBuildKinds(payload.revealedBuildKinds ?? []));
+      const loadedLogisticsUnlocked = Boolean(
+        payload.logisticsUnlocked || nextRuntime.research.logisticsUnlocked,
+      );
+      if (loadedLogisticsUnlocked) {
+        nextRuntime.research.logisticsUnlocked = true;
+        nextRuntime.research.progress.logistics = getResearchProjectCost("logistics");
+        LOGISTICS_BUILD_KINDS.forEach((kind) => nextRevealed.add(kind));
+      }
       const nextBuilt = new Set(filterBuildKinds(payload.builtBuildKinds ?? []));
       const initialNodeIds = new Set(INITIAL_NODES.map((node) => node.id));
       const inferredPlacedKinds = nextNodes.flatMap((node) =>
@@ -8594,6 +13183,11 @@ export default function Home() {
       });
       const nextZoom = clampZoom(payload.zoom ?? 1);
       const nextPromptPreferences = normalizePromptPreferences(payload.promptPreferences);
+      const nextShortcutBars = normalizeShortcutBars(payload.shortcutBars);
+      const nextShortcutBarGroups = normalizeShortcutBarGroups(
+        payload.shortcutBarGroups,
+        nextShortcutBars,
+      );
 
       nodesRef.current = nextNodes;
       undoHistoryRef.current = [];
@@ -8605,8 +13199,8 @@ export default function Home() {
       setConnections(nextConnections);
       runtimeRef.current = nextRuntime;
       setRuntime(nextRuntime);
-      controlGroupsRef.current = payload.controlGroups ?? [];
-      setControlGroups(payload.controlGroups ?? []);
+      controlGroupsRef.current = nextControlGroups;
+      setControlGroups(nextControlGroups);
       setRevealedBuildKinds(nextRevealed);
       setBuiltBuildKinds(nextBuilt);
       setPlacedBuildKinds(nextPlaced);
@@ -8614,7 +13208,12 @@ export default function Home() {
       setUnlockTimes(nextUnlockTimes);
       setBuildAttention(payload.buildAttention ?? false);
       setJournalAttention(payload.journalAttention ?? false);
-      setShortcutBars(normalizeShortcutBars(payload.shortcutBars));
+      shortcutBarsRef.current = nextShortcutBars;
+      shortcutBarGroupsRef.current = nextShortcutBarGroups;
+      shortcutBarDragRef.current = null;
+      setShortcutBars(nextShortcutBars);
+      setShortcutBarGroups(nextShortcutBarGroups);
+      setShortcutBarSnapTarget(null);
       setRemoveBuildCosts(payload.removeBuildCosts === true);
       setAlwaysDeleteConnections(
         nextPromptPreferences.skipConnectionDeleteConfirmation,
@@ -8628,24 +13227,52 @@ export default function Home() {
       setAlwaysApproveAssemblerRecipeChanges(
         nextPromptPreferences.skipAssemblerRecipeChangeConfirmation,
       );
+      setSkipMiningDrillCompletionWarning(
+        nextPromptPreferences.skipMiningDrillCompletionWarning,
+      );
+      setSkipMultiConnectionTooltip(
+        nextPromptPreferences.skipMultiConnectionTooltip,
+      );
+      setSkipShortcutBarGroupTooltip(
+        nextPromptPreferences.skipShortcutBarGroupTooltip,
+      );
       controlGroupTutorialSuppressedRef.current =
         nextPromptPreferences.skipControlGroupTutorial;
       setPendingAssemblerRecipeChange(null);
       setAssemblerRecipeChangeDialogOpen(false);
       setSuppressFutureAssemblerRecipeWarnings(false);
+      setMiningDrillWarningOpen(false);
+      setSuppressFutureMiningDrillWarnings(false);
       setSuppressControlGroupTutorial(false);
       setSuppressFutureNodeDestructionWarnings(false);
       setSuppressFutureInventoryOverflowWarnings(false);
-      logisticsUnlockedRef.current = Boolean(payload.logisticsUnlocked);
-      setLogisticsUnlocked(Boolean(payload.logisticsUnlocked));
-      setSelectedMapSector(payload.selectedMapSector ?? null);
-      setMapNodeProgress(normalizeMapNodeProgress(payload.mapNodeProgress));
+      logisticsUnlockedRef.current = loadedLogisticsUnlocked;
+      setLogisticsUnlocked(loadedLogisticsUnlocked);
+      setSelectedMapSector(
+        normalizedSelectedMapSector &&
+          canUnlockMapNode(nextMapNodeProgress, normalizedSelectedMapSector)
+          ? normalizedSelectedMapSector
+          : null,
+      );
+      activeMapSectorRef.current = loadedActiveMapSector;
+      mapFactoriesGeneratedAtStartRef.current = true;
+      mapFactoriesRef.current = {
+        ...mapFactoriesRef.current,
+        ...loadedMapFactories,
+      };
+      setActiveMapSector(loadedActiveMapSector);
+      setMapNodeDialogSector(null);
+      setMapNodeDialogOpen(false);
+      setMapNodeDraftName("");
+      mapNodeProgressRef.current = nextMapNodeProgress;
+      setMapNodeProgress(nextMapNodeProgress);
       buildSequenceRef.current = {
         ...makeBuildSequence(),
         ...(payload.buildSequence ?? {}),
       };
       controlGroupSequenceRef.current = payload.controlGroupSequence ?? 0;
       gameElapsedMsRef.current = loadedGameElapsedMs;
+      lastTemporarySaveElapsedRef.current = loadedGameElapsedMs;
       zoomRef.current = nextZoom;
       pinchTargetZoomRef.current = nextZoom;
       setZoom(nextZoom);
@@ -8660,6 +13287,7 @@ export default function Home() {
       setRewiringConnectionId(null);
       setSelectedConnection(null);
       selectedNodesRef.current = [];
+      prioritizedBoxSelectionRef.current = [];
       setSelectedNodes([]);
       setActiveFlows({});
       setActiveControlGroupId(null);
@@ -8686,6 +13314,7 @@ export default function Home() {
       setConnectionDeleteDialogOpen(false);
       placingNodeRef.current = null;
       repeatPlacementPreviewRef.current = null;
+      continuousReplicationRef.current = false;
       setPlacingNodeId(null);
       updatePlacementBlocked(false);
       insertionTargetRef.current = null;
@@ -8699,9 +13328,12 @@ export default function Home() {
       setBuildOpen(false);
       buildOpenRef.current = false;
       setResearchOpen(false);
+      setHoveredResearchProject(null);
       setMapOpen(false);
       setJournalOpen(false);
       setOptionsOpen(false);
+      setShortcutsOpen(false);
+      setRecipesOpen(false);
       setSaveOpen(false);
       setDevOpen(false);
       setLoadConfirmOpen(false);
@@ -8719,14 +13351,14 @@ export default function Home() {
         });
       });
       toast.success(`Loaded ${slot.name}`, {
-        description: `Slot ${slotIndex + 1} · saved ${formatSaveDate(slot.savedAt)}`,
+        description: `${slotIndex === "temporary" ? "Temporary save" : `Slot ${slotIndex + 1}`} · saved ${formatSaveDate(slot.savedAt)}`,
       });
     } catch {
       toast.error("Load failed", {
         description: "This save is incomplete or incompatible with the current game version.",
       });
     }
-  }, [measureAnchors, saveSlots, setProductionRunning, updateGridPosition, updatePlacementBlocked, updateSnappedPort]);
+  }, [measureAnchors, saveSlots, setProductionRunning, temporarySave, updateGridPosition, updatePlacementBlocked, updateSnappedPort]);
 
   useEffect(() => {
     const context = (document as Document & { modelContext?: ModelContextApi }).modelContext;
@@ -8848,9 +13480,9 @@ export default function Home() {
           type: "object",
           properties: {
             sourceNode: { type: "string", description: "ID of any node with an output socket" },
-            sourcePort: { type: "string", enum: ["ore-out", "copper-ore-out", "stone-out", "forest-out", "product-out", "charcoal-out", "plate-out", "gear-out", "wire-out", "motor-out", "circuit-a-out", "automata-core-out", "assembler-out", "refiner-out", "power-out", "power-split-top", "power-split-out", "power-split-bottom", "forest-growth-out", "split-a-out", "split-b-out", "merge-out", "joint-out", "inventory-out", "filter-out", "chest-out"] },
+            sourcePort: { type: "string", enum: ["ore-out", "copper-ore-out", "stone-out", "forest-out", "lake-water-out-north", "lake-water-out", "lake-water-out-south", "lake-water-out-west", "product-out", "charcoal-out", "plate-out", "gear-out", "wire-out", "automata-core-out", "assembler-out", "refiner-out", "power-out", "power-split-top", "power-split-out", "power-split-bottom", "forest-growth-out", "split-a-out", "split-b-out", "merge-out", "joint-out", "road-out", "inventory-out", "filter-out", "chest-out"] },
             targetNode: { type: "string", description: "ID of any node with an input socket" },
-            targetPort: { type: "string", enum: ["resource-in", "wood-in", "metal-in", "charcoal-in", "generator-charcoal-in", "research-core-in", "power-in", "power-split-in", "forest-growth-in", "plate-a-in", "plate-b-in", "wire-plate-in", "motor-gear-in", "motor-wire-in", "circuit-wire-in", "circuit-plate-in", "core-motor-in", "core-circuit-in", "assembler-a-in", "assembler-b-in", "refiner-in", "split-in", "merge-a-in", "merge-b-in", "joint-in", "filter-in", "storage-in", "chest-in"] },
+            targetPort: { type: "string", enum: ["resource-in", "wood-in", "metal-in", "charcoal-in", "generator-charcoal-in", "research-core-in", "motor-in", "power-in", "power-split-in", "forest-growth-in", "plate-a-in", "plate-b-in", "wire-plate-in", "core-circuit-in", "core-plate-in", "assembler-a-in", "assembler-b-in", "refiner-in", "split-in", "merge-a-in", "merge-b-in", "joint-in", "road-in", "filter-in", "storage-in", "chest-in"] },
           },
           required: ["sourceNode", "sourcePort", "targetNode", "targetPort"],
           additionalProperties: false,
@@ -8862,7 +13494,11 @@ export default function Home() {
           const targetNode = value.targetNode as NodeId;
           const sourceNodeSpec = nodesRef.current.find((node) => node.id === sourceNode);
           const targetNodeSpec = nodesRef.current.find((node) => node.id === targetNode);
-          const sourceSpec = sourceNodeSpec?.outputs.find((port) => port.id === value.sourcePort);
+          const sourceSpec = sourceNodeSpec?.outputs.find((port) => port.id === value.sourcePort) ?? (
+            runtimeRef.current.lakes[sourceNode] && value.sourcePort
+              ? getLakeWaterOutputPort(value.sourcePort)
+              : null
+          );
           const source = sourceSpec
             ? getRuntimeAwarePort(sourceNode, sourceSpec, connectionsRef.current, runtimeRef.current)
             : null;
@@ -8904,6 +13540,40 @@ export default function Home() {
         .filter((connection) => connection.start && connection.end),
     [anchors, connections, rewiringConnectionId],
   );
+  const insertionPreview = useMemo(() => {
+    const insertingNodeId = placingNodeId ?? draggingNode;
+    if (!insertionTarget || !insertingNodeId) return null;
+    const original = renderedConnections.find(
+      (connection) => connection.id === insertionTarget,
+    );
+    if (!original) return null;
+    const nodeMap = Object.fromEntries(nodes.map((node) => [node.id, node]));
+    const plan = getInsertionPlan(
+      insertingNodeId,
+      original,
+      nodeMap,
+      connections,
+      runtime,
+    );
+    if (!plan) return null;
+    const inputAnchor = anchors[`${insertingNodeId}:${plan.input.id}`];
+    const outputAnchor = anchors[`${insertingNodeId}:${plan.output.id}`];
+    if (!inputAnchor || !outputAnchor) return null;
+    return {
+      incomingPath: getCurve(original.start, inputAnchor, original.sourcePort),
+      outgoingPath: getCurve(outputAnchor, original.end, plan.output.id),
+      type: original.type,
+    };
+  }, [
+    anchors,
+    connections,
+    draggingNode,
+    insertionTarget,
+    nodes,
+    placingNodeId,
+    renderedConnections,
+    runtime,
+  ]);
   const selectedRenderedConnection = selectedConnection
     ? renderedConnections.find((connection) => connection.id === selectedConnection) ?? null
     : null;
@@ -8957,9 +13627,10 @@ export default function Home() {
       ] as const),
   ), [connections, nodes, runtime.processors]);
 
+  const playAreaWorldSize = getPlayAreaWorldSize(runtime.research, activeMapSector);
   const worldSize = {
-    width: Math.max(WORLD_SIZE.width, viewportSize.width / zoom),
-    height: Math.max(WORLD_SIZE.height, viewportSize.height / zoom),
+    width: Math.max(playAreaWorldSize.width, viewportSize.width / zoom),
+    height: Math.max(playAreaWorldSize.height, viewportSize.height / zoom),
   };
 
   const extractorRecipes = useMemo(() => Object.fromEntries(
@@ -9013,13 +13684,8 @@ export default function Home() {
         (input) => (processor.inputs[input.id] ?? 0) < input.amount,
       );
   };
-  const processorNeedsPower = (nodeId: NodeId, kind: ProcessorKind) => {
-    const powerCost = POWER_COSTS[kind] ?? 0;
-    if (!powerCost || runtime.processors[nodeId]?.powerCommitted) return false;
-    return getAvailablePower(nodeId) < powerCost;
-  };
   const processorIsWaiting = (nodeId: NodeId, kind: ProcessorKind) =>
-    processorNeedsInputs(nodeId, kind) || processorNeedsPower(nodeId, kind);
+    processorNeedsInputs(nodeId, kind);
   const getNodeProgress = (node: NodeSpec) => {
     const minedDeposit = runtime.minedDeposits[node.id];
     if (minedDeposit) return (minedDeposit.remaining / minedDeposit.capacity) * 100;
@@ -9042,7 +13708,7 @@ export default function Home() {
     if (node.kind === "miningDrill") {
       const drill = runtime.miningDrills[node.id];
       return drill
-        ? ((drill.iterations + drill.progress / 100) / MINING_DRILL_ITERATIONS) * 100
+        ? (drill.iterations / MINING_DRILL_ITERATIONS) * 100
         : 0;
     }
     if (node.kind === "generator") return ((runtime.generators[node.id]?.power ?? 0) / GENERATOR_MAX_POWER) * 100;
@@ -9130,9 +13796,71 @@ export default function Home() {
     .filter(({ node }) => isDestroyableNode(node))
     .map(({ node }) => node.id);
   const buildMaterialAvailability = useMemo(
-    () => getBuildMaterialAvailability(runtime, nodes, connections),
-    [connections, nodes, runtime],
+    () => getGlobalBuildMaterialAvailability(
+      runtime,
+      nodes,
+      connections,
+      activeMapSector,
+      mapFactoriesRef.current,
+      mapNodeProgress,
+    ),
+    [activeMapSector, connections, mapNodeProgress, nodes, runtime],
   );
+  const milestoneResearchTriggerKey = [
+    runtime.produced[ResourceType.WOOD] ?? 0,
+    runtime.produced[ResourceType.MOTOR] ?? 0,
+    runtime.produced[ResourceType.IRON] ?? 0,
+    runtime.produced[ResourceType.COPPER] ?? 0,
+    runtime.produced[ResourceType.IRON_PLATE] ?? 0,
+    runtime.produced[ResourceType.COPPER_PLATE] ?? 0,
+    Number(builtBuildKinds.has("refiner")),
+    Number(builtBuildKinds.has("assembler")),
+    Number(runtime.research.kilnUnlocked),
+    Number(runtime.research.charcoalGeneratorUnlocked),
+    Number(runtime.research.furnaceUnlocked),
+    Number(runtime.research.refinerUnlocked),
+    Number(runtime.research.assemblerUnlocked),
+    Number(runtime.research.researchCenterUnlocked),
+  ].join(":");
+  useEffect(() => {
+    const current = runtimeRef.current;
+    const completedProjects = RESEARCH_PROJECTS.filter((project) =>
+      getResearchMilestoneRequirement(project.id) &&
+      !isResearchProjectUnlocked(current.research, project.id) &&
+      isResearchMilestoneSatisfied(project.id, current, builtBuildKinds)
+    );
+    if (completedProjects.length === 0) return;
+
+    const research: Runtime["research"] = {
+      ...current.research,
+      progress: { ...current.research.progress },
+    };
+    completedProjects.forEach((project) => {
+      research.progress[project.id] = getResearchProjectCost(project.id);
+      if (project.id === "kiln") {
+        research.kilnUnlocked = true;
+      } else if (project.id === "charcoalGenerator") {
+        research.charcoalGeneratorUnlocked = true;
+      } else if (project.id === "furnace") {
+        research.furnaceUnlocked = true;
+      } else if (project.id === "refiner") {
+        research.refinerUnlocked = true;
+      } else if (project.id === "assembler") {
+        research.assemblerUnlocked = true;
+      } else if (project.id === "researchCenter") {
+        research.researchCenterUnlocked = true;
+      }
+    });
+
+    const next: Runtime = {
+      ...current,
+      research,
+    };
+    runtimeRef.current = next;
+    setRuntime(next);
+    completedProjects.forEach((project) => announceResearchCompletion(project.id));
+  }, [builtBuildKinds, milestoneResearchTriggerKey]);
+
   useEffect(() => {
     const newlyRecorded = Array.from(revealedBuildKinds).filter(
       (kind) => unlockTimes[kind] === undefined,
@@ -9165,9 +13893,6 @@ export default function Home() {
 
     if (discoveredKinds.length === 0) return;
     const revealFrame = window.requestAnimationFrame(() => {
-      discoveredKinds
-        .filter((kind) => !RESEARCH_GATED_BUILD_KINDS.has(kind))
-        .forEach(announceNodeUnlock);
       setRevealedBuildKinds((current) => {
         const next = new Set(current);
         discoveredKinds.forEach((kind) => next.add(kind));
@@ -9188,6 +13913,12 @@ export default function Home() {
     revealedBuildKinds,
     runtime,
   ]);
+  const researchCenterLimitReached = hasNodeKindAcrossMaps(
+    "researchFoundry",
+    nodes,
+    activeMapSector,
+    mapFactoriesRef.current,
+  );
   const buildCatalog = useMemo(() => {
     const unlockContext: BuildUnlockContext = {
       runtime,
@@ -9196,17 +13927,18 @@ export default function Home() {
     };
     const visibleItems = VISIBLE_BUILD_CATALOG
       .map((item) => {
-        const unlocked = revealedBuildKinds.has(item.kind) ||
-          isBuildUnlockSatisfied(item.kind, unlockContext);
+        const unlocked = isBuildKindUnlocked(item.kind, revealedBuildKinds, unlockContext);
         const hasMaterials = removeBuildCosts || item.recipe.every(
           (ingredient) =>
             buildMaterialAvailability[ingredient.type].total >= ingredient.amount,
         );
+        const limitReached = item.kind === "researchFoundry" && researchCenterLimitReached;
         return {
           item,
           unlocked,
           hasMaterials,
-          canBuild: unlocked && hasMaterials,
+          limitReached,
+          canBuild: unlocked && hasMaterials && !limitReached,
         };
       })
       .filter(({ unlocked }) => showAllBuildNodes || unlocked)
@@ -9249,6 +13981,7 @@ export default function Home() {
     builtBuildKinds,
     logisticsUnlocked,
     placedBuildKinds,
+    researchCenterLimitReached,
     removeBuildCosts,
     revealedBuildKinds,
     runtime,
@@ -9263,21 +13996,22 @@ export default function Home() {
       logisticsUnlocked,
     };
     return VISIBLE_BUILD_CATALOG
-      .filter((item) =>
-        revealedBuildKinds.has(item.kind) || isBuildUnlockSatisfied(item.kind, unlockContext),
-      )
+      .filter((item) => isBuildKindUnlocked(item.kind, revealedBuildKinds, unlockContext))
       .map((item) => ({
         kind: item.kind,
         title: item.title,
         icon: item.icon,
-        canBuild: removeBuildCosts || item.recipe.every((ingredient) =>
-          buildMaterialAvailability[ingredient.type].total >= ingredient.amount,
-        ),
+        canBuild: item.kind !== "researchFoundry" || !researchCenterLimitReached
+          ? removeBuildCosts || item.recipe.every((ingredient) =>
+              buildMaterialAvailability[ingredient.type].total >= ingredient.amount,
+            )
+          : false,
       }));
   }, [
     buildMaterialAvailability,
     builtBuildKinds,
     logisticsUnlocked,
+    researchCenterLimitReached,
     removeBuildCosts,
     revealedBuildKinds,
     runtime,
@@ -9435,19 +14169,127 @@ export default function Home() {
 
     return INVENTORY_ITEMS.filter((item) => visibleTypes.has(item.type));
   }, [buildMaterialAvailability, nodes, runtime.construction, runtime.produced]);
+  const researchSelectionAvailable = canSelectResearchProject(runtime, nodes);
   const activeResearchProject = getResearchProject(runtime.research.activeProject);
+  const activeResearchProjectCost = activeResearchProject
+    ? getResearchProjectCost(activeResearchProject.id)
+    : 0;
+  const activeResearchCompleted = activeResearchProject
+    ? runtime.research.progress[activeResearchProject.id]
+    : 0;
+  const activeResearchInFlight = activeResearchProject
+    ? Object.values(runtime.researchFoundries).reduce(
+        (total, foundry) => total + Math.max(0, Math.min(100, foundry.progress)) / 100,
+        0,
+      )
+    : 0;
+  const activeResearchDisplayProgress = Math.min(
+    activeResearchProjectCost,
+    activeResearchCompleted + activeResearchInFlight,
+  );
+  const activeResearchProgressPercent = activeResearchProjectCost > 0
+    ? (activeResearchDisplayProgress / activeResearchProjectCost) * 100
+    : 0;
   const completedResearchCount = RESEARCH_PROJECTS.filter((project) =>
     isResearchProjectUnlocked(runtime.research, project.id)
   ).length;
+  const orderedResearchProjects = [
+    ...RESEARCH_PROJECTS.filter((project) =>
+      !isResearchProjectUnlocked(runtime.research, project.id)
+    ),
+    ...RESEARCH_PROJECTS.filter((project) =>
+      isResearchProjectUnlocked(runtime.research, project.id)
+    ),
+  ];
   const selectedMapNodeProgress = selectedMapSector
     ? mapNodeProgress[selectedMapSector]
     : null;
+  const selectedMapNodeUnlockable = selectedMapSector
+    ? canUnlockMapNode(mapNodeProgress, selectedMapSector)
+    : false;
+  const selectedMapNodeValue = selectedMapSector
+    ? getMapNodeValue(selectedMapSector)
+    : 0;
+  const selectedMapNodePlayAreaSize = selectedMapSector
+    ? getPlayAreaWorldSize(runtime.research, selectedMapSector)
+    : null;
   const selectedMapNodeLabel = selectedMapSector
     ? selectedMapNodeProgress?.customName?.trim() || (
-        selectedMapNodeProgress?.explored ? "Unnamed" : "Unexplored"
+        selectedMapNodeProgress?.explored
+          ? "Unlocked Node"
+          : selectedMapNodeUnlockable
+            ? "Available Node"
+            : "Uncharted"
       )
     : "Not selected";
-  const pendingLoadSave = pendingLoadSlot === null ? null : saveSlots[pendingLoadSlot];
+  const getMapNodeDisplayName = (sectorKey: string) =>
+    mapNodeProgress[sectorKey]?.customName?.trim() || (
+      sectorKey === MAP_HOME_SECTOR ? "Home Factory" : "Unnamed Node"
+    );
+  const getMapNodeRuntime = (sectorKey: string) => {
+    if (sectorKey === activeMapSector) return runtime;
+    return mapFactoriesRef.current[sectorKey]?.runtime ?? null;
+  };
+  const getMapNodeResourceSummary = (sectorKey: string) => {
+    const nodeRuntime = getMapNodeRuntime(sectorKey);
+    const baseResources = [
+      { label: "Iron Ore", amount: nodeRuntime?.ironOre.remaining ?? RESOURCE_CAPACITIES.ironOre },
+      { label: "Copper Ore", amount: nodeRuntime?.copperOre.remaining ?? RESOURCE_CAPACITIES.copperOre },
+      { label: "Stone", amount: nodeRuntime?.stone.remaining ?? RESOURCE_CAPACITIES.stone },
+      { label: "Forest", amount: nodeRuntime?.forest.remaining ?? RESOURCE_CAPACITIES.forest },
+    ];
+    const minedResources = Object.values(nodeRuntime?.minedDeposits ?? {}).map((deposit) => ({
+      label: getMiningTarget(deposit.type)?.title ?? formatResourceType(deposit.type),
+      amount: deposit.remaining as number | string,
+    }));
+    const lakeResources = Object.keys(nodeRuntime?.lakes ?? {}).length > 0
+      ? [{ label: "Water", amount: "∞" as number | string }]
+      : [];
+    return [
+      ...baseResources.filter((resource) => resource.amount > 0),
+      ...minedResources.filter((resource) => Number(resource.amount) > 0),
+      ...lakeResources,
+    ];
+  };
+  const renderMapNodeTooltip = (sectorKey: string) => {
+    const resources = getMapNodeResourceSummary(sectorKey);
+    const size = getPlayAreaWorldSize(runtime.research, sectorKey);
+    const factoryNodeCount = sectorKey === activeMapSector
+      ? nodes.length
+      : mapFactoriesRef.current[sectorKey]?.nodes.length ?? 4;
+    return (
+      <div className="map-node-tooltip-copy">
+        <strong>{getMapNodeDisplayName(sectorKey)}</strong>
+        <small>
+          Node Value {getMapNodeValue(sectorKey)} · {size.width.toLocaleString()} × {size.height.toLocaleString()} · {factoryNodeCount} factory nodes
+        </small>
+        <div className="map-node-tooltip-resources">
+          <span>Resources</span>
+          {resources.map((resource) => (
+            <small key={`${sectorKey}-${resource.label}`}>
+              {resource.label}<b>{typeof resource.amount === "number" ? resource.amount.toLocaleString() : resource.amount}</b>
+            </small>
+          ))}
+        </div>
+        <div className="map-node-tooltip-transport">
+          <span>Inter-node transport</span>
+          <small>No active item transports</small>
+        </div>
+      </div>
+    );
+  };
+  const currentMapNodeName = getMapNodeDisplayName(activeMapSector);
+  const mapNodeDialogPlayArea = mapNodeDialogSector
+    ? getPlayAreaWorldSize(runtime.research, mapNodeDialogSector)
+    : null;
+  const mapNodeDialogResources = mapNodeDialogSector
+    ? getMapNodeResourceSummary(mapNodeDialogSector)
+    : [];
+  const pendingLoadSave = pendingLoadSlot === null
+    ? null
+    : pendingLoadSlot === "temporary"
+      ? temporarySave
+      : saveSlots[pendingLoadSlot];
   const configuringFilter = configuringFilterId
     ? runtime.filters[configuringFilterId] ?? null
     : null;
@@ -9524,7 +14366,14 @@ export default function Home() {
         ? managedMultiPortNode.outputs
         : managedMultiPortNode.inputs
       ).find((port) => port.id === managedMultiPort.portId) ?? null
-    : null;
+    : managedMultiPort &&
+        runtime.lakes[managedMultiPort.nodeId] &&
+        getLakeWaterOutputPort(managedMultiPort.portId)
+      ? getLakeWaterOutputPort(managedMultiPort.portId)
+      : null;
+  const managedMultiPortTitle = managedMultiPortNode?.title ?? (
+    managedMultiPort && runtime.lakes[managedMultiPort.nodeId] ? "Lake" : "Node"
+  );
   const managedMultiConnections = managedMultiPort
     ? connections.filter((connection) => managedMultiPort.direction === "output"
       ? connection.sourceNode === managedMultiPort.nodeId && connection.sourcePort === managedMultiPort.portId
@@ -9555,24 +14404,42 @@ export default function Home() {
                 >
                   <MapIcon aria-hidden="true" />
                   <span className="map-trigger-label">Map</span>
+                  <span className="map-trigger-count" aria-label={`${runtime.mapPoints} Map Points`}>
+                    {runtime.mapPoints}
+                  </span>
                 </Button>
               </DialogTrigger>
-              <DialogContent className="map-dialog">
-                <DialogHeader className="map-dialog-header">
-                  <DialogTitle>Node Map</DialogTitle>
+              <DialogContent className="map-dialog topbar-modal">
+                <DialogHeader className="map-dialog-header topbar-modal-header">
+                  <div className="topbar-modal-title-mark"><MapIcon aria-hidden="true" /></div>
+                  <div>
+                    <DialogTitle>Node Map</DialogTitle>
+                    <DialogDescription>
+                      Spend Map Points to unlock connected map nodes.
+                    </DialogDescription>
+                  </div>
                 </DialogHeader>
                 <div className="map-summary">
-                  <span>Current Node <strong>H · Home Factory</strong></span>
+                  <span>Current Node <strong>{currentMapNodeName}</strong></span>
+                  <span>Map Points <strong>{runtime.mapPoints}</strong></span>
                   <span>Target Node <strong>{selectedMapNodeLabel}</strong></span>
+                  <span>
+                    Field Size
+                    <strong>
+                      {selectedMapNodePlayAreaSize
+                        ? `${selectedMapNodePlayAreaSize.width.toLocaleString()} × ${selectedMapNodePlayAreaSize.height.toLocaleString()}`
+                        : "—"}
+                    </strong>
+                  </span>
                 </div>
-                <div className="map-viewport" ref={mapViewportRef}>
+                <div className="map-viewport">
                   <div
                     className="map-grid"
                     role="region"
                     aria-label="Exploration sectors"
                     style={{
-                      gridTemplateColumns: `repeat(${MAP_GRID_SIZE}, 58px)`,
-                      gridTemplateRows: `repeat(${MAP_GRID_SIZE}, 58px)`,
+                      gridTemplateColumns: `repeat(${MAP_GRID_SIZE}, minmax(0, 1fr))`,
+                      gridTemplateRows: `repeat(${MAP_GRID_SIZE}, minmax(0, 1fr))`,
                     }}
                   >
                     {Array.from({ length: MAP_GRID_SIZE * MAP_GRID_SIZE }).map((_, index) => {
@@ -9580,26 +14447,56 @@ export default function Home() {
                       const y = Math.floor(index / MAP_GRID_SIZE);
                       const sectorKey = `${x},${y}`;
                       const isHome = x === MAP_HOME_INDEX && y === MAP_HOME_INDEX;
-                      const direction = MAP_ADJACENT_SECTORS.get(sectorKey);
                       if (isHome) {
                         return (
-                          <div
-                            className="map-sector home"
-                            role="img"
-                            aria-label="Home Factory, current sector"
-                            key={sectorKey}
-                          >
-                            <strong>H</strong>
-                          </div>
+                          <Tooltip key={sectorKey}>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                className={`map-sector home ${activeMapSector === sectorKey ? "current" : ""}`}
+                                aria-label={`${getMapNodeDisplayName(sectorKey)}, unlocked${activeMapSector === sectorKey ? ", current node" : ""}`}
+                                onClick={() => openMapNodeDialog(sectorKey)}
+                              >
+                                <strong>H</strong>
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent className="map-node-tooltip" side="top" sideOffset={8}>
+                              {renderMapNodeTooltip(sectorKey)}
+                            </TooltipContent>
+                          </Tooltip>
                         );
                       }
-                      if (direction) {
+                      const unlocked = isMapNodeUnlocked(mapNodeProgress, sectorKey);
+                      if (unlocked) {
+                        const mapNodeValue = getMapNodeValue(sectorKey);
+                        const playAreaSize = getPlayAreaWorldSize(runtime.research, sectorKey);
+                        return (
+                          <Tooltip key={sectorKey}>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                className={`map-sector explored ${activeMapSector === sectorKey ? "current" : ""}`}
+                                aria-label={`${getMapNodeDisplayName(sectorKey)}, unlocked map node, value ${mapNodeValue}, Field Size ${playAreaSize.width} by ${playAreaSize.height}${activeMapSector === sectorKey ? ", current node" : ""}`}
+                                onClick={() => openMapNodeDialog(sectorKey)}
+                              >
+                                <span>◆</span>
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent className="map-node-tooltip" side="top" sideOffset={8}>
+                              {renderMapNodeTooltip(sectorKey)}
+                            </TooltipContent>
+                          </Tooltip>
+                        );
+                      }
+                      const available = canUnlockMapNode(mapNodeProgress, sectorKey);
+                      if (available) {
                         const isSelected = selectedMapSector === sectorKey;
+                        const mapNodeValue = getMapNodeValue(sectorKey);
                         return (
                           <button
                             type="button"
                             className={`map-sector adjacent ${isSelected ? "selected" : ""}`}
-                            aria-label={`${direction} sector, ${isSelected ? "selected" : "available for exploration"}`}
+                            aria-label={`Map node value ${mapNodeValue}, ${isSelected ? "selected" : "available to unlock"}`}
                             aria-pressed={isSelected}
                             onClick={() => setSelectedMapSector(sectorKey)}
                             key={sectorKey}
@@ -9614,81 +14511,238 @@ export default function Home() {
                 </div>
                 <div className="map-legend" aria-label="Map legend">
                   <span><i className="home-swatch" />Home</span>
+                  <span><i className="explored-swatch" />Unlocked</span>
                   <span><i className="available-swatch" />Available</span>
                   <span><i className="uncharted-swatch" />Uncharted</span>
-                  <small>Scroll to survey the wider region</small>
+                  <small>Entire region in view</small>
+                </div>
+                <div className="map-actions">
+                  <span>
+                    {selectedMapSector
+                      ? `Node Value ${selectedMapNodeValue}`
+                      : "Select an available node connected to any unlocked node"}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className={`map-unlock-button ${
+                      selectedMapNodeUnlockable && runtime.mapPoints > 0 ? "ready" : ""
+                    }`}
+                    disabled={!selectedMapNodeUnlockable || runtime.mapPoints < 1}
+                    onClick={unlockSelectedMapNode}
+                  >
+                    {!selectedMapNodeUnlockable
+                      ? "Select Available Node"
+                      : runtime.mapPoints < 1
+                        ? "Need 1 Map Point"
+                        : "Activate Node · 1 Point"}
+                  </Button>
                 </div>
               </DialogContent>
             </Dialog>
           ) : null}
-          <Dialog open={researchOpen} onOpenChange={setResearchOpen}>
-            {runtime.research.available ? (
-              <DialogTrigger asChild>
-                <Button
-                  className={`research-trigger ${!activeResearchProject && completedResearchCount < RESEARCH_PROJECTS.length ? "attention" : ""}`}
-                  size="sm"
-                  variant="outline"
-                  aria-label={`Research, ${completedResearchCount} of ${RESEARCH_PROJECTS.length} projects complete${activeResearchProject ? `, researching ${activeResearchProject.title}` : ""}`}
-                >
-                  <FlaskConical aria-hidden="true" />
-                  <span className="research-trigger-label">Research</span>
-                  <span className="research-trigger-count">{completedResearchCount}/{RESEARCH_PROJECTS.length}</span>
+          <Dialog
+            open={mapNodeDialogOpen}
+            onOpenChange={(open) => {
+              setMapNodeDialogOpen(open);
+              if (!open) setMapNodeDialogSector(null);
+            }}
+          >
+            <DialogContent className="map-node-dialog">
+              <DialogHeader>
+                <DialogTitle>
+                  {mapNodeDialogSector ? getMapNodeDisplayName(mapNodeDialogSector) : "Map Node"}
+                </DialogTitle>
+                <DialogDescription>
+                  Rename this map node or travel to its persistent factory field.
+                </DialogDescription>
+              </DialogHeader>
+              <label className="map-node-name-field">
+                <span>Node name</span>
+                <input
+                  value={mapNodeDraftName}
+                  maxLength={80}
+                  placeholder={mapNodeDialogSector === MAP_HOME_SECTOR ? "Home Factory" : "Unnamed Node"}
+                  onChange={(event) => setMapNodeDraftName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") saveMapNodeName();
+                  }}
+                />
+              </label>
+              <div className="map-node-dialog-summary">
+                <span>
+                  Node Value
+                  <strong>
+                    {mapNodeDialogSector
+                      ? getMapNodeValue(mapNodeDialogSector)
+                      : 0}
+                  </strong>
+                </span>
+                <span>
+                  Field Size
+                  <strong>
+                    {mapNodeDialogPlayArea
+                      ? `${mapNodeDialogPlayArea.width.toLocaleString()} × ${mapNodeDialogPlayArea.height.toLocaleString()}`
+                      : "—"}
+                  </strong>
+                </span>
+              </div>
+              <div className="map-node-dialog-resources">
+                <span>Resources</span>
+                <div>
+                  {mapNodeDialogResources.map((resource) => (
+                    <small key={`dialog-${resource.label}`}>
+                      {resource.label}<strong>{resource.amount.toLocaleString()}</strong>
+                    </small>
+                  ))}
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="ghost" onClick={saveMapNodeName}>
+                  Save Name
                 </Button>
-              </DialogTrigger>
-            ) : null}
-            <DialogContent className="research-dialog">
-                <DialogHeader>
-                  <DialogTitle>Research</DialogTitle>
-                  <DialogDescription>
-                    Choose where Research Foundries apply analyzed Automata Cores.
-                  </DialogDescription>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!mapNodeDialogSector || mapNodeDialogSector === activeMapSector}
+                  onClick={() => {
+                    if (!mapNodeDialogSector) return;
+                    travelToMapNode(mapNodeDialogSector);
+                  }}
+                >
+                  {mapNodeDialogSector === activeMapSector ? "Current Node" : "Travel to Node"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+          <Dialog
+            open={researchOpen}
+            onOpenChange={(open) => {
+              setResearchOpen(open);
+              if (!open) setHoveredResearchProject(null);
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button
+                className={`research-trigger ${researchSelectionAvailable && !activeResearchProject && completedResearchCount < RESEARCH_PROJECTS.length ? "attention" : ""}`}
+                size="sm"
+                variant="outline"
+                aria-label={`Research, ${completedResearchCount} of ${RESEARCH_PROJECTS.length} projects complete${activeResearchProject ? `, researching ${activeResearchProject.title}` : researchSelectionAvailable ? "" : ", awaiting Research Center"}`}
+              >
+                <FlaskConical aria-hidden="true" />
+                <span className="research-trigger-label">Research</span>
+                <span className="research-trigger-count">{completedResearchCount}/{RESEARCH_PROJECTS.length}</span>
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="research-dialog topbar-modal">
+                <DialogHeader className="topbar-modal-header">
+                  <div className="topbar-modal-title-mark"><FlaskConical aria-hidden="true" /></div>
+                  <div>
+                    <DialogTitle>Research</DialogTitle>
+                    <DialogDescription>
+                      Unlock new stuff! Dopamine!
+                    </DialogDescription>
+                  </div>
                 </DialogHeader>
-                <div className="research-summary">
+                <div className={`research-summary ${activeResearchProject ? "with-progress" : ""}`}>
                   <span>Active project</span>
                   <strong>{activeResearchProject?.title ?? (completedResearchCount === RESEARCH_PROJECTS.length ? "All research complete" : "Choose a project")}</strong>
+                  {activeResearchProject ? (
+                    <div className="research-summary-progress">
+                      <Progress
+                        value={activeResearchProgressPercent}
+                        aria-label={`${activeResearchProject.title}, ${activeResearchDisplayProgress.toFixed(1)} of ${activeResearchProjectCost} ${getResearchProjectCoreLabel(activeResearchProject.id)} analyzed`}
+                      />
+                      <small>
+                        {activeResearchCompleted} / {activeResearchProjectCost}
+                      </small>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="research-list">
-                  {RESEARCH_PROJECTS.map((project) => {
+                  {orderedResearchProjects.map((project) => {
                     const Icon = project.icon;
                     const projectProgress = runtime.research.progress[project.id];
+                    const projectCost = getResearchProjectCost(project.id);
+                    const projectCoreLabel = getResearchProjectCoreLabel(project.id);
+                    const milestoneRequirement = getResearchMilestoneRequirement(project.id);
+                    const prerequisite = getResearchProjectPrerequisite(project.id);
+                    const prerequisiteSatisfied = isResearchProjectPrerequisiteSatisfied(
+                      runtime.research,
+                      project.id,
+                    );
                     const unlocked = isResearchProjectUnlocked(runtime.research, project.id);
                     const active = runtime.research.activeProject === project.id;
+                    const selectable = !milestoneRequirement &&
+                      prerequisiteSatisfied &&
+                      researchSelectionAvailable &&
+                      !unlocked &&
+                      !active;
+                    const locked = !milestoneRequirement &&
+                      (!researchSelectionAvailable || !prerequisiteSatisfied);
+                    const status = unlocked
+                      ? null
+                      : !prerequisiteSatisfied && prerequisite
+                        ? `Requires ${prerequisite}`
+                        : milestoneRequirement || !researchSelectionAvailable
+                          ? null
+                          : active
+                            ? "Active"
+                            : projectProgress > 0
+                              ? "Continue research"
+                              : "Available research";
                     return (
-                      <article className={`research-card ${active ? "active" : ""} ${unlocked ? "complete" : ""}`} key={project.id}>
-                        <span className="research-card-icon"><Icon aria-hidden="true" /></span>
-                        <div className="research-card-copy">
-                          <div className="research-card-heading">
-                            <div>
-                              <span>{unlocked ? "Completed research" : active ? "Active research" : "Available research"}</span>
-                              <strong>{project.title}</strong>
-                            </div>
-                            <span className="research-cost">{RESEARCH_UNLOCK_COST} Automata Cores</span>
-                          </div>
+                      <Tooltip open={hoveredResearchProject === project.id} key={project.id}>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            className={`research-card ${active ? "active" : ""} ${unlocked ? "complete" : ""} ${locked ? "locked" : ""}`}
+                            aria-disabled={!selectable}
+                            aria-pressed={active}
+                            aria-label={`${project.title}. ${status ? `${status}. ` : ""}${project.description} ${project.unlock}. ${milestoneRequirement ? projectProgress >= projectCost ? `${milestoneRequirement.complete}.` : `Cost: ${milestoneRequirement.pending}.` : `${projectProgress} of ${projectCost} ${projectCoreLabel} analyzed.`}`}
+                            onPointerEnter={(event) => {
+                              if (event.pointerType === "mouse") setHoveredResearchProject(project.id);
+                            }}
+                            onPointerLeave={() => setHoveredResearchProject((current) => (
+                              current === project.id ? null : current
+                            ))}
+                            onClick={() => {
+                              if (selectable) chooseResearchProject(project.id);
+                            }}
+                          >
+                            <span className="research-card-icon"><Icon aria-hidden="true" /></span>
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent
+                          className={`research-card-tooltip ${unlocked ? "complete" : ""}`}
+                          side="top"
+                          sideOffset={10}
+                        >
+                          <strong className="research-tooltip-title">{project.title}</strong>
+                          {status ? <span>{status}</span> : null}
                           <p>{project.description}</p>
                           <small>{project.unlock}</small>
-                          <div className="research-card-progress">
-                            <Progress
-                              value={(projectProgress / RESEARCH_UNLOCK_COST) * 100}
-                              aria-label={`${project.title}, ${projectProgress} of ${RESEARCH_UNLOCK_COST} Automata Cores analyzed`}
-                            />
-                            <strong>{projectProgress} / {RESEARCH_UNLOCK_COST}</strong>
+                          {project.flavorText ? (
+                            <em className="research-tooltip-flavor">{project.flavorText}</em>
+                          ) : null}
+                          <div className="research-tooltip-progress">
+                             <Progress
+                               value={(projectProgress / projectCost) * 100}
+                              aria-label={milestoneRequirement
+                                ? `${project.title}, ${projectProgress >= projectCost ? milestoneRequirement.complete : milestoneRequirement.pending}`
+                                : `${project.title}, ${projectProgress} of ${projectCost} ${projectCoreLabel} analyzed`}
+                             />
+                            <strong>{milestoneRequirement
+                              ? projectProgress >= projectCost ? milestoneRequirement.complete : `Cost: ${milestoneRequirement.pending}`
+                              : `${projectProgress} / ${projectCost} ${projectCoreLabel}`}</strong>
                           </div>
-                        </div>
-                        <Button
-                          className="research-card-action"
-                          size="sm"
-                          variant={active ? "secondary" : "outline"}
-                          disabled={unlocked || active}
-                          onClick={() => chooseResearchProject(project.id)}
-                        >
-                          {unlocked ? "Unlocked" : active ? "Active" : projectProgress > 0 ? "Continue" : "Research"}
-                        </Button>
-                      </article>
+                        </TooltipContent>
+                      </Tooltip>
                     );
                   })}
                 </div>
                 <p className="research-note">
-                  Each connected Research Foundry analyzes one Automata Core in {(RESEARCH_CYCLE_DURATION / 1000).toFixed(0)} seconds. Switching projects restarts the current analysis but keeps the loaded Core.
+                  Each connected Research Center analyzes one compatible Core in {(RESEARCH_CYCLE_DURATION / 1000).toFixed(0)} seconds. Switching projects restarts the current analysis but keeps loaded Cores.
                 </p>
             </DialogContent>
           </Dialog>
@@ -9705,9 +14759,13 @@ export default function Home() {
                 <span className="inventory-trigger-count">{inventoryTotal}</span>
               </Button>
             </DialogTrigger>
-            <DialogContent className="inventory-dialog">
-              <DialogHeader>
-                <DialogTitle>Inventory</DialogTitle>
+            <DialogContent className="inventory-dialog topbar-modal">
+              <DialogHeader className="topbar-modal-header">
+                <div className="topbar-modal-title-mark"><PackageOpen aria-hidden="true" /></div>
+                <div>
+                  <DialogTitle>Inventory</DialogTitle>
+                  <DialogDescription>We wants it, we needs it... my precioussss.</DialogDescription>
+                </div>
               </DialogHeader>
               <div className="inventory-list" aria-live="polite">
                 {visibleInventoryItems.map((item) => {
@@ -9779,12 +14837,15 @@ export default function Home() {
                 Build
               </Button>
             </DialogTrigger>
-            <DialogContent className={`build-dialog ${showAllBuildNodes ? "show-all-nodes" : ""}`}>
-              <DialogHeader>
-                <DialogTitle>Node Construction</DialogTitle>
+            <DialogContent className={`build-dialog topbar-modal ${showAllBuildNodes ? "show-all-nodes" : ""}`}>
+              <DialogHeader className="topbar-modal-header">
+                <div className="topbar-modal-title-mark"><Hammer aria-hidden="true" /></div>
+                <div>
+                  <DialogTitle>Node Construction</DialogTitle>
                   <DialogDescription>
-                  Resources required to create a new node are drawn directly from physical node storage, including completed machine output, Storage nodes, and Wooden Chests.
-                </DialogDescription>
+                    Something need building?
+                  </DialogDescription>
+                </div>
               </DialogHeader>
               <div className="build-category-filters" role="group" aria-label="Filter buildings by category">
                 <Button
@@ -9868,7 +14929,7 @@ export default function Home() {
                 </Button>
               </div>
               <div className={`build-list ${compactBuildView ? "compact" : ""}`}>
-                {buildCatalog.items.map(({ item, canBuild, unlocked }) => {
+                {buildCatalog.items.map(({ item, canBuild, unlocked, limitReached }) => {
                   const Icon = item.icon;
                   const isNewBuild = newBuildKinds.has(item.kind);
                   const hasBeenBuilt = builtBuildKinds.has(item.kind);
@@ -9921,7 +14982,7 @@ export default function Home() {
                               onClick={() => buildNode(item.kind, item.recipe)}
                             >
                               {canBuild ? <Hammer aria-hidden="true" /> : null}
-                              {canBuild ? "Build" : unlocked ? "Missing items" : "Locked"}
+                              {canBuild ? "Build" : limitReached ? "Limit reached" : unlocked ? "Missing items" : "Locked"}
                             </Button>
                           </div>
                         </TooltipTrigger>
@@ -10134,7 +15195,7 @@ export default function Home() {
                           onClick={() => buildNode(item.kind, item.recipe)}
                         >
                           {canBuild ? <Hammer aria-hidden="true" /> : null}
-                          {canBuild ? "Build" : unlocked ? "Missing items" : "Locked"}
+                          {canBuild ? "Build" : limitReached ? "Limit reached" : unlocked ? "Missing items" : "Locked"}
                         </Button>
                         {!hasBeenBuilt ? (
                           <span className="never-built-indicator">Never built</span>
@@ -10186,18 +15247,18 @@ export default function Home() {
                 <span className="journal-trigger-label">Journal</span>
               </Button>
             </DialogTrigger>
-            <DialogContent className="journal-dialog">
-              <DialogHeader className="journal-header">
+            <DialogContent className="journal-dialog topbar-modal">
+              <DialogHeader className="journal-header topbar-modal-header">
                 <div className="journal-title-mark"><BookOpenText aria-hidden="true" /></div>
                 <div>
                   <DialogTitle>Discovery Journal</DialogTitle>
                   <DialogDescription>
-                    Blueprint unlocks recorded from the start of this game.
+                    In case you forgot, or you&apos;re speedrunning.
                   </DialogDescription>
                 </div>
               </DialogHeader>
               <div className="journal-summary" aria-live="polite">
-                <span>Discovered blueprints</span>
+                <span>Discovered nodes</span>
                 <strong>{journalEntries.length} / {VISIBLE_BUILD_CATALOG.length}</strong>
               </div>
               <div className="journal-category-filters" role="group" aria-label="Filter journal by category">
@@ -10273,7 +15334,7 @@ export default function Home() {
                   <div className="journal-empty-state">
                     <BookOpenText aria-hidden="true" />
                     <strong>No {journalCategory} discoveries yet</strong>
-                    <span>New blueprints will be recorded here as they unlock.</span>
+                    <span>New nodes will be recorded here as they unlock.</span>
                   </div>
                 ) : null}
               </div>
@@ -10291,13 +15352,13 @@ export default function Home() {
                 <span className="options-trigger-label">Options</span>
               </Button>
             </DialogTrigger>
-            <DialogContent className="options-dialog">
-              <DialogHeader className="options-dialog-header">
+            <DialogContent className="options-dialog topbar-modal">
+              <DialogHeader className="options-dialog-header topbar-modal-header">
                 <div className="options-title-mark"><Menu aria-hidden="true" /></div>
                 <div>
                   <DialogTitle>Options</DialogTitle>
                   <DialogDescription>
-                    Manage local saves, shortcut bars, and visual preferences.
+                    No funny business going on here, move along.
                   </DialogDescription>
                 </div>
               </DialogHeader>
@@ -10319,6 +15380,36 @@ export default function Home() {
                 </button>
                 <button
                   type="button"
+                  className="options-menu-item shortcuts-option"
+                  onClick={() => {
+                    setOptionsOpen(false);
+                    setShortcutsOpen(true);
+                  }}
+                >
+                  <span className="options-menu-icon"><Keyboard aria-hidden="true" /></span>
+                  <span className="options-menu-copy">
+                    <strong>Commands</strong>
+                    <small>View every keyboard command and what it does.</small>
+                  </span>
+                  <span className="options-menu-action">Open</span>
+                </button>
+                <button
+                  type="button"
+                  className="options-menu-item recipes-option"
+                  onClick={() => {
+                    setOptionsOpen(false);
+                    setRecipesOpen(true);
+                  }}
+                >
+                  <span className="options-menu-icon"><FlaskConical aria-hidden="true" /></span>
+                  <span className="options-menu-copy">
+                    <strong>Recipes</strong>
+                    <small>View every current recipe and the node that constructs it.</small>
+                  </span>
+                  <span className="options-menu-action">Open</span>
+                </button>
+                <button
+                  type="button"
                   className={`options-menu-item wire-animation-option ${wireAnimationsEnabled ? "enabled" : "disabled"}`}
                   aria-pressed={wireAnimationsEnabled}
                   aria-label={`Wire animations, ${wireAnimationsEnabled ? "enabled" : "disabled"}`}
@@ -10334,30 +15425,168 @@ export default function Home() {
                     {wireAnimationsEnabled ? "Enabled" : "Disabled"}
                   </span>
                 </button>
-                {(["shortcutBar1", "shortcutBar2"] as const).map((barId, index) => {
-                  const bar = shortcutBars[barId];
-                  const label = `Shortcut Bar ${index + 1}`;
+                <div className="shortcut-bar-options-row" role="group" aria-label="Shortcut bar visibility">
+                  {(["shortcutBar1", "shortcutBar2", "shortcutBar3"] as const).map((barId, index) => {
+                    const bar = shortcutBars[barId];
+                    const label = `Shortcut Bar ${index + 1}`;
+                    return (
+                      <button
+                        type="button"
+                        className={`options-menu-item shortcut-bar-option ${bar.visible ? "enabled" : "disabled"}`}
+                        aria-pressed={bar.visible}
+                        aria-label={`${label}, ${bar.visible ? "visible" : "hidden"}`}
+                        key={barId}
+                        onClick={() => toggleShortcutBarVisibility(barId)}
+                      >
+                        <span className="options-menu-icon"><Menu aria-hidden="true" /></span>
+                        <span className="options-menu-copy">
+                          <strong>{label}</strong>
+                          <small>{bar.visible ? "Shown in the field" : "Hidden from the field"}</small>
+                        </span>
+                        <span className="options-toggle-state">
+                          <i aria-hidden="true" />
+                          {bar.visible ? "Visible" : "Hidden"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
+            <DialogContent className="shortcuts-dialog">
+              <DialogHeader className="shortcuts-dialog-header">
+                <div className="shortcuts-title-mark"><Keyboard aria-hidden="true" /></div>
+                <div>
+                  <DialogTitle>Commands</DialogTitle>
+                  <DialogDescription>
+                    Push the right buttons, preferably in the right order.
+                  </DialogDescription>
+                </div>
+              </DialogHeader>
+              <div className="shortcut-command-groups" ref={shortcutsListRef}>
+                {KEYBOARD_SHORTCUT_GROUPS.map((group) => (
+                  <section className="shortcut-command-group" key={group}>
+                    <h3>{group}</h3>
+                    <div className="shortcut-command-list">
+                      {KEYBOARD_SHORTCUTS.filter((shortcut) => shortcut.group === group).map((shortcut) => (
+                        <article className="shortcut-command" key={shortcut.name}>
+                          <div className="shortcut-command-copy">
+                            <strong>{shortcut.name}</strong>
+                            <span>{shortcut.description}</span>
+                          </div>
+                          <div
+                            className="shortcut-key-combo"
+                            aria-label={`Command: ${shortcut.keys.join(" plus ")}`}
+                          >
+                            {shortcut.keys.map((key, keyIndex) => (
+                              <span className="shortcut-key-part" aria-hidden="true" key={key}>
+                                {keyIndex > 0 ? <i>+</i> : null}
+                                <kbd>{key}</kbd>
+                              </span>
+                            ))}
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={recipesOpen} onOpenChange={setRecipesOpen}>
+            <DialogContent className="recipes-dialog">
+              <DialogHeader className="recipes-dialog-header">
+                <div className="recipes-title-mark"><FlaskConical aria-hidden="true" /></div>
+                <div>
+                  <DialogTitle>Recipes</DialogTitle>
+                  <DialogDescription>
+                    A little of this, a little of that.
+                  </DialogDescription>
+                </div>
+              </DialogHeader>
+              <div className="recipe-node-filters" role="group" aria-label="Filter recipes by production node">
+                <button
+                  type="button"
+                  className={`recipe-node-filter ${recipeNodeFilters.length === 0 ? "selected" : ""}`}
+                  aria-pressed={recipeNodeFilters.length === 0}
+                  onClick={() => setRecipeNodeFilters([])}
+                >
+                  All
+                </button>
+                {RECIPE_GUIDE_GROUPS.map((group) => {
+                  const GroupIcon = group.recipes[0].icon;
+                  const selected = recipeNodeFilters.includes(group.node);
                   return (
                     <button
                       type="button"
-                      className={`options-menu-item shortcut-bar-option ${bar.visible ? "enabled" : "disabled"}`}
-                      aria-pressed={bar.visible}
-                      aria-label={`${label}, ${bar.visible ? "visible" : "hidden"}`}
-                      key={barId}
-                      onClick={() => toggleShortcutBarVisibility(barId)}
+                      className={`recipe-node-filter ${selected ? "selected" : ""}`}
+                      aria-pressed={selected}
+                      key={group.node}
+                      onClick={() => setRecipeNodeFilters((current) => (
+                        current.includes(group.node)
+                          ? current.filter((node) => node !== group.node)
+                          : [...current, group.node]
+                      ))}
                     >
-                      <span className="options-menu-icon"><Menu aria-hidden="true" /></span>
-                      <span className="options-menu-copy">
-                        <strong>{label}</strong>
-                        <small>Show or hide this independently configured node shortcut bar.</small>
-                      </span>
-                      <span className="options-toggle-state">
-                        <i aria-hidden="true" />
-                        {bar.visible ? "Visible" : "Hidden"}
-                      </span>
+                      <GroupIcon aria-hidden="true" />
+                      {group.node}
                     </button>
                   );
                 })}
+              </div>
+              <div className="recipe-guide-groups" aria-label="Production recipes" ref={recipesListRef}>
+                {RECIPE_GUIDE_GROUPS.filter((group) => (
+                  recipeNodeFilters.length === 0 || recipeNodeFilters.includes(group.node)
+                )).map((group) => (
+                  <section className="recipe-guide-group" key={group.node}>
+                    <div className="recipe-guide-group-heading">
+                      <strong>{group.node}</strong>
+                      <span>{group.recipes.length} {group.recipes.length === 1 ? "recipe" : "recipes"}</span>
+                    </div>
+                    <div className="recipe-guide-list">
+                      {group.recipes.map((recipe) => {
+                        const RecipeIcon = recipe.icon;
+                        return (
+                          <article
+                            className="recipe-guide-card"
+                            key={recipe.id}
+                            style={{ "--recipe-color": recipe.color } as React.CSSProperties}
+                          >
+                            <span className="recipe-guide-icon"><RecipeIcon aria-hidden="true" /></span>
+                            <div className="recipe-guide-copy">
+                              <div className="recipe-guide-title">
+                                <strong>{recipe.title}</strong>
+                                <span>{recipe.node}</span>
+                              </div>
+                              <div className="recipe-guide-formula" aria-label={recipe.summary}>
+                                <span className="recipe-guide-materials inputs">
+                                  {recipe.inputs.map((input, inputIndex) => (
+                                    <span className="recipe-guide-material" key={`${recipe.id}-${input.type}-${inputIndex}`}>
+                                      <i style={{ background: RESOURCE_COLORS[input.type] }} />
+                                      <b>{input.amount}</b>
+                                      {input.label}
+                                    </span>
+                                  ))}
+                                </span>
+                                <span className="recipe-guide-arrow" aria-hidden="true">→</span>
+                                <span className="recipe-guide-material output">
+                                  <i style={{ background: RESOURCE_COLORS[recipe.output.type] }} />
+                                  <b>{recipe.output.amount}</b>
+                                  {recipe.output.label}
+                                </span>
+                              </div>
+                            </div>
+                            {recipe.duration ? (
+                              <span className="recipe-guide-duration">{formatCycleDuration(recipe.duration)}</span>
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
               </div>
             </DialogContent>
           </Dialog>
@@ -10368,7 +15597,7 @@ export default function Home() {
                 <div>
                   <DialogTitle>Save / Load</DialogTitle>
                   <DialogDescription>
-                    Keep up to three local foundry saves in this browser.
+                    Time travel, minus the paradoxes.
                   </DialogDescription>
                 </div>
               </DialogHeader>
@@ -10377,6 +15606,72 @@ export default function Home() {
                 <span>Saves stay on this device and browser. They are not uploaded.</span>
               </div>
               <div className="save-slot-list" aria-label="Save game slots">
+                <article
+                  className={`save-slot-card temporary-save-card ${temporarySave ? "occupied" : "empty"}`}
+                >
+                  <button
+                    type="button"
+                    className="save-slot-index temporary temporary-save-frequency-trigger"
+                    aria-label={`Change temporary save frequency, currently ${describeTemporarySaveFrequency(temporarySaveFrequencyMinutes).toLowerCase()}`}
+                    onClick={() => {
+                      setTemporarySaveFrequencyDraft(temporarySaveFrequencyMinutes);
+                      setTemporarySaveFrequencyOpen(true);
+                    }}
+                  >
+                    <span>Auto</span>
+                    <strong>{formatTemporarySaveFrequency(temporarySaveFrequencyMinutes)}</strong>
+                  </button>
+                  <div className="save-slot-copy">
+                    <label>Temporary save</label>
+                    <div className="temporary-save-name">
+                      {temporarySave?.name ?? "Awaiting first temporary save"}
+                    </div>
+                    {temporarySave ? (
+                      <p>
+                        <span className="save-slot-status">Available</span>
+                        <time dateTime={temporarySave.savedAt}>
+                          {formatSaveDate(temporarySave.savedAt)}
+                        </time>
+                      </p>
+                    ) : (
+                      <p>
+                        <span className="save-slot-status empty">Pending</span>
+                        {describeTemporarySaveFrequency(temporarySaveFrequencyMinutes)} of active play
+                      </p>
+                    )}
+                  </div>
+                  <div className="save-slot-actions">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={!temporarySave}
+                      onClick={() => {
+                        setPendingLoadSlot("temporary");
+                        setLoadConfirmOpen(true);
+                      }}
+                    >
+                      <FolderOpen aria-hidden="true" />
+                      Load
+                    </Button>
+                  </div>
+                  <div className="temporary-save-copy-actions">
+                    <span>Copy to permanent slot</span>
+                    {saveSlots.map((slot, slotIndex) => (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={!temporarySave}
+                        onClick={() => copyTemporarySaveToSlot(slotIndex)}
+                        key={`temporary-copy-${slotIndex}`}
+                      >
+                        <Save aria-hidden="true" />
+                        {slot ? `Overwrite Slot ${slotIndex + 1}` : `Slot ${slotIndex + 1}`}
+                      </Button>
+                    ))}
+                  </div>
+                </article>
                 {saveSlots.map((slot, slotIndex) => (
                   <article
                     className={`save-slot-card ${slot ? "occupied" : "empty"}`}
@@ -10440,6 +15735,61 @@ export default function Home() {
               </div>
             </DialogContent>
           </Dialog>
+          <Dialog
+            open={temporarySaveFrequencyOpen}
+            onOpenChange={(open) => {
+              setTemporarySaveFrequencyOpen(open);
+              if (open) setTemporarySaveFrequencyDraft(temporarySaveFrequencyMinutes);
+            }}
+          >
+            <DialogContent className="temporary-save-frequency-dialog">
+              <DialogHeader>
+                <div className="temporary-save-frequency-title">
+                  <span><Save aria-hidden="true" /></span>
+                  <div>
+                    <DialogTitle>Temporary Save Frequency</DialogTitle>
+                    <DialogDescription>Set it and forget it.</DialogDescription>
+                  </div>
+                </div>
+              </DialogHeader>
+              <div className="temporary-save-frequency-control">
+                <strong>{describeTemporarySaveFrequency(temporarySaveFrequencyDraft)}</strong>
+                <input
+                  type="range"
+                  min={MIN_TEMPORARY_SAVE_FREQUENCY_MINUTES}
+                  max={MAX_TEMPORARY_SAVE_FREQUENCY_MINUTES}
+                  step={1}
+                  value={temporarySaveFrequencyDraft}
+                  aria-label="Temporary save frequency in minutes"
+                  aria-valuetext={describeTemporarySaveFrequency(temporarySaveFrequencyDraft)}
+                  onChange={(event) => {
+                    setTemporarySaveFrequencyDraft(Number(event.target.value));
+                  }}
+                />
+                <div>
+                  <span>Every minute</span>
+                  <span>Once an hour</span>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setTemporarySaveFrequencyOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button type="button" variant="outline" onClick={applyTemporarySaveFrequency}>
+                  Apply
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={rapidClickWarningOpen} onOpenChange={setRapidClickWarningOpen}>
+            <DialogContent className="rapid-click-warning-dialog" aria-describedby={undefined}>
+              <DialogTitle>Hey, stop that.</DialogTitle>
+            </DialogContent>
+          </Dialog>
           <Dialog open={devOpen} onOpenChange={setDevOpen}>
             <DialogTrigger asChild>
               <Button
@@ -10452,8 +15802,8 @@ export default function Home() {
                 <span className="dev-trigger-label">Dev</span>
               </Button>
             </DialogTrigger>
-            <DialogContent className="dev-dialog">
-              <DialogHeader className="dev-dialog-header">
+            <DialogContent className="dev-dialog topbar-modal">
+              <DialogHeader className="dev-dialog-header topbar-modal-header">
                 <div className="dev-title-mark"><Atom aria-hidden="true" /></div>
                 <div>
                   <DialogTitle>Developer tools</DialogTitle>
@@ -10502,7 +15852,7 @@ export default function Home() {
                   <LockOpen aria-hidden="true" />
                   <span>
                     <strong>{allBuildNodesUnlocked ? "All nodes unlocked" : "Unlock all nodes"}</strong>
-                    <small>Reveal every node blueprint for this game</small>
+                    <small>Reveal every node for this game</small>
                   </span>
                   <em>{allBuildNodesUnlocked ? "Unlocked" : "Developer"}</em>
                 </Button>
@@ -10537,12 +15887,26 @@ export default function Home() {
                   <em>{removeBuildCosts ? "Enabled" : "Disabled"}</em>
                 </Button>
                 <Button
+                  className="build-cost-toggle"
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  onClick={unlockAllMapNodesForDevelopment}
+                >
+                  <MapIcon aria-hidden="true" />
+                  <span>
+                    <strong>Unlock All Map Nodes</strong>
+                    <small>Immediately unlock every map node without spending Map Points</small>
+                  </span>
+                  <em>Run</em>
+                </Button>
+                <Button
                   className="build-inventory-enable"
                   size="sm"
                   variant="outline"
                   type="button"
                   disabled={revealedBuildKinds.has("inventorySource")}
-                  onClick={() => enableTemporaryBlueprint("inventorySource")}
+                  onClick={() => enableTemporaryNode("inventorySource")}
                 >
                   <Plus aria-hidden="true" />
                   <span>
@@ -10557,7 +15921,7 @@ export default function Home() {
                   variant="outline"
                   type="button"
                   disabled={revealedBuildKinds.has("storage")}
-                  onClick={() => enableTemporaryBlueprint("storage")}
+                  onClick={() => enableTemporaryNode("storage")}
                 >
                   <HardDrive aria-hidden="true" />
                   <span>
@@ -10573,22 +15937,37 @@ export default function Home() {
       </header>
 
       <div className="shortcut-bar-layer" aria-label="Node shortcut bars">
-        <NodeShortcutBar
-          name="Shortcut Bar 1"
-          config={shortcutBars.shortcutBar1}
-          options={shortcutNodeOptions}
-          placementActive={Boolean(placingNodeId)}
-          onBuild={buildFromShortcut}
-          onChange={(updater) => updateShortcutBar("shortcutBar1", updater)}
-        />
-        <NodeShortcutBar
-          name="Shortcut Bar 2"
-          config={shortcutBars.shortcutBar2}
-          options={shortcutNodeOptions}
-          placementActive={Boolean(placingNodeId)}
-          onBuild={buildFromShortcut}
-          onChange={(updater) => updateShortcutBar("shortcutBar2", updater)}
-        />
+        {SHORTCUT_BAR_IDS.map((barId, index) => {
+          const group = shortcutBarGroups.find((candidate) => candidate.barIds.includes(barId));
+          const snapReady = Boolean(
+            shortcutBarSnapTarget && (
+              shortcutBarSnapTarget.movingBarId === barId ||
+              shortcutBarSnapTarget.targetBarId === barId
+            ),
+          );
+          return (
+            <NodeShortcutBar
+              key={barId}
+              name={`Shortcut Bar ${index + 1}`}
+              config={shortcutBars[barId]}
+              options={shortcutNodeOptions}
+              placementActive={Boolean(placingNodeId)}
+              grouped={Boolean(group)}
+              snapReady={snapReady}
+              showGroupTooltip={!skipShortcutBarGroupTooltip}
+              onBuild={buildFromShortcut}
+              onChange={(updater) => updateShortcutBar(barId, updater)}
+              onElementRef={(element) => { shortcutBarElementsRef.current[barId] = element; }}
+              onMoveStart={() => beginShortcutBarMove(barId)}
+              onMove={(deltaX, deltaY) => moveShortcutBar(barId, deltaX, deltaY)}
+              onMoveEnd={(commit) => finishShortcutBarMove(barId, commit)}
+              onRotate={() => rotateShortcutBar(barId)}
+              onResizeEnd={() => finishShortcutBarResize(barId)}
+              onSeparate={() => separateShortcutBarGroup(barId)}
+              onDisableGroupTooltip={() => setSkipShortcutBarGroupTooltip(true)}
+            />
+          );
+        })}
       </div>
 
       <AlertDialog
@@ -10612,7 +15991,7 @@ export default function Home() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep current game</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               disabled={pendingLoadSlot === null || !pendingLoadSave}
               onClick={() => {
@@ -10620,7 +15999,7 @@ export default function Home() {
               }}
             >
               <FolderOpen aria-hidden="true" />
-              Load game
+              Confirm
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -10739,7 +16118,7 @@ export default function Home() {
             <small>{pendingDisbandControlGroup?.nodeIds.length ?? 0} nodes</small>
           </div>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep group</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={(event) => {
                 if (!pendingDisbandControlGroupId) {
@@ -10750,7 +16129,7 @@ export default function Home() {
               }}
             >
               <Unplug aria-hidden="true" />
-              Disband group
+              Confirm
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -10814,12 +16193,10 @@ export default function Home() {
             </span>
           </label>
           <AlertDialogFooter>
-            <AlertDialogCancel>
-              {inventoryOverflowPrompt?.cancelLabel ?? "Cancel action"}
-            </AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={confirmInventoryOverflow}>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmInventoryOverflow}>
               <TriangleAlert aria-hidden="true" />
-              {inventoryOverflowPrompt?.confirmLabel ?? "Proceed & destroy overflow"}
+              Confirm
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -10872,13 +16249,9 @@ export default function Home() {
             </span>
           </label>
           <AlertDialogFooter>
-            <AlertDialogCancel className="node-delete-cancel" variant="ghost">
-              Cancel
-            </AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               ref={destroyConfirmButtonRef}
-              className="node-delete-confirm"
-              variant="destructive"
               onClick={(event) => {
                 const deleted = destroyNodes(pendingDeletionNodeIds);
                 if (!deleted) {
@@ -10891,9 +16264,7 @@ export default function Home() {
               }}
             >
               <Trash2 aria-hidden="true" />
-              {pendingDeletionIsHighlightedGroup
-                ? "Delete All"
-                : "Continue"}
+              Confirm
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -10924,7 +16295,7 @@ export default function Home() {
             </AlertDialogMedia>
             <AlertDialogTitle>Delete this connection?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes only the selected cable. Completed output waiting in the source machine is moved into available storage nodes first.
+              This removes only the selected cable. Stored products and production progress remain in the source machine.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="connection-delete-route" aria-label="Selected connection">
@@ -10957,12 +16328,8 @@ export default function Home() {
             </span>
           </label>
           <AlertDialogFooter>
-            <AlertDialogCancel className="connection-delete-cancel" variant="ghost">
-              Cancel
-            </AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="connection-delete-confirm"
-              variant="destructive"
               onClick={(event) => {
                 if (!pendingDeletionConnectionId || !deleteConnection(pendingDeletionConnectionId)) {
                   event.preventDefault();
@@ -10974,7 +16341,7 @@ export default function Home() {
               }}
             >
               <Trash2 aria-hidden="true" />
-              Yes, Delete
+              Confirm
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -11005,7 +16372,7 @@ export default function Home() {
             <span className="connection-manager-star" aria-hidden="true" />
             <span className="connection-manager-summary-copy">
               <small>MULTI-CONNECTION SOCKET</small>
-              <strong>{managedMultiPortNode?.title ?? "Node"} · {managedMultiPortSpec?.label ?? "Socket"}</strong>
+              <strong>{managedMultiPortTitle} · {managedMultiPortSpec?.label ?? "Socket"}</strong>
             </span>
             <span className="connection-manager-count">
               {managedMultiConnections.length} connected
@@ -11098,6 +16465,50 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
+      <AlertDialog
+        open={miningDrillWarningOpen}
+        onOpenChange={(open) => {
+          setMiningDrillWarningOpen(open);
+          if (!open) setSuppressFutureMiningDrillWarnings(false);
+        }}
+      >
+        <AlertDialogContent className="destroy-dialog mining-drill-warning-dialog">
+          <AlertDialogHeader>
+            <AlertDialogMedia className="destroy-dialog-icon mining-drill-warning-icon">
+              <TriangleAlert aria-hidden="true" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>Mining Drill placement warning</AlertDialogTitle>
+            <AlertDialogDescription>
+              Once this Mining Drill accepts its twentieth Motor and becomes a completed resource deposit, it cannot be moved.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <label className="inventory-overflow-suppression mining-drill-warning-suppression">
+            <Checkbox
+              checked={suppressFutureMiningDrillWarnings}
+              onCheckedChange={(checked) =>
+                setSuppressFutureMiningDrillWarnings(checked === true)
+              }
+            />
+            <span>
+              <strong>Don&apos;t show this again</strong>
+              <small>Future Mining Drill placements will skip this reminder.</small>
+            </span>
+          </label>
+          <AlertDialogFooter>
+            <AlertDialogAction
+              onClick={() => {
+                if (suppressFutureMiningDrillWarnings) {
+                  setSkipMiningDrillCompletionWarning(true);
+                }
+              }}
+            >
+              <TriangleAlert aria-hidden="true" />
+              Understood
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <Dialog
         open={Boolean(configuringMiningDrillId)}
         onOpenChange={(open) => {
@@ -11108,7 +16519,7 @@ export default function Home() {
           <DialogHeader>
             <DialogTitle>Choose ore deposit</DialogTitle>
             <DialogDescription>
-              The Mining Drill completes one powered cycle every three seconds. After twenty cycles it becomes a 1,000-unit deposit of the selected resource.
+              Each Motor delivered advances the Mining Drill by one tick. After twenty Motors it becomes a 1,000-unit deposit of the selected resource.
             </DialogDescription>
           </DialogHeader>
           <div className="filter-choice-grid mining-drill-choice-grid" role="listbox" aria-label="Mining Drill ore resource">
@@ -11186,8 +16597,6 @@ export default function Home() {
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              variant="outline"
-              className="assembler-recipe-change-action"
               onClick={(event) => {
                 if (!pendingAssemblerRecipeChange) {
                   event.preventDefault();
@@ -11206,7 +16615,7 @@ export default function Home() {
               {pendingAssemblerRecipeChange?.kind === "refiner"
                 ? <Cog aria-hidden="true" />
                 : <Hammer aria-hidden="true" />}
-              Change Recipe
+              Confirm
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -11249,7 +16658,9 @@ export default function Home() {
                       <span className="assembler-recipe-icon"><RecipeIcon aria-hidden="true" /></span>
                       <span className="filter-choice-copy">
                         <strong>{option.label}</strong>
-                        <small>{recipe.summary} · {formatCycleDuration(recipe.duration)}</small>
+                        <small>
+                          {recipe.summary} · {formatCycleDuration(recipe.duration)}
+                        </small>
                       </span>
                       {selected ? <span className="filter-choice-current">ACTIVE</span> : null}
                     </button>
@@ -11303,6 +16714,7 @@ export default function Home() {
           "--grid-size": `${24 * zoom}px`,
           "--major-grid-size": `${120 * zoom}px`,
           "--port-zoom-scale": getPortZoomScale(zoom),
+          "--port-hit-padding": `${getPortHitPadding(zoom)}px`,
         } as React.CSSProperties}
       >
         <div
@@ -11313,7 +16725,9 @@ export default function Home() {
           className="node-canvas"
           ref={canvasRef}
           style={{ width: worldSize.width, height: worldSize.height, transform: `scale(${zoom})` }}
+          onPointerDownCapture={handleCanvasPointerDownCapture}
           onPointerDown={beginCanvasPan}
+          onContextMenuCapture={handleCanvasContextMenuCapture}
           onContextMenu={(event) => event.preventDefault()}
         >
           <svg className="cable-layer" aria-hidden="true">
@@ -11368,19 +16782,20 @@ export default function Home() {
                   }}
                 >
                   <path className="cable-underlay" d={path} />
-                  {isActive ? (
-                    <path
-                      key={`${connection.id}-transfer-${activeFlowTimestamp}`}
-                      className={`cable-transfer-glow ${connection.type === ResourceType.POWER ? "power" : "material"}`}
-                      d={path}
-                    />
-                  ) : null}
                   <path
                     ref={(element) => { pathRefs.current[connection.id] = element; }}
                     className="cable-main"
                     d={path}
                     style={{ stroke: RESOURCE_COLORS[connection.type] }}
                   />
+                  {isActive ? (
+                    <path
+                      key={`${connection.id}-transfer-${activeFlowTimestamp}`}
+                      className={`cable-transfer-glow ${connection.type === ResourceType.POWER ? "power" : "material"}`}
+                      d={path}
+                      pathLength={100}
+                    />
+                  ) : null}
                   <path className="cable-hitbox" d={path} />
                   {cableAlert ? (
                     <g
@@ -11394,8 +16809,208 @@ export default function Home() {
                 </g>
               );
             })}
+            {insertionPreview ? (
+              <g className="cable-insertion-preview">
+                <path className="cable-insertion-preview-underlay" d={insertionPreview.incomingPath} />
+                <path className="cable-insertion-preview-underlay" d={insertionPreview.outgoingPath} />
+                <path
+                  className="cable-insertion-preview-main"
+                  d={insertionPreview.incomingPath}
+                  style={{ stroke: RESOURCE_COLORS[insertionPreview.type] }}
+                />
+                <path
+                  className="cable-insertion-preview-main"
+                  d={insertionPreview.outgoingPath}
+                  style={{ stroke: RESOURCE_COLORS[insertionPreview.type] }}
+                />
+              </g>
+            ) : null}
             {previewPath && connecting ? <path className="cable-preview" d={previewPath} style={{ stroke: RESOURCE_COLORS[connecting.port.type] }} /> : null}
           </svg>
+
+          {Object.values(runtime.blackHoles ?? {}).map((hole) => {
+            const requiredStone = getBlackHoleStoneRequirement(hole);
+            const isFilled = hole.stoneFilled >= requiredStone;
+            const hasStoneConnection = connections.some(
+              (connection) =>
+                connection.targetNode === hole.id &&
+                connection.targetPort === BLACK_HOLE_INPUT_PORT.id,
+            );
+            return (
+              <div
+                className={`black-hole-obstacle ${isFilled ? "filled" : ""}`}
+                key={hole.id}
+                style={{
+                  left: hole.x - hole.radius,
+                  top: hole.y - hole.radius,
+                  width: hole.radius * 2,
+                  height: hole.radius * 2,
+                }}
+                aria-label={`Black Hole, ${hole.stoneFilled} of ${requiredStone} stone`}
+                onPointerEnter={(event) => updateObstructionTooltip("blackHole", hole.id, event)}
+                onPointerMove={(event) => updateObstructionTooltip("blackHole", hole.id, event)}
+                onPointerLeave={() => clearObstructionTooltip("blackHole", hole.id)}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+              >
+                    <svg viewBox="0 0 100 100" aria-hidden="true">
+                      <g className="black-hole-cracks">
+                        {hole.shape.map((scale, index) => {
+                          if (index % 2 !== 0) return null;
+                          const angle =
+                            (Math.PI * 2 * index) / hole.shape.length +
+                            hole.rotation * Math.PI / 180;
+                          const endX = 50 + Math.cos(angle) * (47 + scale * 3);
+                          const endY = 50 + Math.sin(angle) * (47 + scale * 3);
+                          return (
+                            <path
+                              key={index}
+                              d={`M 50 50 L ${endX} ${endY}`}
+                              style={{ "--crack-index": index / 2 } as React.CSSProperties}
+                            />
+                          );
+                        })}
+                      </g>
+                      <polygon
+                        className="black-hole-core"
+                        points={getBlackHolePolygonPoints(hole)}
+                      />
+                    </svg>
+                    <span className="black-hole-input">
+                      <button
+                        ref={(element) => {
+                          portRefs.current[`${hole.id}:${BLACK_HOLE_INPUT_PORT.id}`] = element;
+                        }}
+                        type="button"
+                        className={`port-socket ${getPortConnectionClass(hole.id, BLACK_HOLE_INPUT_PORT)} ${hasStoneConnection ? "filled" : ""}`}
+                        style={{
+                          "--port-color": RESOURCE_COLORS[ResourceType.STONE],
+                        } as React.CSSProperties}
+                        data-port-node={hole.id}
+                        data-port-id={BLACK_HOLE_INPUT_PORT.id}
+                        aria-label="Black Hole Stone input"
+                        onPointerEnter={() => setHoveredPort({
+                          nodeId: hole.id,
+                          port: BLACK_HOLE_INPUT_PORT,
+                        })}
+                        onPointerLeave={() => clearHoveredPort(
+                          hole.id,
+                          BLACK_HOLE_INPUT_PORT.id,
+                        )}
+                        onFocus={() => setHoveredPort({
+                          nodeId: hole.id,
+                          port: BLACK_HOLE_INPUT_PORT,
+                        })}
+                        onBlur={() => clearHoveredPort(hole.id, BLACK_HOLE_INPUT_PORT.id)}
+                        onPointerDown={(event) => beginConnection(
+                          event,
+                          hole.id,
+                          BLACK_HOLE_INPUT_PORT,
+                        )}
+                      />
+                    </span>
+                    <span className="black-hole-fill-progress" aria-hidden="true">
+                      {hole.stoneFilled}/{requiredStone}
+                    </span>
+                    {isFilled ? (
+                      <button
+                        type="button"
+                        className="black-hole-delete-button"
+                        aria-label="Remove filled Black Hole"
+                        title="Remove filled Black Hole"
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          removeFilledBlackHole(hole.id);
+                        }}
+                      >
+                        <Trash2 aria-hidden="true" />
+                      </button>
+                    ) : null}
+              </div>
+            );
+          })}
+
+          {Object.values(runtime.lakes ?? {}).map((lake) => {
+            return (
+              <div
+                className="lake-obstacle"
+                key={lake.id}
+                style={{
+                  left: lake.x - lake.width / 2,
+                  top: lake.y - lake.height / 2,
+                  width: lake.width,
+                  height: lake.height,
+                }}
+                aria-label="Lake, infinite Water source, produces 1 Water per second"
+                onPointerEnter={(event) => updateObstructionTooltip("lake", lake.id, event)}
+                onPointerMove={(event) => updateObstructionTooltip("lake", lake.id, event)}
+                onPointerLeave={() => clearObstructionTooltip("lake", lake.id)}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+              >
+                    <svg viewBox="0 0 100 100" aria-hidden="true">
+                      <polygon className="lake-shore" points={getLakePolygonSvgPoints(lake)} />
+                      <polygon className="lake-water" points={getLakePolygonSvgPoints(lake)} />
+                      <path className="lake-ripple lake-ripple-one" d="M25 48 C38 40 61 41 76 49" />
+                      <path className="lake-ripple lake-ripple-two" d="M31 62 C44 56 58 57 69 62" />
+                    </svg>
+                    {LAKE_WATER_OUTPUT_PORTS.map((port) => {
+                      const position = getLakeOutputPortPosition(lake, port.side);
+                      const hasWaterConnection = connections.some(
+                        (connection) =>
+                          connection.sourceNode === lake.id &&
+                          connection.sourcePort === port.id,
+                      );
+                      return (
+                        <span
+                          className="lake-output"
+                          key={port.id}
+                          style={{ left: `${position.x}%`, top: `${position.y}%` }}
+                        >
+                          <MultiConnectionSocketTooltip
+                            enabled={!skipMultiConnectionTooltip}
+                            direction="output"
+                            options={[]}
+                            onDisable={() => setSkipMultiConnectionTooltip(true)}
+                          >
+                            <button
+                              ref={(element) => {
+                                portRefs.current[`${lake.id}:${port.id}`] = element;
+                              }}
+                              type="button"
+                              className={`port-socket multi-connection ${getPortConnectionClass(lake.id, port)} ${hasWaterConnection ? "filled" : ""}`}
+                              style={{
+                                "--port-color": RESOURCE_COLORS[ResourceType.WATER],
+                              } as React.CSSProperties}
+                              data-port-node={lake.id}
+                              data-port-id={port.id}
+                              aria-label={`Lake ${port.side} Water output, WATER type, supports multiple connections`}
+                              onPointerEnter={() => setHoveredPort({
+                                nodeId: lake.id,
+                                port,
+                              })}
+                              onPointerLeave={() => clearHoveredPort(lake.id, port.id)}
+                              onFocus={() => setHoveredPort({
+                                nodeId: lake.id,
+                                port,
+                              })}
+                              onBlur={() => clearHoveredPort(lake.id, port.id)}
+                              onPointerDown={(event) => beginConnection(
+                                event,
+                                lake.id,
+                                port,
+                              )}
+                            >
+                              <span className="multi-port-star" aria-hidden="true" />
+                            </button>
+                          </MultiConnectionSocketTooltip>
+                        </span>
+                      );
+                    })}
+              </div>
+            );
+          })}
 
           {selectedRenderedConnection && selectedConnectionMidpoint ? (
             <span
@@ -11495,6 +17110,7 @@ export default function Home() {
             const isSplitter = node.kind === "splitter";
             const isMerger = node.kind === "merger";
             const isJoint = node.kind === "joint";
+            const isRoad = node.kind === "road";
             const isPowerSplitter = node.kind === "powerSplitter";
             const isInventorySource = node.kind === "inventorySource";
             const isFilter = node.kind === "filter";
@@ -11516,13 +17132,6 @@ export default function Home() {
               ? getProcessorRecipe(processorKind, processorState)
               : null;
             const processorStored = processorKind ? getProcessorStored(processorState ?? undefined) : 0;
-            const processorPowerCost = processorKind ? POWER_COSTS[processorKind] ?? 0 : 0;
-            const processorPowerConnection = processorKind && processorPowerCost
-              ? getPowerConnection(node.id)
-              : null;
-            const processorAvailablePower = processorKind && processorPowerCost
-              ? getAvailablePower(node.id)
-              : 0;
             const smartProcessorInputType = processorKind
               ? smartProcessorInputTypes.get(node.id) ?? null
               : null;
@@ -11561,11 +17170,23 @@ export default function Home() {
               ? runtime.researchFoundries[node.id]
               : null;
             const researchFoundryCores = getResearchFoundryCores(researchFoundryState ?? undefined);
+            const activeResearchProjectProgress = runtime.research.activeProject
+              ? runtime.research.progress[runtime.research.activeProject]
+              : 0;
+            const researchFoundryProjectCores = getResearchFoundryProjectCoreCount(
+              researchFoundryState ?? undefined,
+              runtime.research.activeProject,
+              activeResearchProjectProgress,
+            );
+            const requiredResearchCoreType = getResearchProjectRequiredCoreType(
+              runtime.research.activeProject,
+              activeResearchProjectProgress,
+            );
             const researchIsProducing = Boolean(
               isResearchFoundry &&
               !isBuilding &&
               isRunning &&
-              researchFoundryCores > 0 &&
+              researchFoundryProjectCores > 0 &&
               activeResearchProject &&
               !isResearchProjectUnlocked(runtime.research, activeResearchProject.id),
             );
@@ -11578,8 +17199,9 @@ export default function Home() {
               ? connectionIndex.outgoingByPort.get(`${node.id}:forest-growth-out`)?.[0]
               : null;
             const miningDrillState = isMiningDrill ? runtime.miningDrills[node.id] : null;
-            const miningDrillPowerConnection = isMiningDrill ? getPowerConnection(node.id) : null;
-            const miningDrillAvailablePower = isMiningDrill ? getAvailablePower(node.id) : 0;
+            const miningDrillMotorConnection = isMiningDrill
+              ? connectionIndex.incomingByPort.get(`${node.id}:motor-in`)
+              : null;
             const miningDrillTarget = getMiningTarget(miningDrillState?.selectedType ?? null);
             const splitterType = isSplitter ? getSplitterInputType(node.id, connections) : null;
             const mergerType = isMerger ? getMergerInputType(node.id, connections) : null;
@@ -11638,11 +17260,8 @@ export default function Home() {
                 connections,
               ) <= 0;
             const extractorEffectiveCycleDuration = extractorId
-              ? EXTRACTOR_BASE_CYCLE_DURATION * (
-                  runtime.research.extractor2Unlocked
-                    ? EXTRACTOR_RESEARCH_CYCLE_MULTIPLIER
-                    : 1
-                )
+              ? EXTRACTOR_BASE_CYCLE_DURATION *
+                getExtractorResearchCycleMultiplier(runtime.research)
               : null;
             const effectiveProductionCycleDuration = extractorEffectiveCycleDuration ?? (
               processorKind
@@ -11651,17 +17270,15 @@ export default function Home() {
                   ? RESEARCH_CYCLE_DURATION
                   : isTreePlanter
                     ? TREE_PLANTER_CYCLE_DURATION
-                    : isMiningDrill
-                      ? MINING_DRILL_CYCLE_DURATION
-                      : isGenerator
-                        ? 0
-                        : null
+                    : isGenerator
+                      ? 0
+                      : null
             );
             const isIdle =
               isBuilding ||
               (extractorId ? extractorIsWaiting(extractorId) : false) ||
               (isResearchFoundry
-                ? researchFoundryCores <= 0 || !activeResearchProject || isAllResearchComplete(runtime.research)
+                ? researchFoundryProjectCores <= 0 || !activeResearchProject || isAllResearchComplete(runtime.research)
                 : false) ||
               (isTreePlanter
                 ? !treePlanterPowerConnection ||
@@ -11671,10 +17288,7 @@ export default function Home() {
                 : false) ||
               (isMiningDrill
                 ? !miningDrillTarget ||
-                  (!miningDrillState?.powerCommitted && (
-                    !miningDrillPowerConnection ||
-                    miningDrillAvailablePower < MINING_DRILL_POWER_COST
-                  ))
+                  !miningDrillMotorConnection
                 : false) ||
               (isInventorySource
                 ? inventorySourceTypes.length === 0 || !inventorySourceHasStock
@@ -11699,7 +17313,6 @@ export default function Home() {
               processorState &&
               processorStored < PROCESSOR_CAPACITY &&
               !processorNeedsInputs(node.id, processorKind) &&
-              !processorNeedsPower(node.id, processorKind) &&
               (
                 !getSmartProcessorOutputPortId(node.id, processorState) ||
                 smartProcessorOutput
@@ -11713,11 +17326,9 @@ export default function Home() {
                   ? processorRecipe.duration
                   : isResearchFoundry
                     ? RESEARCH_CYCLE_DURATION
-                    : isTreePlanter
-                      ? TREE_PLANTER_CYCLE_DURATION
-                      : isMiningDrill
-                        ? MINING_DRILL_CYCLE_DURATION * MINING_DRILL_ITERATIONS
-                        : null;
+                  : isTreePlanter
+                    ? TREE_PLANTER_CYCLE_DURATION
+                    : null;
             const smoothProgressActive = Boolean(
               isRunning &&
               (
@@ -11725,8 +17336,7 @@ export default function Home() {
                 extractorProductionActive ||
                 processorProductionActive ||
                 researchIsProducing ||
-                (isTreePlanter && !isIdle) ||
-                (isMiningDrill && !isIdle)
+                (isTreePlanter && !isIdle)
               ),
             );
             const progressStatus = isBuilding
@@ -11753,9 +17363,7 @@ export default function Home() {
                       ? `Stored ${processorStored} / ${PROCESSOR_CAPACITY} · ${
                           processorNeedsInputs(node.id, processorKind)
                             ? "waiting for inputs"
-                            : processorNeedsPower(node.id, processorKind)
-                              ? `waiting for ${processorPowerCost}W`
-                              : processorRecipe?.activeLabel.toLowerCase() ?? "producing"
+                            : processorRecipe?.activeLabel.toLowerCase() ?? "producing"
                         }`
                     : isTreePlanter
                       ? runtime.forest.remaining >= RESOURCE_CAPACITIES.forest
@@ -11770,21 +17378,23 @@ export default function Home() {
                     : isMiningDrill
                       ? !miningDrillTarget
                         ? "Choose an ore resource"
-                        : !miningDrillPowerConnection
-                          ? "Connect Power"
-                          : !miningDrillState?.powerCommitted && miningDrillAvailablePower < MINING_DRILL_POWER_COST
-                            ? `Waiting for ${MINING_DRILL_POWER_COST}W`
-                            : `Drilling ${miningDrillTarget.title.toLowerCase()} · ${miningDrillState?.iterations ?? 0}/${MINING_DRILL_ITERATIONS}`
+                        : !miningDrillMotorConnection
+                          ? "Connect Motors"
+                          : `Waiting for Motor · ${miningDrillState?.iterations ?? 0}/${MINING_DRILL_ITERATIONS}`
                     : isResearchFoundry
                       ? isAllResearchComplete(runtime.research)
                         ? "All research complete"
-                        : researchFoundryCores > 0
-                          ? activeResearchProject
+                        : !activeResearchProject
+                          ? researchFoundryCores > 0
+                            ? "Choose a research project"
+                            : researchCoreConnection
+                              ? "Waiting for a Core"
+                              : "Connect Cores"
+                          : researchFoundryProjectCores > 0
                             ? `Researching ${activeResearchProject.title}`
-                            : "Choose a research project"
-                          : researchCoreConnection
-                            ? "Waiting for Automata Core"
-                            : "Connect Automata Cores"
+                            : `Waiting for ${requiredResearchCoreType
+                              ? formatResourceType(requiredResearchCoreType)
+                              : "a Core"}`
                     : isInventorySource
                       ? inventorySourceFilterEdges.length === 0
                         ? "Connect Filters"
@@ -11807,21 +17417,19 @@ export default function Home() {
                             : processorKind === "furnace"
                               ? "Connect Iron or Copper"
                               : "Connect a Plate"
-                          : processorKind && processorNeedsPower(node.id, processorKind)
-                            ? processorPowerConnection
-                              ? `Waiting for ${processorPowerCost}W`
-                              : "Connect Power"
                           : processorRecipe
                             ? processorRecipe.activeLabel
                         : "Producing";
             const nodeMetaLabel = effectiveProductionCycleDuration !== null
               ? formatCycleDuration(effectiveProductionCycleDuration)
+              : isMiningDrill
+                ? "1 Motor per tick"
               : isInventorySource
                 ? "1 item per Filter · 4.0s withdrawal"
                 : "";
-            const effectiveInputs = node.inputs.map((port) =>
-              getRuntimeAwarePort(node.id, port, connections, runtime)
-            );
+            const effectiveInputs = node.inputs
+              .filter((port) => !(processorKind && port.id === "power-in"))
+              .map((port) => getRuntimeAwarePort(node.id, port, connections, runtime));
             const effectiveOutputs = node.outputs.map((port) =>
               getRuntimeAwarePort(node.id, port, connections, runtime)
             );
@@ -11881,6 +17489,11 @@ export default function Home() {
               : undefined;
             const rows = Math.max(effectiveInputs.length, effectiveOutputs.length, 1);
             const nodeControlGroup = controlGroupByNodeId.get(node.id);
+            const prioritySelection = prioritizedBoxSelectionRef.current;
+            const isPrioritySelection =
+              selectedNodes.includes(node.id) &&
+              prioritySelection.length === selectedNodes.length &&
+              selectedNodes.every((selectedNodeId) => prioritySelection.includes(selectedNodeId));
             const entireControlGroupSelected = Boolean(
               nodeControlGroup &&
               nodeControlGroup.nodeIds.every((groupNodeId) => selectedNodes.includes(groupNodeId)),
@@ -11897,7 +17510,7 @@ export default function Home() {
               <section
                 key={node.id}
                 ref={(element) => { nodeRefs.current[node.id] = element; }}
-                className={`node-card ${isFiniteResource ? "resource-node" : ""} ${isJoint || isPowerSplitter ? "joint-node" : ""} ${isPowerSplitter ? "power-splitter-node" : ""} ${isSplitter || isMerger || isFilter ? "compact-routing-node routing-node" : ""} ${isSplitter ? "splitter-node" : ""} ${isMerger ? "merger-node" : ""} ${isFilter ? "filter-node" : ""} ${isStorage ? "storage-node" : ""} ${isWoodenChest ? "wooden-chest-node" : ""} ${isConfigurableProcessor ? "assembler-node" : ""} ${nodeControlGroup ? "control-group-member" : ""} ${isActiveControlGroup ? "control-group-active" : ""} ${nodeControlGroup && individualControlNodeId === node.id && selectedNodes.includes(node.id) ? "individual-control" : ""} ${selectedNodes.includes(node.id) ? "selected" : ""} ${draggingNode && selectedNodes.includes(node.id) ? "dragging" : ""} ${(draggingNode === node.id || placingNodeId === node.id) && insertionTarget ? "insert-ready" : ""} ${placingNodeId === node.id ? "placing" : ""} ${placingNodeId === node.id && placementBlocked ? "placement-blocked" : ""} ${draggingNode === node.id && dragCollisionBlocked ? "collision-blocked" : ""} ${isBuilding ? "building" : ""} ${outputPaused ? "output-paused" : ""}`}
+                className={`node-card ${isFiniteResource ? "resource-node" : ""} ${isJoint || isPowerSplitter ? "joint-node" : ""} ${isPowerSplitter ? "power-splitter-node" : ""} ${isSplitter || isMerger || isFilter || isRoad ? "compact-routing-node routing-node" : ""} ${isSplitter ? "splitter-node" : ""} ${isMerger ? "merger-node" : ""} ${isFilter ? "filter-node" : ""} ${isRoad ? "road-node" : ""} ${isStorage ? "storage-node" : ""} ${isWoodenChest ? "wooden-chest-node" : ""} ${isConfigurableProcessor ? "assembler-node" : ""} ${nodeControlGroup ? "control-group-member" : ""} ${isActiveControlGroup ? "control-group-active" : ""} ${nodeControlGroup && individualControlNodeId === node.id && selectedNodes.includes(node.id) ? "individual-control" : ""} ${selectedNodes.includes(node.id) ? "selected" : ""} ${draggingNode && selectedNodes.includes(node.id) ? "dragging" : ""} ${(draggingNode === node.id || placingNodeId === node.id) && insertionTarget ? "insert-ready" : ""} ${placingNodeId === node.id ? "placing" : ""} ${placingNodeId === node.id && placementBlocked ? "placement-blocked" : ""} ${draggingNode === node.id && dragCollisionBlocked ? "collision-blocked" : ""} ${isBuilding ? "building" : ""} ${outputPaused ? "output-paused" : ""}`}
                 style={{
                   transform: `translate3d(${positions[node.id]?.x ?? 0}px, ${positions[node.id]?.y ?? 0}px, 0)`,
                   "--control-group-color": nodeControlGroup?.color ?? "transparent",
@@ -11919,7 +17532,7 @@ export default function Home() {
                 } as React.CSSProperties}
                 aria-label={isExtractor ? `${node.eyebrow} ${node.title} node` : `${node.title} node`}
                 onPointerDown={(event) => {
-                  if (event.button === 2 && nodeControlGroup) {
+                  if (event.button === 2 && nodeControlGroup && !isPrioritySelection) {
                     if (!selectedNodesRef.current.includes(node.id)) {
                       event.stopPropagation();
                       beginCanvasPan(event, node.id);
@@ -11930,6 +17543,11 @@ export default function Home() {
                     return;
                   }
                   beginNodeDrag(event, node.id);
+                }}
+                onClick={(event) => {
+                  if (event.button !== 0 || event.ctrlKey || event.shiftKey) return;
+                  if ((event.target as HTMLElement).closest("button, input, select, textarea, a")) return;
+                  recordRapidNodeClick(node.id);
                 }}
                 onDoubleClick={(event) => {
                   if ((event.target as HTMLElement).closest("button, input, select, textarea, a")) return;
@@ -11958,7 +17576,7 @@ export default function Home() {
                     return;
                   }
                   suppressedNodeContextMenuRef.current = null;
-                  if (nodeControlGroup) {
+                  if (nodeControlGroup && !isPrioritySelection) {
                     event.stopPropagation();
                     setPendingDisbandControlGroupId(nodeControlGroup.id);
                     setDisbandControlGroupOpen(true);
@@ -11974,6 +17592,27 @@ export default function Home() {
                   }
                 }}
               >
+                {productionFlashTokens[node.id] ? (
+                  <span
+                    key={productionFlashTokens[node.id]}
+                    className="production-completion-flash"
+                    aria-hidden="true"
+                  />
+                ) : null}
+                {rapidClickAnimations[node.id] ? (
+                  <span
+                    key={rapidClickAnimations[node.id].token}
+                    className={`rapid-click-animation variant-${rapidClickAnimations[node.id].variant + 1}`}
+                    aria-hidden="true"
+                  >
+                    {Array.from({ length: 16 }, (_, index) => (
+                      <i
+                        key={index}
+                        style={{ "--particle-index": index } as React.CSSProperties}
+                      />
+                    ))}
+                  </span>
+                ) : null}
                 {nodeControlGroup ? (
                   <span
                     className="control-group-marker"
@@ -12080,7 +17719,6 @@ export default function Home() {
                             onFocus={() => setHoveredPort({ nodeId: node.id, port })}
                             onBlur={() => clearHoveredPort(node.id, port.id)}
                             onPointerDown={(event) => beginConnection(event, node.id, port)}
-                            onKeyDown={(event) => handlePortKeyboard(event, node.id, port)}
                           />
                           <span className="power-splitter-flow-label input-flow" aria-hidden="true">→</span>
                         </span>
@@ -12103,7 +17741,6 @@ export default function Home() {
                             onFocus={() => setHoveredPort({ nodeId: node.id, port })}
                             onBlur={() => clearHoveredPort(node.id, port.id)}
                             onPointerDown={(event) => beginConnection(event, node.id, port)}
-                            onKeyDown={(event) => handlePortKeyboard(event, node.id, port)}
                           />
                           <span className="power-splitter-flow-label output-flow" aria-hidden="true">
                             {index === 0 ? "↑" : index === 1 ? "→" : "↓"}
@@ -12150,12 +17787,8 @@ export default function Home() {
                           manualLockedIngredientType === choice
                         ))
                       : [];
-                    const isPowerInput = input?.id === "power-in" && processorPowerCost > 0;
                     const isTreePlanterPowerInput = Boolean(isTreePlanter && input?.id === "power-in");
-                    const isMiningDrillPowerInput = Boolean(isMiningDrill && input?.id === "power-in");
-                    const processorPowerReady = Boolean(
-                      processorState?.powerCommitted || processorAvailablePower >= processorPowerCost,
-                    );
+                    const isMiningDrillMotorInput = Boolean(isMiningDrill && input?.id === "motor-in");
                     const inputFilled = Boolean(
                       (isExtractor && input?.type === ResourceType.RESOURCE && extractorRecipe && !extractorSourceDepleted) ||
                       (isGenerator && input?.id === "generator-charcoal-in" && (
@@ -12166,9 +17799,7 @@ export default function Home() {
                       )) ||
                       (isResearchFoundry && input?.id === "research-core-in" && researchFoundryCores > 0) ||
                       (isTreePlanterPowerInput && treePlanterPowerConnection && treePlanterAvailablePower >= TREE_PLANTER_POWER_COST) ||
-                      (isMiningDrillPowerInput && miningDrillPowerConnection && (
-                        miningDrillState?.powerCommitted || miningDrillAvailablePower >= MINING_DRILL_POWER_COST
-                      )) ||
+                      (isMiningDrillMotorInput && miningDrillMotorConnection) ||
                       (isForest && input?.id === "forest-growth-in" && connections.some(
                         (connection) => connection.targetNode === node.id && connection.targetPort === input.id,
                       )) ||
@@ -12184,7 +17815,6 @@ export default function Home() {
                           (connection) => connection.targetNode === node.id && connection.targetPort === input.id,
                         )
                       )) ||
-                      (isPowerInput && processorPowerConnection && processorPowerReady) ||
                       (processorInput && processorInputCount >= processorInput.amount) ||
                       (isStorage && input && connections.some(
                         (connection) => connection.targetNode === node.id && connection.targetPort === input.id,
@@ -12192,12 +17822,10 @@ export default function Home() {
                     );
                     const inputStatus = inputFilled
                         ? "READY"
-                      : isPowerInput && processorPowerConnection
-                        ? `${processorAvailablePower}W`
-                        : isTreePlanterPowerInput && treePlanterPowerConnection
+                      : isTreePlanterPowerInput && treePlanterPowerConnection
                           ? `${treePlanterAvailablePower}W`
-                        : isMiningDrillPowerInput && miningDrillPowerConnection
-                          ? `${miningDrillAvailablePower}W`
+                        : isMiningDrillMotorInput && miningDrillMotorConnection
+                          ? "READY"
                         : null;
                     const outputFilled =
                       nodeFull ||
@@ -12218,9 +17846,10 @@ export default function Home() {
                           {input ? (
                             <>
                               <MultiConnectionSocketTooltip
-                                enabled={isMultiInputPort(node.id, input.id)}
+                                enabled={isMultiInputPort(node.id, input.id) && !skipMultiConnectionTooltip}
                                 direction="input"
                                 options={hoveredNodePort?.id === input.id ? hoveredPortConnectionOptions : []}
+                                onDisable={() => setSkipMultiConnectionTooltip(true)}
                               >
                               <button
                                 ref={(element) => { portRefs.current[`${node.id}:${input.id}`] = element; }}
@@ -12237,7 +17866,6 @@ export default function Home() {
                                 onFocus={() => setHoveredPort({ nodeId: node.id, port: input })}
                                 onBlur={() => clearHoveredPort(node.id, input.id)}
                                 onPointerDown={(event) => beginConnection(event, node.id, input)}
-                                onKeyDown={(event) => handlePortKeyboard(event, node.id, input)}
                               >
                                 {isMultiInputPort(node.id, input.id) ? <span className="multi-port-star" aria-hidden="true" /> : null}
                               </button>
@@ -12264,6 +17892,7 @@ export default function Home() {
                                       const disabled =
                                         available <= 0 ||
                                         remainingCapacity <= 0 ||
+                                        (isMiningDrill && !miningDrillTarget) ||
                                         (isResearchFoundry && isAllResearchComplete(runtime.research));
                                       return (
                                         <button
@@ -12319,9 +17948,10 @@ export default function Home() {
                                 <PortLabel label={output.label} />
                               )}
                               <MultiConnectionSocketTooltip
-                                enabled={isMultiOutputPort(node.id, output.id)}
+                                enabled={isMultiOutputPort(node.id, output.id) && !skipMultiConnectionTooltip}
                                 direction="output"
                                 options={hoveredNodePort?.id === output.id ? hoveredPortConnectionOptions : []}
+                                onDisable={() => setSkipMultiConnectionTooltip(true)}
                               >
                               <button
                                 ref={(element) => { portRefs.current[`${node.id}:${output.id}`] = element; }}
@@ -12338,7 +17968,6 @@ export default function Home() {
                                 onFocus={() => setHoveredPort({ nodeId: node.id, port: output })}
                                 onBlur={() => clearHoveredPort(node.id, output.id)}
                                 onPointerDown={(event) => beginConnection(event, node.id, output)}
-                                onKeyDown={(event) => handlePortKeyboard(event, node.id, output)}
                               >
                                 {isMultiOutputPort(node.id, output.id) ? <span className="multi-port-star" aria-hidden="true" /> : null}
                               </button>
@@ -12404,9 +18033,9 @@ export default function Home() {
                       <SmoothProgress
                         className="machine-progress mining-drill-progress"
                         value={nodeProgress}
-                        active={smoothProgressActive}
-                        cycleDuration={smoothProgressDuration ?? MINING_DRILL_CYCLE_DURATION * MINING_DRILL_ITERATIONS}
-                        aria-label={`Mining Drill, ${miningDrillState?.iterations ?? 0} of ${MINING_DRILL_ITERATIONS} cycles complete`}
+                        active={false}
+                        cycleDuration={1}
+                        aria-label={`Mining Drill, ${miningDrillState?.iterations ?? 0} of ${MINING_DRILL_ITERATIONS} Motors accepted`}
                       />
                       <span className="mining-drill-status">{progressStatus} · {nodeMetaLabel}</span>
                     </button>
@@ -12527,8 +18156,9 @@ export default function Home() {
                   )}
                 </div>
                 {isConfigurableProcessor ? (
-                  <aside
+                  <ViewportBoundTooltip
                     className="assembler-recipe-tooltip"
+                    measurementKey={`${node.id}:${positions[node.id]?.x ?? 0}:${positions[node.id]?.y ?? 0}:${zoom}:${processorRecipe?.title ?? "none"}`}
                     role="tooltip"
                     aria-label={processorRecipe
                       ? `${processorRecipe.title} recipe: ${processorRecipe.summary}`
@@ -12564,12 +18194,13 @@ export default function Home() {
                     ) : (
                       <div className="assembler-recipe-tooltip-empty">No recipe selected.</div>
                     )}
-                  </aside>
+                  </ViewportBoundTooltip>
                 ) : null}
                 {showSocketGuide && hoveredNodePort ? (
-                  <aside
+                  <ViewportBoundTooltip
                     id={socketGuideId}
                     className={`node-connect-tooltip visible ${hoveredNodePort.direction}-guide`}
+                    measurementKey={`${node.id}:${positions[node.id]?.x ?? 0}:${positions[node.id]?.y ?? 0}:${zoom}:${hoveredNodePort.direction}:${hoveredPortIndex}`}
                     role="tooltip"
                     aria-label={`${hoveredNodePort.direction === "input" ? "Acceptable sources" : "Acceptable destinations"} for ${node.title} ${hoveredNodePort.label}`}
                     style={{
@@ -12610,7 +18241,7 @@ export default function Home() {
                         +{connectionOptions.length - visibleConnectionOptions.length} more available
                       </div>
                     ) : null}
-                  </aside>
+                  </ViewportBoundTooltip>
                 ) : null}
               </section>
             );
@@ -12652,6 +18283,26 @@ export default function Home() {
           </Button>
         </div>
       </div>
+
+      {replicationResourceWarning ? (
+        <span
+          className="replication-resource-tooltip"
+          key={replicationResourceWarning.token}
+          role="tooltip"
+          aria-live="polite"
+          style={{
+            "--replication-tooltip-x": `${replicationResourceWarning.clientX}px`,
+            "--replication-tooltip-y": `${replicationResourceWarning.clientY}px`,
+          } as React.CSSProperties}
+        >
+          <TriangleAlert aria-hidden="true" />
+          Not enough resources
+        </span>
+      ) : null}
+
+      {obstructionTooltip ? (
+        <CursorObstructionTooltip tooltip={obstructionTooltip} runtime={runtime} />
+      ) : null}
 
       <Toaster
         position="bottom-center"
