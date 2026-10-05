@@ -42,6 +42,7 @@ import {
   Trash2,
   TreePine,
   TriangleAlert,
+  Trophy,
   Unplug,
   Zap,
 } from "lucide-react";
@@ -182,8 +183,10 @@ type PurchasableKind = ExtractorKind | "generator" | "powerSplitter" | "research
 type NodeKind = "ironOre" | "copperOre" | "stone" | "forest" | PurchasableKind;
 type BuildCategory = "all" | "production" | "logistics" | "storage";
 type PortDirection = "input" | "output";
+type JointOrientation = "horizontal" | "vertical";
 type UnlockTimes = Partial<Record<PurchasableKind, number>>;
 type ResearchProjectId = "logistics" | "kiln" | "charcoalGenerator" | "furnace" | "refiner" | "assembler" | "researchCenter" | "road" | "areaExpansion1" | "extractor2" | "extractor3" | "treePlanter" | "miningDrill" | "exploration";
+type AchievementId = "oops" | "handHolding";
 type MiningDrillTarget = ResourceType.IRON | ResourceType.COPPER | ResourceType.STONE;
 type CoreType = ResourceType.BASIC_CORE | ResourceType.AUTOMATA_CORE;
 type MapEdge = "north" | "east" | "south" | "west";
@@ -360,6 +363,7 @@ type Runtime = {
   }>;
   joints: Record<NodeId, {
     bufferedType: ResourceType | null;
+    orientation: JointOrientation;
   }>;
   roads: Record<NodeId, {
     outboundType: InventoryItemType | null;
@@ -556,6 +560,7 @@ type SaveGamePayload = {
   promptPreferences?: PromptPreferences;
   shortcutBars?: ShortcutBarsState;
   shortcutBarGroups?: ShortcutBarGroup[];
+  achievements?: AchievementId[];
   removeBuildCosts?: boolean;
   starterStoneCollectHint?: {
     activated: boolean;
@@ -1337,6 +1342,26 @@ const SAVE_SLOT_COUNT = 3;
 const DEFAULT_TEMPORARY_SAVE_FREQUENCY_MINUTES = 5;
 const MIN_TEMPORARY_SAVE_FREQUENCY_MINUTES = 1;
 const MAX_TEMPORARY_SAVE_FREQUENCY_MINUTES = 60;
+const EMPTY_ACHIEVEMENT_FLAVOR_TEXTS = [
+  "Nope, nothing here yet",
+  "Are you even trying?",
+  "Someday, maybe.",
+] as const;
+const ACHIEVEMENT_UNLOCK_DETAILS: Record<AchievementId, {
+  title: string;
+  flavorText: string;
+}> = {
+  oops: {
+    title: "Oops.",
+    flavorText: "Did I do thaaaaat?",
+  },
+  handHolding: {
+    title: "Hand Holding",
+    flavorText: "You are either very deliberate, or very slow.  Or both?",
+  },
+};
+const isAchievementId = (value: unknown): value is AchievementId =>
+  value === "oops" || value === "handHolding";
 const SHORTCUT_SLOT_COUNT = 5;
 const SHORTCUT_BAR_SCALE_MIN = 0.72;
 const SHORTCUT_BAR_SCALE_MAX = 1.55;
@@ -4335,7 +4360,10 @@ const cloneStoredMaterialRuntime = (runtime: Runtime): Runtime => ({
     ]),
   ),
   joints: Object.fromEntries(
-    Object.entries(runtime.joints ?? {}).map(([nodeId, joint]) => [nodeId, { ...joint }]),
+    Object.entries(runtime.joints ?? {}).map(([nodeId, joint]) => [nodeId, {
+      ...joint,
+      orientation: joint.orientation === "vertical" ? "vertical" as const : "horizontal" as const,
+    }]),
   ),
   roads: Object.fromEntries(
     Object.entries(runtime.roads ?? {}).map(([nodeId, road]) => [nodeId, { ...road }]),
@@ -5661,7 +5689,10 @@ const advanceMapFactoryInBackground = (
       }
 
       if (targetNode.kind === "joint" && edge.targetPort === "joint-in") {
-        const joint = next.joints[edge.targetNode] ?? { bufferedType: null };
+        const joint = next.joints[edge.targetNode] ?? {
+          bufferedType: null,
+          orientation: "horizontal" as const,
+        };
         next.joints[edge.targetNode] = joint;
         if (joint.bufferedType === null) {
           joint.bufferedType = product;
@@ -5725,7 +5756,10 @@ const advanceMapFactoryInBackground = (
     simulationNodes
       .filter((node) => node.kind === "joint")
       .forEach((node) => {
-        const joint = next.joints[node.id] ?? { bufferedType: null };
+        const joint = next.joints[node.id] ?? {
+          bufferedType: null,
+          orientation: "horizontal" as const,
+        };
         next.joints[node.id] = joint;
         if (joint.bufferedType && deliverProduct(node.id, "joint-out", joint.bufferedType)) {
           joint.bufferedType = null;
@@ -6391,6 +6425,8 @@ type KeyboardShortcut = {
   description: string;
 };
 
+type KeyboardShortcutFilter = KeyboardShortcut["group"] | "all";
+
 const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
   {
     group: "General",
@@ -6415,6 +6451,36 @@ const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     name: "Pan the field",
     keys: ["Right-click", "Drag"],
     description: "Right-click and drag anywhere on the field to pan.",
+  },
+  {
+    group: "General",
+    name: "Toggle Build",
+    keys: ["B"],
+    description: "Open or close the Node Construction menu.",
+  },
+  {
+    group: "General",
+    name: "Toggle Inventory",
+    keys: ["I"],
+    description: "Open or close the Inventory menu.",
+  },
+  {
+    group: "General",
+    name: "Toggle Journal",
+    keys: ["J"],
+    description: "Open or close the Discovery Journal.",
+  },
+  {
+    group: "General",
+    name: "Toggle Options",
+    keys: ["O"],
+    description: "Open or close the Options menu.",
+  },
+  {
+    group: "General",
+    name: "Toggle Research",
+    keys: ["Q"],
+    description: "Open or close the Research menu.",
   },
   {
     group: "General",
@@ -6457,6 +6523,30 @@ const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     name: "Repeat placement",
     keys: ["Shift", "Place node"],
     description: "Place the current node and immediately prepare another copy. Release Shift to stop.",
+  },
+  {
+    group: "Node",
+    name: "Rotate a Joint",
+    keys: ["R", "Hover Joint"],
+    description: "Rotate the hovered Joint between left-right and top-bottom connections.",
+  },
+  {
+    group: "Node",
+    name: "Use Shortcut Bar 1",
+    keys: ["1–5"],
+    description: "Activate the matching slot in Shortcut Bar 1.",
+  },
+  {
+    group: "Node",
+    name: "Use Shortcut Bar 2",
+    keys: ["Shift", "1–5"],
+    description: "Activate the matching slot in Shortcut Bar 2.",
+  },
+  {
+    group: "Node",
+    name: "Use Shortcut Bar 3",
+    keys: ["Ctrl", "1–5"],
+    description: "Activate the matching slot in Shortcut Bar 3.",
   },
 ];
 
@@ -6517,10 +6607,17 @@ export default function Home() {
     makeInitialMapNodeProgress,
   );
   const [journalOpen, setJournalOpen] = useState(false);
+  const [inventoryOpen, setInventoryOpen] = useState(false);
   const [journalCategory, setJournalCategory] = useState<BuildCategory>("all");
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [keyboardShortcutFilter, setKeyboardShortcutFilter] = useState<KeyboardShortcutFilter>("all");
   const [recipesOpen, setRecipesOpen] = useState(false);
+  const [achievementsOpen, setAchievementsOpen] = useState(false);
+  const [achievementFlavorIndex, setAchievementFlavorIndex] = useState(0);
+  const [unlockedAchievements, setUnlockedAchievements] = useState<Set<AchievementId>>(
+    () => new Set(),
+  );
   const [recipeNodeFilters, setRecipeNodeFilters] = useState<string[]>([]);
   const [saveOpen, setSaveOpen] = useState(false);
   const [wireAnimationsEnabled, setWireAnimationsEnabled] = useState(true);
@@ -6566,6 +6663,7 @@ export default function Home() {
   const [configuringFilterId, setConfiguringFilterId] = useState<NodeId | null>(null);
   const [configuringMiningDrillId, setConfiguringMiningDrillId] = useState<NodeId | null>(null);
   const [configuringAssemblerId, setConfiguringAssemblerId] = useState<NodeId | null>(null);
+  const [configuringRecipeMachineKind, setConfiguringRecipeMachineKind] = useState<"assembler" | "refiner">("assembler");
   const [pendingAssemblerRecipeChange, setPendingAssemblerRecipeChange] = useState<{
     nodeId: NodeId;
     kind: "assembler" | "refiner";
@@ -6631,8 +6729,11 @@ export default function Home() {
     snap: ShortcutBarSnapCandidate | null;
   } | null>(null);
   const buildOpenRef = useRef(false);
+  const achievementOpenCountRef = useRef(0);
+  const unlockedAchievementsRef = useRef<Set<AchievementId>>(new Set());
   const gameElapsedMsRef = useRef(0);
   const lastTemporarySaveElapsedRef = useRef(0);
+  const temporarySaveIntervalPendingRef = useRef(true);
   const stoneCollectHintActivatedRef = useRef(false);
   const stoneCollectHintDismissedRef = useRef(false);
   const stoneCollectSecondHintPendingRef = useRef(false);
@@ -6663,6 +6764,7 @@ export default function Home() {
   const anchorsRef = useRef<Record<string, Position>>({});
   const snappedPortRef = useRef<PortHandle | null>(null);
   const nodeRefs = useRef<Record<NodeId, HTMLElement | null>>({});
+  const hoveredNodeIdRef = useRef<NodeId | null>(null);
   const pathRefs = useRef<Record<string, SVGPathElement | null>>({});
   const nodesRef = useRef(nodes);
   const selectedNodesRef = useRef(selectedNodes);
@@ -7291,15 +7393,20 @@ export default function Home() {
     isRunningRef.current = isRunning;
   }, [isRunning]);
 
-  useEffect(() => {
-    const markPlayerActivity = () => {
-      if (!isRunningRef.current) return;
-      lastPlayerActivityElapsedRef.current = gameElapsedMsRef.current;
-    };
-    window.addEventListener("click", markPlayerActivity, true);
-    return () => {
-      window.removeEventListener("click", markPlayerActivity, true);
-    };
+  const unlockAchievement = useCallback((achievementId: AchievementId) => {
+    if (unlockedAchievementsRef.current.has(achievementId)) return;
+    const next = new Set(unlockedAchievementsRef.current);
+    next.add(achievementId);
+    unlockedAchievementsRef.current = next;
+    setUnlockedAchievements(next);
+    const achievement = ACHIEVEMENT_UNLOCK_DETAILS[achievementId];
+    toast(`${achievement.title} achievement unlocked`, {
+      id: `achievement-unlocked-${achievementId}`,
+      description: achievement.flavorText,
+      icon: <Trophy aria-hidden="true" />,
+      className: "achievement-unlock-toast",
+      duration: 6500,
+    });
   }, []);
 
   useEffect(() => {
@@ -7460,6 +7567,7 @@ export default function Home() {
           );
           if (elapsed - outroInactiveSince >= SUBSEQUENT_COLLECT_HINT_DELAY_MS) {
             starterTutorialOutroShownRef.current = true;
+            unlockAchievement("handHolding");
             setStarterTutorialOutroOpen(true);
           }
         }
@@ -7486,7 +7594,7 @@ export default function Home() {
       setConnectionTutorialExtractorId(placedExtractor.id);
     }, 500);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [unlockAchievement]);
 
   const recordRapidNodeClick = useCallback((nodeId: NodeId) => {
     const now = performance.now();
@@ -8040,6 +8148,37 @@ export default function Home() {
     return true;
   }, [measureAnchors, restoreGraphUndoSnapshot]);
 
+  const rotateHoveredJoint = useCallback(() => {
+    const nodeId = hoveredNodeIdRef.current;
+    const node = nodeId
+      ? nodesRef.current.find((candidate) => candidate.id === nodeId)
+      : null;
+    if (!nodeId || node?.kind !== "joint") return false;
+
+    const undoSnapshot = captureGraphUndoSnapshot();
+    const current = runtimeRef.current;
+    const joint = current.joints[nodeId] ?? {
+      bufferedType: null,
+      orientation: "horizontal" as const,
+    };
+    const next: Runtime = {
+      ...current,
+      joints: {
+        ...current.joints,
+        [nodeId]: {
+          ...joint,
+          orientation: joint.orientation === "vertical" ? "horizontal" : "vertical",
+        },
+      },
+    };
+    runtimeRef.current = next;
+    lastPublishedRuntimeSignatureRef.current = null;
+    setRuntime(next);
+    pushUndoEntry({ kind: "graph", snapshot: undoSnapshot });
+    window.requestAnimationFrame(measureAnchors);
+    return true;
+  }, [captureGraphUndoSnapshot, measureAnchors, pushUndoEntry]);
+
   const getNodeSize = useCallback((nodeId: NodeId, fallbackNode?: NodeSpec): NodeSize => {
     const element = nodeRefs.current[nodeId];
     if (element?.offsetWidth && element.offsetHeight) {
@@ -8191,8 +8330,9 @@ export default function Home() {
     runtimeRef.current = nextRuntime;
     lastPublishedRuntimeSignatureRef.current = null;
     setRuntime(nextRuntime);
+    unlockAchievement("oops");
     window.requestAnimationFrame(measureAnchors);
-  }, [getNodeSize, getPortWorldPosition, measureAnchors]);
+  }, [getNodeSize, getPortWorldPosition, measureAnchors, unlockAchievement]);
 
   const removeFilledBlackHole = useCallback((holeId: NodeId) => {
     const hole = runtimeRef.current.blackHoles[holeId];
@@ -8469,7 +8609,7 @@ export default function Home() {
                   ...current,
                   joints: {
                     ...current.joints,
-                    [id]: { bufferedType: null },
+                    [id]: { bufferedType: null, orientation: "horizontal" as const },
                   },
                 }
             : kind === "road"
@@ -8581,6 +8721,55 @@ export default function Home() {
     revealedBuildKinds,
     updatePlacementBlocked,
   ]);
+
+  const updateBuildMenuOpen = useCallback((open: boolean) => {
+    buildOpenRef.current = open;
+    setBuildOpen(open);
+    if (open) setBuildAttention(false);
+    if (open && starterBuildHintStageRef.current === "menu") {
+      starterBuildHintStageRef.current = "extractor";
+      setStarterBuildHintTarget("extractor");
+    } else if (!open && starterBuildHintStageRef.current === "extractor") {
+      starterBuildHintStageRef.current = "menu";
+      setStarterBuildHintTarget("menu");
+    }
+  }, []);
+
+  const openTopbarMenu = useCallback((menu: "build" | "inventory" | "journal" | "options" | "research") => {
+    const requestedMenuIsOpen = menu === "build"
+      ? buildOpen
+      : menu === "inventory"
+        ? inventoryOpen
+        : menu === "journal"
+          ? journalOpen
+          : menu === "options"
+            ? optionsOpen
+            : researchOpen;
+    const nextMenu = requestedMenuIsOpen ? null : menu;
+
+    updateBuildMenuOpen(nextMenu === "build");
+    setInventoryOpen(nextMenu === "inventory");
+    setJournalOpen(nextMenu === "journal");
+    setOptionsOpen(nextMenu === "options");
+    setResearchOpen(nextMenu === "research");
+    setMapOpen(false);
+    setDevOpen(false);
+    setShortcutsOpen(false);
+    setRecipesOpen(false);
+    setAchievementsOpen(false);
+    setSaveOpen(false);
+    if (nextMenu === "journal") setJournalAttention(false);
+    if (nextMenu !== "research") setHoveredResearchProject(null);
+  }, [buildOpen, inventoryOpen, journalOpen, optionsOpen, researchOpen, updateBuildMenuOpen]);
+
+  const activateShortcutSlot = useCallback((barId: ShortcutBarId, slotIndex: number) => {
+    const assignment = shortcutBarsRef.current[barId]?.assignments[slotIndex];
+    if (!assignment || placingNodeRef.current) return false;
+    const item = VISIBLE_BUILD_CATALOG.find((candidate) => candidate.kind === assignment);
+    if (!item) return false;
+    buildNode(item.kind, item.recipe);
+    return true;
+  }, [buildNode]);
 
   const cancelRepeatPlacementPreview = useCallback(() => {
     const preview = repeatPlacementPreviewRef.current;
@@ -9983,6 +10172,7 @@ export default function Home() {
     })) return false;
     connectionsRef.current = nextConnections;
     setConnections(nextConnections);
+    lastPlayerActivityElapsedRef.current = gameElapsedMsRef.current;
     if (isExtractorResourceInput) {
       setRuntime((current) => {
         const previous = current.extractors[input.nodeId] ?? {
@@ -10027,7 +10217,10 @@ export default function Home() {
           ...current,
           joints: {
             ...current.joints,
-            [input.nodeId]: { bufferedType: null },
+            [input.nodeId]: {
+              bufferedType: null,
+              orientation: current.joints[input.nodeId]?.orientation ?? "horizontal" as const,
+            },
           },
         };
         runtimeRef.current = next;
@@ -10297,7 +10490,10 @@ export default function Home() {
           ...current,
           joints: {
             ...current.joints,
-            [nodeId]: { bufferedType: null },
+            [nodeId]: {
+              bufferedType: null,
+              orientation: current.joints[nodeId]?.orientation ?? "horizontal" as const,
+            },
           },
         };
         runtimeRef.current = updated;
@@ -10570,6 +10766,7 @@ export default function Home() {
     insertionTargetRef.current = null;
     setInsertionTarget(null);
     updatePlacementBlocked(false);
+    lastPlayerActivityElapsedRef.current = gameElapsedMsRef.current;
     if (isPurchasableKind(node.kind)) {
       const placedKind = node.kind;
       setPlacedBuildKinds((current) => new Set(current).add(placedKind));
@@ -12240,7 +12437,10 @@ export default function Home() {
       (simulationNodesByKind.get("joint") ?? [])
         .forEach((node) => {
           const construction = next.construction[node.id];
-          const joint = next.joints[node.id] ?? { bufferedType: null };
+          const joint = next.joints[node.id] ?? {
+            bufferedType: null,
+            orientation: "horizontal" as const,
+          };
           next.joints[node.id] = joint;
 
           if (construction && !construction.complete) {
@@ -12418,6 +12618,53 @@ export default function Home() {
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
         (target instanceof HTMLElement && target.isContentEditable);
+      const isModalInteraction = target instanceof HTMLElement && Boolean(
+        target.closest('[data-slot="dialog-content"], [data-slot="alert-dialog-content"], [role="menu"]'),
+      );
+      const isTopbarMenuInteraction = target instanceof HTMLElement && Boolean(
+        target.closest(".topbar-modal"),
+      );
+      const digitShortcut = /^Digit([1-5])$/.exec(event.code);
+      if (
+        !isEditing &&
+        !isModalInteraction &&
+        !event.repeat &&
+        !event.metaKey &&
+        !event.altKey &&
+        !(event.ctrlKey && event.shiftKey) &&
+        digitShortcut
+      ) {
+        const barId: ShortcutBarId = event.ctrlKey
+          ? "shortcutBar3"
+          : event.shiftKey
+            ? "shortcutBar2"
+            : "shortcutBar1";
+        event.preventDefault();
+        activateShortcutSlot(barId, Number(digitShortcut[1]) - 1);
+        return;
+      }
+      if (
+        !isEditing &&
+        (!isModalInteraction || isTopbarMenuInteraction) &&
+        !event.repeat &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        !event.shiftKey
+      ) {
+        const menu = ({
+          b: "build",
+          i: "inventory",
+          j: "journal",
+          o: "options",
+          q: "research",
+        } as const)[event.key.toLowerCase() as "b" | "i" | "j" | "o" | "q"];
+        if (menu) {
+          event.preventDefault();
+          openTopbarMenu(menu);
+          return;
+        }
+      }
       if (
         !isEditing &&
         !event.shiftKey &&
@@ -12425,6 +12672,18 @@ export default function Home() {
         event.key.toLowerCase() === "z"
       ) {
         if (undoLastAction()) event.preventDefault();
+        return;
+      }
+      if (
+        !isEditing &&
+        !event.repeat &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "r"
+      ) {
+        if (rotateHoveredJoint()) event.preventDefault();
         return;
       }
       if (event.code === "Space" && !isEditing) {
@@ -12519,10 +12778,13 @@ export default function Home() {
       window.removeEventListener("blur", onBlur);
     };
   }, [
+    activateShortcutSlot,
     cancelNodeInHand,
     cancelRepeatPlacementPreview,
+    openTopbarMenu,
     requestNodeDeletion,
     requestConnectionDeletion,
+    rotateHoveredJoint,
     selectedConnection,
     selectedNodes,
     undoLastAction,
@@ -13007,6 +13269,7 @@ export default function Home() {
     undoHistoryRef.current = [];
     pendingPlacementUndoRef.current = null;
     nodesRef.current = INITIAL_NODES;
+    hoveredNodeIdRef.current = null;
     setNodes(INITIAL_NODES);
     positionsRef.current = INITIAL_POSITIONS;
     setPositions(INITIAL_POSITIONS);
@@ -13074,12 +13337,16 @@ export default function Home() {
     setPendingDeletionConnectionId(null);
     setConnectionDeleteDialogOpen(false);
     setBuildOpen(false);
+    setInventoryOpen(false);
     setResearchOpen(false);
     setHoveredResearchProject(null);
     setMapOpen(false);
     setOptionsOpen(false);
     setShortcutsOpen(false);
     setRecipesOpen(false);
+    setAchievementsOpen(false);
+    unlockedAchievementsRef.current = new Set();
+    setUnlockedAchievements(new Set());
     setSaveOpen(false);
     const defaultShortcutBars = makeDefaultShortcutBars();
     shortcutBarsRef.current = defaultShortcutBars;
@@ -13126,6 +13393,7 @@ export default function Home() {
     setNewBuildKinds(new Set());
     gameElapsedMsRef.current = 0;
     lastTemporarySaveElapsedRef.current = 0;
+    temporarySaveIntervalPendingRef.current = true;
     stoneCollectHintActivatedRef.current = false;
     stoneCollectHintDismissedRef.current = false;
     stoneCollectSecondHintPendingRef.current = false;
@@ -13209,6 +13477,7 @@ export default function Home() {
         journalAttention,
         shortcutBars,
         shortcutBarGroups,
+        achievements: [...unlockedAchievementsRef.current],
         removeBuildCosts,
         starterStoneCollectHint: {
           activated: stoneCollectHintActivatedRef.current,
@@ -13340,6 +13609,7 @@ export default function Home() {
       );
       setTemporarySaveFrequencyMinutes(frequency);
       setTemporarySaveFrequencyDraft(frequency);
+      temporarySaveIntervalPendingRef.current = true;
       setTemporarySaveFrequencyOpen(false);
       toast.success("Temporary save frequency updated", {
         description: describeTemporarySaveFrequency(frequency),
@@ -13355,6 +13625,11 @@ export default function Home() {
     const timer = window.setInterval(() => {
       if (!isRunningRef.current) return;
       const elapsed = Math.max(0, gameElapsedMsRef.current);
+      if (temporarySaveIntervalPendingRef.current) {
+        lastTemporarySaveElapsedRef.current = elapsed;
+        temporarySaveIntervalPendingRef.current = false;
+        return;
+      }
       const interval = temporarySaveFrequencyMinutes * 60 * 1000;
       if (elapsed - lastTemporarySaveElapsedRef.current < interval) return;
       try {
@@ -13383,6 +13658,12 @@ export default function Home() {
 
     try {
       const payload = slot.data;
+      const nextUnlockedAchievements = new Set(
+        (payload.achievements ?? []).filter(isAchievementId),
+      );
+      if (payload.starterTutorialOutro?.shown === true) {
+        nextUnlockedAchievements.add("handHolding");
+      }
       const migrateLegacyMapCoordinates = hasLegacyMapCoordinates(payload.mapFactories);
       const nextMapNodeProgress = normalizeMapNodeProgress(
         payload.mapNodeProgress,
@@ -13532,6 +13813,14 @@ export default function Home() {
             ...(payload.runtime.research?.progress ?? {}),
           },
         },
+        joints: Object.fromEntries(
+          Object.entries(payload.runtime.joints ?? {})
+            .filter(([id]) => validNodeIds.has(id))
+            .map(([id, joint]) => [id, {
+              bufferedType: joint.bufferedType ?? null,
+              orientation: joint.orientation === "vertical" ? "vertical" as const : "horizontal" as const,
+            }]),
+        ),
         processors: Object.fromEntries(
           Object.entries(payload.runtime.processors ?? {})
             .filter(([id]) => validNodeIds.has(id))
@@ -13821,6 +14110,7 @@ export default function Home() {
       );
 
       nodesRef.current = nextNodes;
+      hoveredNodeIdRef.current = null;
       undoHistoryRef.current = [];
       pendingPlacementUndoRef.current = null;
       setNodes(nextNodes);
@@ -13845,6 +14135,8 @@ export default function Home() {
       setShortcutBars(nextShortcutBars);
       setShortcutBarGroups(nextShortcutBarGroups);
       setShortcutBarSnapTarget(null);
+      unlockedAchievementsRef.current = nextUnlockedAchievements;
+      setUnlockedAchievements(nextUnlockedAchievements);
       setRemoveBuildCosts(payload.removeBuildCosts === true);
       setAlwaysDeleteConnections(
         nextPromptPreferences.skipConnectionDeleteConfirmation,
@@ -13904,6 +14196,7 @@ export default function Home() {
       controlGroupSequenceRef.current = payload.controlGroupSequence ?? 0;
       gameElapsedMsRef.current = loadedGameElapsedMs;
       lastTemporarySaveElapsedRef.current = loadedGameElapsedMs;
+      temporarySaveIntervalPendingRef.current = true;
       stoneCollectHintActivatedRef.current = loadedStoneCollectHintActivated;
       stoneCollectHintDismissedRef.current = loadedStoneCollectHintDismissed;
       stoneCollectSecondHintPendingRef.current = loadedStoneCollectSecondPending;
@@ -13994,6 +14287,7 @@ export default function Home() {
       setConfiguringAssemblerId(null);
       setBuildOpen(false);
       buildOpenRef.current = false;
+      setInventoryOpen(false);
       setResearchOpen(false);
       setHoveredResearchProject(null);
       setMapOpen(false);
@@ -14001,6 +14295,7 @@ export default function Home() {
       setOptionsOpen(false);
       setShortcutsOpen(false);
       setRecipesOpen(false);
+      setAchievementsOpen(false);
       setSaveOpen(false);
       setDevOpen(false);
       setLoadConfirmOpen(false);
@@ -14990,7 +15285,9 @@ export default function Home() {
     : null;
   const configuringRecipeKind = configuringRecipeNode?.kind === "refiner"
     ? "refiner"
-    : "assembler";
+    : configuringRecipeNode?.kind === "assembler"
+      ? "assembler"
+      : configuringRecipeMachineKind;
   const configuringRecipeTitle = configuringRecipeKind === "refiner" ? "Refiner" : "Assembler";
   const configuringRecipeOptions = configuringRecipeKind === "refiner"
     ? REFINER_RECIPE_OPTIONS.map((option) => ({
@@ -15432,7 +15729,7 @@ export default function Home() {
                 </p>
             </DialogContent>
           </Dialog>
-          <Dialog>
+          <Dialog open={inventoryOpen} onOpenChange={setInventoryOpen}>
             <DialogTrigger asChild>
               <Button
                 className="inventory-trigger"
@@ -15500,18 +15797,7 @@ export default function Home() {
           </Dialog>
           <Dialog
             open={buildOpen}
-            onOpenChange={(open) => {
-              buildOpenRef.current = open;
-              setBuildOpen(open);
-              if (open) setBuildAttention(false);
-              if (open && starterBuildHintStageRef.current === "menu") {
-                starterBuildHintStageRef.current = "extractor";
-                setStarterBuildHintTarget("extractor");
-              } else if (!open && starterBuildHintStageRef.current === "extractor") {
-                starterBuildHintStageRef.current = "menu";
-                setStarterBuildHintTarget("menu");
-              }
-            }}
+            onOpenChange={updateBuildMenuOpen}
           >
             <DialogTrigger asChild>
               <Button
@@ -16082,7 +16368,6 @@ export default function Home() {
                   type="button"
                   className="options-menu-item save-option"
                   onClick={() => {
-                    setOptionsOpen(false);
                     setSaveOpen(true);
                   }}
                 >
@@ -16097,7 +16382,6 @@ export default function Home() {
                   type="button"
                   className="options-menu-item shortcuts-option"
                   onClick={() => {
-                    setOptionsOpen(false);
                     setShortcutsOpen(true);
                   }}
                 >
@@ -16112,7 +16396,6 @@ export default function Home() {
                   type="button"
                   className="options-menu-item recipes-option"
                   onClick={() => {
-                    setOptionsOpen(false);
                     setRecipesOpen(true);
                   }}
                 >
@@ -16149,23 +16432,78 @@ export default function Home() {
                         type="button"
                         className={`options-menu-item shortcut-bar-option ${bar.visible ? "enabled" : "disabled"}`}
                         aria-pressed={bar.visible}
-                        aria-label={`${label}, ${bar.visible ? "visible" : "hidden"}`}
+                        aria-label={`${label}, ${bar.visible ? "visible" : "hidden"}. Toggle visibility.`}
                         key={barId}
                         onClick={() => toggleShortcutBarVisibility(barId)}
                       >
                         <span className="options-menu-icon"><Menu aria-hidden="true" /></span>
                         <span className="options-menu-copy">
                           <strong>{label}</strong>
-                          <small>{bar.visible ? "Shown in the field" : "Hidden from the field"}</small>
-                        </span>
-                        <span className="options-toggle-state">
-                          <i aria-hidden="true" />
-                          {bar.visible ? "Visible" : "Hidden"}
                         </span>
                       </button>
                     );
                   })}
                 </div>
+                <button
+                  type="button"
+                  className="options-menu-item achievements-option"
+                  onClick={() => {
+                    setAchievementFlavorIndex(
+                      achievementOpenCountRef.current % EMPTY_ACHIEVEMENT_FLAVOR_TEXTS.length,
+                    );
+                    achievementOpenCountRef.current += 1;
+                    setAchievementsOpen(true);
+                  }}
+                >
+                  <span className="options-menu-icon"><Trophy aria-hidden="true" /></span>
+                  <span className="options-menu-copy">
+                    <strong>Achievements</strong>
+                    <small>Oooh, shiny.</small>
+                  </span>
+                  <span className="options-menu-action">Open</span>
+                </button>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={achievementsOpen} onOpenChange={setAchievementsOpen}>
+            <DialogContent className="achievements-dialog topbar-modal">
+              <DialogHeader className="achievements-dialog-header topbar-modal-header">
+                <div className="achievements-title-mark"><Trophy aria-hidden="true" /></div>
+                <div>
+                  <DialogTitle>Achievements</DialogTitle>
+                  <DialogDescription>
+                    {unlockedAchievements.size === 0
+                      ? EMPTY_ACHIEVEMENT_FLAVOR_TEXTS[achievementFlavorIndex]
+                      : "Oooh, shiny."}
+                  </DialogDescription>
+                </div>
+              </DialogHeader>
+              <div
+                className={`achievements-list ${unlockedAchievements.size === 0 ? "empty" : ""}`}
+                aria-label={unlockedAchievements.size === 0 ? "No achievements available yet" : "Unlocked achievements"}
+              >
+                {unlockedAchievements.has("oops") ? (
+                  <article className="achievement-entry unlocked">
+                    <span className="achievement-entry-icon"><Trophy aria-hidden="true" /></span>
+                    <span className="achievement-entry-copy">
+                      <small>Achievement unlocked</small>
+                      <strong>Oops.</strong>
+                      <span>Create a Black Hole by rapidly clicking an empty part of the field.</span>
+                      <em>Did I do thaaaaat?</em>
+                    </span>
+                  </article>
+                ) : null}
+                {unlockedAchievements.has("handHolding") ? (
+                  <article className="achievement-entry unlocked">
+                    <span className="achievement-entry-icon"><BookOpenText aria-hidden="true" /></span>
+                    <span className="achievement-entry-copy">
+                      <small>Achievement unlocked</small>
+                      <strong>Hand Holding</strong>
+                      <span>See the final tutorial after completing every previous tutorial.</span>
+                      <em>You are either very deliberate, or very slow.  Or both?</em>
+                    </span>
+                  </article>
+                ) : null}
               </div>
             </DialogContent>
           </Dialog>
@@ -16180,8 +16518,48 @@ export default function Home() {
                   </DialogDescription>
                 </div>
               </DialogHeader>
+              <div className="shortcut-category-filters" role="group" aria-label="Filter commands by category">
+                {KEYBOARD_SHORTCUT_GROUPS.map((group) => {
+                  const className = group === "General"
+                    ? "general"
+                    : group === "Control groups"
+                      ? "control-groups"
+                      : "node";
+                  const Icon = group === "General"
+                    ? Compass
+                    : group === "Control groups"
+                      ? Split
+                      : Factory;
+                  const isActive = keyboardShortcutFilter === group;
+
+                  return (
+                    <Button
+                      className={`shortcut-category-filter ${className} ${isActive ? "active" : ""}`}
+                      size="sm"
+                      variant="outline"
+                      type="button"
+                      aria-pressed={isActive}
+                      key={group}
+                      onClick={() => {
+                        setKeyboardShortcutFilter((current) => current === group ? "all" : group);
+                        window.requestAnimationFrame(() => {
+                          if (shortcutsListRef.current) shortcutsListRef.current.scrollTop = 0;
+                        });
+                      }}
+                    >
+                      <Icon aria-hidden="true" />
+                      <span>{group}</span>
+                      <span className="shortcut-category-count">
+                        {KEYBOARD_SHORTCUTS.filter((shortcut) => shortcut.group === group).length}
+                      </span>
+                    </Button>
+                  );
+                })}
+              </div>
               <div className="shortcut-command-groups" ref={shortcutsListRef}>
-                {KEYBOARD_SHORTCUT_GROUPS.map((group) => (
+                {KEYBOARD_SHORTCUT_GROUPS.filter(
+                  (group) => keyboardShortcutFilter === "all" || group === keyboardShortcutFilter,
+                ).map((group) => (
                   <section className="shortcut-command-group" key={group}>
                     <h3>{group}</h3>
                     <div className="shortcut-command-list">
@@ -16535,7 +16913,7 @@ export default function Home() {
                   variant="outline"
                   onClick={() => setStarterTutorialOutroOpen(false)}
                 >
-                  Thanks, friend
+                  Cheers!
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -16980,10 +17358,8 @@ export default function Home() {
                 ? `Destroy ${pendingDeletionDetails.title}?`
                 : `Destroy ${pendingDeletionDetails?.title ?? "selected nodes"}?`}
             </AlertDialogTitle>
-            <AlertDialogDescription>
-              {pendingDeletionIsHighlightedGroup
-                ? "Every highlighted node and its attached cables will be removed."
-                : `This removes the ${pendingDeletionDetails?.count === 1 ? "node" : "selected nodes"} and attached cables.`}
+            <AlertDialogDescription className="node-destruction-flavor">
+              Oh NODE, not me! Choose the other one over there!
             </AlertDialogDescription>
           </AlertDialogHeader>
           <label className="inventory-overflow-suppression node-destruction-suppression">
@@ -17340,6 +17716,7 @@ export default function Home() {
             <AlertDialogCancel
               onClick={() => {
                 if (pendingAssemblerRecipeChange) {
+                  setConfiguringRecipeMachineKind(pendingAssemblerRecipeChange.kind);
                   setConfiguringAssemblerId(pendingAssemblerRecipeChange.nodeId);
                 }
               }}
@@ -18306,7 +18683,7 @@ export default function Home() {
               <section
                 key={node.id}
                 ref={(element) => { nodeRefs.current[node.id] = element; }}
-                className={`node-card ${isFiniteResource ? "resource-node" : ""} ${isJoint || isPowerSplitter ? "joint-node" : ""} ${isPowerSplitter ? "power-splitter-node" : ""} ${isSplitter || isMerger || isFilter || isRoad ? "compact-routing-node routing-node" : ""} ${isSplitter ? "splitter-node" : ""} ${isMerger ? "merger-node" : ""} ${isFilter ? "filter-node" : ""} ${isRoad ? "road-node" : ""} ${isStorage ? "storage-node" : ""} ${isWoodenChest ? "wooden-chest-node" : ""} ${isConfigurableProcessor ? "assembler-node" : ""} ${nodeControlGroup ? "control-group-member" : ""} ${isActiveControlGroup ? "control-group-active" : ""} ${nodeControlGroup && individualControlNodeId === node.id && selectedNodes.includes(node.id) ? "individual-control" : ""} ${selectedNodes.includes(node.id) ? "selected" : ""} ${draggingNode && selectedNodes.includes(node.id) ? "dragging" : ""} ${(draggingNode === node.id || placingNodeId === node.id) && insertionTarget ? "insert-ready" : ""} ${placingNodeId === node.id ? "placing" : ""} ${placingNodeId === node.id && placementBlocked ? "placement-blocked" : ""} ${draggingNode === node.id && dragCollisionBlocked ? "collision-blocked" : ""} ${isBuilding ? "building" : ""} ${outputPaused ? "output-paused" : ""}`}
+                className={`node-card ${isFiniteResource ? "resource-node" : ""} ${isJoint || isPowerSplitter ? "joint-node" : ""} ${isJoint && jointState?.orientation === "vertical" ? "joint-vertical" : ""} ${isPowerSplitter ? "power-splitter-node" : ""} ${isSplitter || isMerger || isFilter || isRoad ? "compact-routing-node routing-node" : ""} ${isSplitter ? "splitter-node" : ""} ${isMerger ? "merger-node" : ""} ${isFilter ? "filter-node" : ""} ${isRoad ? "road-node" : ""} ${isStorage ? "storage-node" : ""} ${isWoodenChest ? "wooden-chest-node" : ""} ${isConfigurableProcessor ? "assembler-node" : ""} ${nodeControlGroup ? "control-group-member" : ""} ${isActiveControlGroup ? "control-group-active" : ""} ${nodeControlGroup && individualControlNodeId === node.id && selectedNodes.includes(node.id) ? "individual-control" : ""} ${selectedNodes.includes(node.id) ? "selected" : ""} ${draggingNode && selectedNodes.includes(node.id) ? "dragging" : ""} ${(draggingNode === node.id || placingNodeId === node.id) && insertionTarget ? "insert-ready" : ""} ${placingNodeId === node.id ? "placing" : ""} ${placingNodeId === node.id && placementBlocked ? "placement-blocked" : ""} ${draggingNode === node.id && dragCollisionBlocked ? "collision-blocked" : ""} ${isBuilding ? "building" : ""} ${outputPaused ? "output-paused" : ""}`}
                 style={{
                   transform: `translate3d(${positions[node.id]?.x ?? 0}px, ${positions[node.id]?.y ?? 0}px, 0)`,
                   "--control-group-color": nodeControlGroup?.color ?? "transparent",
@@ -18327,6 +18704,10 @@ export default function Home() {
                       : node.color,
                 } as React.CSSProperties}
                 aria-label={isExtractor ? `${node.eyebrow} ${node.title} node` : `${node.title} node`}
+                onPointerEnter={() => { hoveredNodeIdRef.current = node.id; }}
+                onPointerLeave={() => {
+                  if (hoveredNodeIdRef.current === node.id) hoveredNodeIdRef.current = null;
+                }}
                 onPointerDown={(event) => {
                   if (event.button === 2 && nodeControlGroup && !isPrioritySelection) {
                     if (!selectedNodesRef.current.includes(node.id)) {
@@ -18429,6 +18810,7 @@ export default function Home() {
                       }}
                       onClick={(event) => {
                         event.stopPropagation();
+                        setConfiguringRecipeMachineKind(isRefiner ? "refiner" : "assembler");
                         setConfiguringAssemblerId(node.id);
                       }}
                     >

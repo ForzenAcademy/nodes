@@ -445,25 +445,16 @@ button:focus-visible { outline: 2px solid #e3c773; outline-offset: 3px; }
   height: 38px;
   gap: 7px;
   overflow: hidden;
-  padding-left: 7px;
+  padding-inline: 9px;
   border-color: #9c755e8a;
   color: #e4c3a2;
   background: linear-gradient(180deg, #443329, #2d2724);
-  box-shadow: inset 3px 0 #bd8c65b8, inset 0 1px #ffffff0c;
+  box-shadow: inset 0 1px #ffffff0c;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-}
-
-.journal-trigger::after {
-  position: absolute;
-  inset: 5px auto 5px 4px;
-  width: 1px;
-  content: "";
-  background: #e1b18552;
-  box-shadow: 2px 0 #140f0d66;
 }
 
 .journal-trigger:hover {
@@ -654,6 +645,66 @@ button:focus-visible { outline: 2px solid #e3c773; outline-offset: 3px; }
 
 [data-sonner-toast].research-completion-toast [data-description] {
   color: #a9d8f5 !important;
+}
+
+[data-sonner-toast].achievement-unlock-toast {
+  --normal-bg: #3b2e0c;
+  --normal-border: #f2c94c;
+  --normal-text: #fff4bd;
+  isolation: isolate;
+  overflow: hidden;
+  border-color: #f2c94c !important;
+  color: #fff4bd !important;
+  background:
+    radial-gradient(circle at 14% 20%, #fff2a852, transparent 27%),
+    linear-gradient(145deg, #6c5214, #2e2309 72%) !important;
+  box-shadow:
+    0 12px 34px #0d0900c7,
+    0 0 0 1px #ffe6944f,
+    0 0 28px #f5c8428a,
+    inset 0 1px #fff5bd61 !important;
+  animation: achievement-toast-glow 900ms ease-in-out infinite alternate;
+}
+
+[data-sonner-toast].achievement-unlock-toast::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  background: linear-gradient(112deg, transparent 25%, #fff5b300 38%, #fff5b36b 49%, #fff5b300 60%, transparent 74%);
+  transform: translateX(-145%);
+  animation: achievement-toast-shimmer 1.65s ease-in-out infinite;
+}
+
+[data-sonner-toast].achievement-unlock-toast > * {
+  position: relative;
+  z-index: 1;
+}
+
+[data-sonner-toast].achievement-unlock-toast [data-icon] {
+  color: #ffe16f !important;
+  filter: drop-shadow(0 0 7px #ffd84e);
+}
+
+[data-sonner-toast].achievement-unlock-toast [data-description] {
+  color: #e8cf7d !important;
+  font-style: italic;
+}
+
+@keyframes achievement-toast-glow {
+  from { filter: brightness(0.96); }
+  to { filter: brightness(1.16); }
+}
+
+@keyframes achievement-toast-shimmer {
+  0%, 18% { transform: translateX(-145%); }
+  72%, 100% { transform: translateX(145%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sonner-toast].achievement-unlock-toast,
+  [data-sonner-toast].achievement-unlock-toast::before { animation: none; }
 }
 
 .research-summary {
@@ -1158,7 +1209,12 @@ button:focus-visible { outline: 2px solid #e3c773; outline-offset: 3px; }
 .options-dialog-header [data-slot="dialog-title"] { color: #e1edf4; }
 .options-dialog-header [data-slot="dialog-description"] { color: #94a6b1; }
 
-.options-menu { display: grid; gap: 10px; }
+.options-menu {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 10px;
+}
 .options-menu-item {
   display: grid;
   min-height: 78px;
@@ -1229,10 +1285,8 @@ button:focus-visible { outline: 2px solid #e3c773; outline-offset: 3px; }
 .wire-animation-option.disabled .options-toggle-state { border-color: #745b62; color: #d0a8b1; background: #2b1d21; }
 .shortcut-bar-option.enabled { border-color: #6f7958; }
 .shortcut-bar-option.enabled .options-menu-icon { border-color: #8d955f; color: #e2d98b; background: #2d2c1d; }
-.shortcut-bar-option.enabled .options-toggle-state { border-color: #8c8d54; color: #ede08a; background: #302e1c; }
 .shortcut-bar-option.disabled { border-color: #565d64; }
 .shortcut-bar-option.disabled .options-menu-icon { border-color: #5d656c; color: #929ba3; background: #20252a; }
-.shortcut-bar-option.disabled .options-toggle-state { border-color: #626970; color: #a4abb1; background: #202429; }
 .shortcut-bar-options-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1241,10 +1295,10 @@ button:focus-visible { outline: 2px solid #e3c773; outline-offset: 3px; }
 .shortcut-bar-options-row .shortcut-bar-option {
   display: flex;
   min-width: 0;
-  min-height: 120px;
+  min-height: 88px;
   flex-direction: column;
   justify-content: center;
-  gap: 8px;
+  gap: 7px;
   padding: 10px 8px;
   text-align: center;
 }
@@ -1258,22 +1312,185 @@ button:focus-visible { outline: 2px solid #e3c773; outline-offset: 3px; }
   font-size: 0.69rem;
   line-height: 1.25;
 }
-.shortcut-bar-options-row .options-menu-copy small { display: none; }
-.shortcut-bar-options-row .options-toggle-state {
-  width: 100%;
-  min-width: 0;
-  padding-inline: 5px;
-}
 .shortcuts-option { border-color: #596b7b; }
 .shortcuts-option .options-menu-icon { border-color: #708aa0; color: #c6e3f4; background: #1a2730; }
 .recipes-option { border-color: #6c6250; }
 .recipes-option .options-menu-icon { border-color: #9a835e; color: #f0d7a5; background: #2b251b; }
+.achievements-option { margin-top: auto; border-color: #746341; }
+.achievements-option .options-menu-icon { border-color: #a3894f; color: #f0d587; background: #2c2619; }
+.achievements-option .options-menu-copy small { font-style: italic; }
+
+.achievements-dialog {
+  isolation: isolate;
+  overflow: hidden;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-color: #746748;
+  background:
+    radial-gradient(circle at 88% 0%, #f7d66d2b, transparent 35%),
+    radial-gradient(circle at 8% 100%, #9e62e825, transparent 38%),
+    linear-gradient(155deg, #3b3323, #202022 74%);
+  animation: achievements-frame-pulse 2.8s ease-in-out infinite;
+}
+
+.achievements-dialog::before,
+.achievements-dialog::after {
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  content: "";
+}
+
+.achievements-dialog::before {
+  inset: -45%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg 42deg,
+    #f7cf6260 66deg,
+    transparent 92deg 178deg,
+    #9b70e64d 210deg,
+    transparent 240deg 360deg
+  );
+  opacity: 0.34;
+  animation: achievements-aurora-spin 12s linear infinite;
+}
+
+.achievements-dialog::after {
+  inset: 0;
+  background: linear-gradient(112deg, transparent 28%, #fff0aa00 39%, #fff0aa36 48%, #fff0aa00 57%, transparent 70%);
+  transform: translateX(-135%);
+  animation: achievements-shimmer 3.8s ease-in-out infinite;
+}
+
+.achievements-dialog > :not([data-slot="dialog-close"]) { position: relative; z-index: 1; }
+.achievements-dialog > [data-slot="dialog-close"] {
+  position: absolute;
+  z-index: 3;
+  top: 16px;
+  right: 16px;
+}
+
+.achievements-dialog-header {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  align-items: center;
+  gap: 13px;
+}
+
+.achievements-title-mark {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border: 1px solid #c2a45d70;
+  border-radius: 10px;
+  color: #f2d98d;
+  background: linear-gradient(145deg, #574a2e, #2e291f);
+  box-shadow: inset 0 1px #ffffff16, 0 6px 18px #0006;
+  animation: achievements-trophy-float 2.2s ease-in-out infinite;
+}
+
+.achievements-title-mark svg { width: 22px; }
+.achievements-dialog-header [data-slot="dialog-title"] { color: #f3e5bd; }
+.achievements-dialog-header [data-slot="dialog-description"] { color: #ad9f7e; font-style: italic; }
+.achievements-list {
+  display: grid;
+  min-height: 0;
+  align-content: start;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.achievements-list.empty {
+  min-height: 0;
+  border: 1px dashed #625a46;
+  border-radius: 11px;
+  background:
+    radial-gradient(circle at 50% 45%, #f0cb5a18, transparent 18%),
+    radial-gradient(circle at 50% 45%, transparent 0 27%, #a173d011 28%, transparent 29%),
+    #1c1d1e66;
+  animation: achievements-empty-glow 3.2s ease-in-out infinite;
+}
+
+.achievement-entry {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  min-height: 92px;
+  padding: 14px;
+  border: 1px solid #d3af4f;
+  border-radius: 12px;
+  color: #f6e3a5;
+  background:
+    radial-gradient(circle at 92% 0%, #fff2a52e, transparent 36%),
+    linear-gradient(110deg, #4a3d20, #29251e 70%);
+  box-shadow: inset 0 1px #ffffff1c, 0 0 24px #edc34b25;
+  animation: achievement-entry-arrive 520ms cubic-bezier(.2,.85,.3,1.15) both;
+}
+
+.achievement-entry-icon {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border: 1px solid #e1bd59;
+  border-radius: 50%;
+  color: #ffe38a;
+  background: #342a16;
+  box-shadow: inset 0 1px #ffffff1d, 0 0 18px #f0c64b48;
+}
+
+.achievement-entry-icon svg { width: 25px; }
+.achievement-entry-copy { display: grid; min-width: 0; gap: 4px; }
+.achievement-entry-copy small {
+  color: #c7a954;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.55rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.achievement-entry-copy strong { color: #fff0b4; font-size: 0.92rem; }
+.achievement-entry-copy > span { color: #bcb092; font-size: 0.65rem; line-height: 1.45; }
+.achievement-entry-copy em {
+  color: #d1bd87;
+  font-size: 0.62rem;
+  line-height: 1.4;
+}
+
+@keyframes achievements-frame-pulse {
+  0%, 100% { border-color: #746748; box-shadow: 0 24px 80px #000d, inset 0 1px #ffffff12, 0 0 0 #f1c85a00; }
+  50% { border-color: #d4b85f; box-shadow: 0 24px 80px #000d, inset 0 1px #ffffff20, 0 0 34px #f1c85a38; }
+}
+
+@keyframes achievements-aurora-spin { to { transform: rotate(360deg); } }
+
+@keyframes achievements-shimmer {
+  0%, 18% { transform: translateX(-135%); }
+  68%, 100% { transform: translateX(135%); }
+}
+
+@keyframes achievements-trophy-float {
+  0%, 100% { transform: translateY(0) rotate(-2deg); box-shadow: inset 0 1px #ffffff16, 0 6px 18px #0006, 0 0 10px #e7c75b30; }
+  50% { transform: translateY(-4px) rotate(2deg); box-shadow: inset 0 1px #ffffff24, 0 10px 23px #0007, 0 0 24px #f4d76a73; }
+}
+
+@keyframes achievements-empty-glow {
+  0%, 100% { border-color: #625a46; background-size: 100% 100%, 100% 100%, auto; }
+  50% { border-color: #a88d4e; background-size: 125% 125%, 112% 112%, auto; }
+}
+
+@keyframes achievement-entry-arrive {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 
 .shortcuts-dialog {
   width: min(700px, calc(100vw - 40px));
   max-width: 700px;
+  height: min(720px, calc(100svh - 72px));
   max-height: calc(100svh - 72px);
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   padding-block: 28px;
   border-color: #5b7081;
   background:
@@ -1303,6 +1520,59 @@ button:focus-visible { outline: 2px solid #e3c773; outline-offset: 3px; }
 .shortcuts-title-mark svg { width: 22px; }
 .shortcuts-dialog-header [data-slot="dialog-title"] { color: #e3f0f7; }
 .shortcuts-dialog-header [data-slot="dialog-description"] { color: #94a9b6; font-style: italic; }
+
+.shortcut-category-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.shortcut-category-filter {
+  justify-content: flex-start;
+  min-height: 40px;
+  border-color: #484d53;
+  color: #aeb4bb;
+  background: #222529;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: border-color 140ms ease, color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+
+.shortcut-category-filter svg { width: 15px; }
+.shortcut-category-filter:hover { border-color: #686f77; color: #e2e5e8; background: #292d31; }
+.shortcut-category-filter.general.active {
+  border-color: #d5b666a8;
+  color: #f1db8b;
+  background: #393326;
+  box-shadow: inset 0 0 0 1px #e1c46c24;
+}
+.shortcut-category-filter.control-groups.active {
+  border-color: #a793d5a8;
+  color: #d4c2f4;
+  background: #302b3d;
+  box-shadow: inset 0 0 0 1px #b9a4e524;
+}
+.shortcut-category-filter.node.active {
+  border-color: #8fb485a8;
+  color: #b9dfa9;
+  background: #283629;
+  box-shadow: inset 0 0 0 1px #9fd38d24;
+}
+
+.shortcut-category-count {
+  min-width: 21px;
+  margin-left: auto;
+  padding: 2px 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: #17191c99;
+  line-height: 1.1;
+  text-align: center;
+  opacity: 0.76;
+}
 
 .shortcut-command-groups {
   display: grid;
@@ -2672,7 +2942,8 @@ button:focus-visible { outline: 2px solid #e3c773; outline-offset: 3px; }
 .connection-delete-dialog {
   --connection-color: #d9b968;
 }
-.connection-delete-flavor {
+.connection-delete-flavor,
+.node-destruction-flavor {
   color: #9299a2;
   font-style: italic;
   line-height: 1.45;
@@ -4858,7 +5129,10 @@ button:focus-visible { outline: 2px solid #e3c773; outline-offset: 3px; }
   border-radius: 6px;
 }
 
-.node-card.joint-node .node-icon svg { width: 14px; }
+.node-card.joint-node .node-icon svg {
+  width: 14px;
+  transition: transform 160ms ease;
+}
 .node-card.joint-node .node-title { display: none; }
 .node-card.joint-node .port-list {
   position: absolute;
@@ -4872,6 +5146,27 @@ button:focus-visible { outline: 2px solid #e3c773; outline-offset: 3px; }
 .node-card.joint-node .port-slot { pointer-events: none; }
 .node-card.joint-node .port-socket { width: 14px; height: 14px; pointer-events: auto; }
 .node-card.joint-node .port-slot > span { display: none; }
+.node-card.joint-node.joint-vertical .port-row {
+  position: relative;
+  display: block;
+}
+.node-card.joint-node.joint-vertical .port-slot {
+  position: absolute;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  justify-content: center;
+}
+.node-card.joint-node.joint-vertical .input-slot {
+  top: 0;
+  transform: translate(-50%, -50%);
+}
+.node-card.joint-node.joint-vertical .output-slot {
+  bottom: 0;
+  transform: translate(-50%, 50%);
+}
+.node-card.joint-node.joint-vertical .port-socket { margin: 0; }
+.node-card.joint-node.joint-vertical .node-icon svg { transform: rotate(90deg); }
 .node-card.joint-node:not(.building) .node-body { display: none; }
 .node-card.joint-node.building .node-body {
   position: absolute;
@@ -6116,7 +6411,7 @@ button:focus-visible { outline: 2px solid #e3c773; outline-offset: 3px; }
   .map-legend small { width: 100%; margin-left: 0; }
   .journal-dialog { width: min(100vw - 20px, 620px); max-height: calc(100svh - 64px); padding-block: 24px; }
   .options-dialog { width: min(100vw - 20px, 560px); max-height: calc(100svh - 64px); padding-block: 24px; }
-  .shortcuts-dialog { width: min(100vw - 20px, 660px); max-height: calc(100svh - 64px); padding-block: 24px; }
+  .shortcuts-dialog { width: min(100vw - 20px, 660px); height: min(720px, calc(100svh - 64px)); max-height: calc(100svh - 64px); padding-block: 24px; }
   .recipes-dialog { width: min(100vw - 20px, 760px); height: min(720px, calc(100svh - 64px)); max-height: calc(100svh - 64px); padding-block: 24px; }
   .save-dialog { width: min(100vw - 20px, 620px); max-height: calc(100svh - 64px); padding-block: 24px; }
   .dev-dialog { width: min(100vw - 20px, 620px); max-height: calc(100svh - 64px); padding-block: 24px; }
@@ -6136,11 +6431,12 @@ button:focus-visible { outline: 2px solid #e3c773; outline-offset: 3px; }
   .options-menu-action,
   .options-toggle-state { grid-column: 2; justify-self: start; }
   .shortcut-command { grid-template-columns: 1fr; gap: 10px; }
+  .shortcut-category-filters { grid-template-columns: 1fr; gap: 6px; }
+  .shortcut-category-filter { min-height: 35px; }
   .shortcut-key-combo { justify-content: flex-start; flex-wrap: wrap; }
   .shortcut-bar-options-row { gap: 6px; }
-  .shortcut-bar-options-row .shortcut-bar-option { min-height: 112px; padding-inline: 5px; }
+  .shortcut-bar-options-row .shortcut-bar-option { min-height: 84px; padding-inline: 5px; }
   .shortcut-bar-options-row .options-menu-copy strong { font-size: 0.62rem; }
-  .shortcut-bar-options-row .options-toggle-state { grid-column: auto; font-size: 0.46rem; letter-spacing: 0.04em; }
   .recipe-guide-card { grid-template-columns: 38px minmax(0, 1fr); gap: 9px; padding-inline: 9px; }
   .recipe-guide-icon { width: 36px; height: 36px; }
   .recipe-guide-title { align-items: flex-start; flex-direction: column; gap: 2px; }
