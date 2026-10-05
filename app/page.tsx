@@ -134,6 +134,7 @@ enum ResourceType {
   METAL = "METAL",
   IRON = "IRON",
   COPPER = "COPPER",
+  MYTHRIL = "MYTHRIL",
   STONE = "STONE",
   BRICK = "BRICK",
   WOOD = "WOOD",
@@ -141,12 +142,15 @@ enum ResourceType {
   PLATE = "PLATE",
   IRON_PLATE = "IRON_PLATE",
   COPPER_PLATE = "COPPER_PLATE",
+  MYTHRIL_PLATE = "MYTHRIL_PLATE",
   GEAR = "GEAR",
   IRON_GEAR = "IRON_GEAR",
   COPPER_GEAR = "COPPER_GEAR",
+  MYTHRIL_GEAR = "MYTHRIL_GEAR",
   WIRE = "WIRE",
   IRON_WIRE = "IRON_WIRE",
   COPPER_WIRE = "COPPER_WIRE",
+  MYTHRIL_WIRE = "MYTHRIL_WIRE",
   MOTOR = "MOTOR",
   CIRCUIT_A = "CIRCUIT_A",
   CORE = "CORE",
@@ -180,16 +184,18 @@ type AssemblerRecipeId = "motor" | "circuitA" | "basicCore" | "automataCore";
 type RefinerRecipeId = "gear" | "wire" | "brick";
 type ExtractorKind = "extractor";
 type PurchasableKind = ExtractorKind | "generator" | "powerSplitter" | "researchFoundry" | "treePlanter" | "miningDrill" | "splitter" | "merger" | "joint" | "road" | "inventorySource" | "filter" | "storage" | "woodenChest" | ProcessorKind;
-type NodeKind = "ironOre" | "copperOre" | "stone" | "forest" | PurchasableKind;
+type NodeKind = "ironOre" | "copperOre" | "mythrilOre" | "stone" | "forest" | PurchasableKind;
 type BuildCategory = "all" | "production" | "logistics" | "storage";
+type JournalCategory = BuildCategory | "achievements";
 type PortDirection = "input" | "output";
 type JointOrientation = "horizontal" | "vertical";
 type UnlockTimes = Partial<Record<PurchasableKind, number>>;
-type ResearchProjectId = "logistics" | "kiln" | "charcoalGenerator" | "furnace" | "refiner" | "assembler" | "researchCenter" | "road" | "areaExpansion1" | "extractor2" | "extractor3" | "treePlanter" | "miningDrill" | "exploration";
+type ResearchProjectId = "logistics" | "kiln" | "charcoalGenerator" | "furnace" | "refiner" | "assembler" | "researchCenter" | "road" | "areaExpansion1" | "extractor2" | "extractor3" | "treePlanter" | "miningDrill" | "exploration" | "mapNode" | "automataCore";
 type AchievementId = "oops" | "handHolding";
-type MiningDrillTarget = ResourceType.IRON | ResourceType.COPPER | ResourceType.STONE;
+type MiningDrillTarget = ResourceType.IRON | ResourceType.COPPER | ResourceType.MYTHRIL | ResourceType.STONE;
 type CoreType = ResourceType.BASIC_CORE | ResourceType.AUTOMATA_CORE;
 type MapEdge = "north" | "east" | "south" | "west";
+type RoadMode = "export" | "import";
 
 type ControlGroup = {
   id: string;
@@ -303,10 +309,10 @@ type ExtractorState = {
 };
 
 type Runtime = {
-  ironOre: { remaining: number };
-  copperOre: { remaining: number };
-  stone: { remaining: number };
-  forest: { remaining: number; regenerationElapsed: number };
+  ironOre: { remaining: number; capacity: number };
+  copperOre: { remaining: number; capacity: number };
+  stone: { remaining: number; capacity: number };
+  forest: { remaining: number; capacity: number; regenerationElapsed: number };
   extractors: Record<NodeId, ExtractorState>;
   processors: Record<NodeId, {
     progress: number;
@@ -352,11 +358,14 @@ type Runtime = {
     researchCenterUnlocked: boolean;
     roadUnlocked: boolean;
     areaExpansion1Unlocked: boolean;
+    areaExpansionLevel: number;
     extractor2Unlocked: boolean;
     extractor3Unlocked: boolean;
     treePlanterUnlocked: boolean;
     miningDrillUnlocked: boolean;
     explorationUnlocked: boolean;
+    automataCoreUnlocked: boolean;
+    mapNodeResearchCompletions: number;
   };
   splitters: Record<NodeId, {
     nextOutput: "a" | "b";
@@ -371,6 +380,7 @@ type Runtime = {
     pairedSector: string | null;
     pairedRoadId: NodeId | null;
     edge: MapEdge | null;
+    mode: RoadMode;
   }>;
   inventorySources: Record<NodeId, {
     progress: number;
@@ -405,16 +415,20 @@ type Runtime = {
 type InventoryItemType =
   | ResourceType.IRON
   | ResourceType.COPPER
+  | ResourceType.MYTHRIL
   | ResourceType.STONE
   | ResourceType.BRICK
   | ResourceType.WOOD
   | ResourceType.CHARCOAL
   | ResourceType.IRON_PLATE
   | ResourceType.COPPER_PLATE
+  | ResourceType.MYTHRIL_PLATE
   | ResourceType.IRON_GEAR
   | ResourceType.COPPER_GEAR
+  | ResourceType.MYTHRIL_GEAR
   | ResourceType.IRON_WIRE
   | ResourceType.COPPER_WIRE
+  | ResourceType.MYTHRIL_WIRE
   | ResourceType.MOTOR
   | ResourceType.CIRCUIT_A
   | ResourceType.BASIC_CORE
@@ -643,6 +657,7 @@ const BLACK_HOLE_INPUT_PORT: Port = {
 };
 const LAKE_SHAPE_POINTS = 18;
 const LAKE_PRODUCTION_DURATION = 1000;
+const LAKE_CONNECTOR_COLOR = "#5b6cff";
 type LakeOutputDirection = "north" | "east" | "south" | "west";
 const LAKE_WATER_OUTPUT_PORTS: Array<Port & { side: LakeOutputDirection }> = [
   { id: "lake-water-out-north", label: "Water", type: ResourceType.WATER, direction: "output", side: "north" },
@@ -785,6 +800,7 @@ const normalizeLakes = (value: unknown): Record<NodeId, LakeObstacle> => {
 };
 
 const IRON_RESOURCE_COLOR = "#8296a6";
+const MYTHRIL_RESOURCE_COLOR = "#55c97a";
 
 const RESOURCE_COLORS: Record<ResourceType, string> = {
   [ResourceType.RESOURCE]: "#8ea0a6",
@@ -795,24 +811,28 @@ const RESOURCE_COLORS: Record<ResourceType, string> = {
   [ResourceType.METAL]: "#a89a91",
   [ResourceType.IRON]: IRON_RESOURCE_COLOR,
   [ResourceType.COPPER]: "#d98a62",
+  [ResourceType.MYTHRIL]: MYTHRIL_RESOURCE_COLOR,
   [ResourceType.STONE]: "#a6aaa7",
-  [ResourceType.BRICK]: "#b86f50",
+  [ResourceType.BRICK]: "#666b70",
   [ResourceType.WOOD]: "#d29a5a",
   [ResourceType.CHARCOAL]: "#6f7782",
   [ResourceType.PLATE]: "#b5a69d",
   [ResourceType.IRON_PLATE]: IRON_RESOURCE_COLOR,
   [ResourceType.COPPER_PLATE]: "#db8f69",
+  [ResourceType.MYTHRIL_PLATE]: "#62d287",
   [ResourceType.GEAR]: "#91b6bb",
   [ResourceType.IRON_GEAR]: IRON_RESOURCE_COLOR,
   [ResourceType.COPPER_GEAR]: "#d69a72",
+  [ResourceType.MYTHRIL_GEAR]: "#58bd78",
   [ResourceType.WIRE]: "#b7a79a",
   [ResourceType.IRON_WIRE]: IRON_RESOURCE_COLOR,
   [ResourceType.COPPER_WIRE]: "#e79a70",
+  [ResourceType.MYTHRIL_WIRE]: "#73dd96",
   [ResourceType.MOTOR]: "#d9a54a",
   [ResourceType.CIRCUIT_A]: "#6fcf9b",
   [ResourceType.CORE]: "#8baadf",
-  [ResourceType.BASIC_CORE]: "#70b9d6",
-  [ResourceType.AUTOMATA_CORE]: "#c28cff",
+  [ResourceType.BASIC_CORE]: "#e45757",
+  [ResourceType.AUTOMATA_CORE]: "#ff6b00",
   [ResourceType.FOREST_GROWTH]: "#82d982",
   [ResourceType.POWER]: "#f2d45c",
   [ResourceType.WATER]: "#55bde8",
@@ -838,14 +858,18 @@ const INVENTORY_ITEMS: Array<{ type: InventoryItemType; label: string }> = [
   { type: ResourceType.WOOD, label: "Wood" },
   { type: ResourceType.COPPER, label: "Copper" },
   { type: ResourceType.IRON, label: "Iron" },
+  { type: ResourceType.MYTHRIL, label: "Mythril" },
   { type: ResourceType.BRICK, label: "Brick" },
   { type: ResourceType.CHARCOAL, label: "Charcoal" },
   { type: ResourceType.IRON_PLATE, label: "Iron Plate" },
   { type: ResourceType.COPPER_PLATE, label: "Copper Plate" },
+  { type: ResourceType.MYTHRIL_PLATE, label: "Mythril Plate" },
   { type: ResourceType.IRON_GEAR, label: "Iron Gear" },
   { type: ResourceType.COPPER_GEAR, label: "Copper Gear" },
+  { type: ResourceType.MYTHRIL_GEAR, label: "Mythril Gear" },
   { type: ResourceType.IRON_WIRE, label: "Iron Wire" },
   { type: ResourceType.COPPER_WIRE, label: "Copper Wire" },
+  { type: ResourceType.MYTHRIL_WIRE, label: "Mythril Wire" },
   { type: ResourceType.MOTOR, label: "Motor" },
   { type: ResourceType.CIRCUIT_A, label: "Circuit A" },
   { type: ResourceType.BASIC_CORE, label: "Basic Core" },
@@ -861,8 +885,9 @@ const STARTING_INVENTORY_ITEM_TYPES = new Set<InventoryItemType>([
 ]);
 
 const PRODUCIBLE_INVENTORY_TYPES_BY_KIND: Partial<Record<NodeKind, readonly InventoryItemType[]>> = {
+  mythrilOre: [ResourceType.MYTHRIL],
   kiln: [ResourceType.CHARCOAL],
-  furnace: [ResourceType.IRON_PLATE, ResourceType.COPPER_PLATE],
+  furnace: [ResourceType.IRON_PLATE, ResourceType.COPPER_PLATE, ResourceType.MYTHRIL_PLATE],
   assembler: [
     ResourceType.MOTOR,
     ResourceType.CIRCUIT_A,
@@ -872,8 +897,10 @@ const PRODUCIBLE_INVENTORY_TYPES_BY_KIND: Partial<Record<NodeKind, readonly Inve
   refiner: [
     ResourceType.IRON_GEAR,
     ResourceType.COPPER_GEAR,
+    ResourceType.MYTHRIL_GEAR,
     ResourceType.IRON_WIRE,
     ResourceType.COPPER_WIRE,
+    ResourceType.MYTHRIL_WIRE,
     ResourceType.BRICK,
   ],
   automataCoreAssembler: [ResourceType.AUTOMATA_CORE],
@@ -956,25 +983,46 @@ const INITIAL_NODES: NodeSpec[] = [
   },
 ];
 
+const MYTHRIL_RESOURCE_NODE: NodeSpec = {
+  id: "mythrilOre",
+  kind: "mythrilOre",
+  title: "Mythril",
+  eyebrow: "ORE DEPOSIT 05",
+  color: MYTHRIL_RESOURCE_COLOR,
+  icon: Gem,
+  inputs: [],
+  outputs: [{
+    id: "mythril-ore-out",
+    label: "Mythril",
+    type: ResourceType.MYTHRIL,
+    direction: "output",
+  }],
+};
+
 const HOME_OFFSET = { x: 0, y: 0 };
 const WORLD_SIZE = { width: 3600, height: 2400 };
-const AREA_EXPANSION_1_MULTIPLIER = 1.25;
+const AREA_EXPANSION_SIZE_INCREMENT = 0.25;
+const MAX_AREA_EXPANSION_LEVEL = 3;
 const MAP_NODE_MAX_SIZE_MULTIPLIER = 2;
-const BASIC_CORE_RESEARCH_COST = 5;
+const BASIC_CORE_RESEARCH_COST = 10;
+const EXPLORATION_RESEARCH_COST = 5;
 const CONNECTION_AUTO_SCROLL_EDGE = 72;
 const CONNECTION_AUTO_SCROLL_MAX_SPEED = 880;
 const PORT_SNAP_PADDING = 14;
 const NODE_CLEARANCE = 12;
 const JOINT_NODE_SIZE = 54;
 const COMPACT_ROUTING_NODE_SIZE = JOINT_NODE_SIZE * 1.25;
+const ROAD_NODE_SIZE = COMPACT_ROUTING_NODE_SIZE * 2;
 const WOODEN_CHEST_NODE_SIZE = { width: 129, height: 101 };
 const RESOURCE_NODE_SIZE = { width: 310, height: 242 };
+const RESEARCH_CENTER_NODE_SCALE = 1.2;
 const STARTING_RESOURCE_X = 96 + RESOURCE_NODE_SIZE.width / 2;
 const STARTING_RESOURCE_STEP = (RESOURCE_NODE_SIZE.height + NODE_CLEARANCE) * 2;
 
 const isResourceNodeKind = (kind: NodeKind) =>
   kind === "ironOre" ||
   kind === "copperOre" ||
+  kind === "mythrilOre" ||
   kind === "stone" ||
   kind === "forest";
 
@@ -983,12 +1031,21 @@ const getEstimatedNodeSize = (node: NodeSpec): NodeSize => {
   if (node.kind === "joint" || node.kind === "powerSplitter") {
     return { width: JOINT_NODE_SIZE, height: JOINT_NODE_SIZE };
   }
-  if (node.kind === "splitter" || node.kind === "merger" || node.kind === "filter" || node.kind === "road") {
+  if (node.kind === "road") {
+    return { width: ROAD_NODE_SIZE, height: ROAD_NODE_SIZE };
+  }
+  if (node.kind === "splitter" || node.kind === "merger" || node.kind === "filter") {
     return { width: COMPACT_ROUTING_NODE_SIZE, height: COMPACT_ROUTING_NODE_SIZE };
   }
   if (node.kind === "woodenChest") return WOODEN_CHEST_NODE_SIZE;
   const portRows = Math.max(node.inputs.length, node.outputs.length, 1);
-  return { width: 258, height: 171 + portRows * 30 };
+  const size = { width: 258, height: 171 + portRows * 30 };
+  return node.kind === "researchFoundry"
+    ? {
+        width: size.width * RESEARCH_CENTER_NODE_SCALE,
+        height: size.width * RESEARCH_CENTER_NODE_SCALE,
+      }
+    : size;
 };
 
 const rectanglesOverlap = (
@@ -1018,11 +1075,22 @@ const STARTING_RESOURCE_BOUNDS = {
 const INITIAL_CONNECTIONS: Connection[] = [];
 
 const RESOURCE_CAPACITIES = {
-  ironOre: 2000,
-  copperOre: 2000,
-  stone: 2000,
-  forest: 2000,
+  ironOre: 1000,
+  copperOre: 1000,
+  mythrilOre: 1000,
+  stone: 1000,
+  forest: 1000,
 } as const;
+const normalizeBaseResourceState = (
+  state: { remaining?: number; capacity?: number } | null | undefined,
+  capacity: number,
+) => ({
+  capacity,
+  remaining: Math.min(
+    capacity,
+    Math.max(0, Math.floor(Number(state?.remaining ?? capacity) || 0)),
+  ),
+});
 const FOREST_BASE_REGENERATION_DURATION = 30_000;
 const SIMULATION_TICK_INTERVAL = 100;
 const SIMULATION_UI_INTERVAL = 250;
@@ -1030,13 +1098,15 @@ const MAX_SIMULATION_ELAPSED = 1000;
 
 const MINED_DEPOSIT_CAPACITY = 1000;
 const MINING_DRILL_ITERATIONS = 20;
+const MYTHRIL_MIN_MAP_NODE_VALUE = 4;
 
 const MINING_DRILL_TARGETS: Array<{
   type: MiningDrillTarget;
-  kind: "ironOre" | "copperOre" | "stone";
+  kind: "ironOre" | "copperOre" | "mythrilOre" | "stone";
   title: string;
   label: string;
-  portId: "ore-out" | "copper-ore-out" | "stone-out";
+  portId: "ore-out" | "copper-ore-out" | "mythril-ore-out" | "stone-out";
+  minimumMapNodeValue: number;
   icon: NodeSpec["icon"];
 }> = [
   {
@@ -1045,6 +1115,7 @@ const MINING_DRILL_TARGETS: Array<{
     title: "Iron",
     label: "Iron",
     portId: "ore-out",
+    minimumMapNodeValue: 0,
     icon: Gem,
   },
   {
@@ -1053,6 +1124,16 @@ const MINING_DRILL_TARGETS: Array<{
     title: "Copper",
     label: "Copper",
     portId: "copper-ore-out",
+    minimumMapNodeValue: 0,
+    icon: Gem,
+  },
+  {
+    type: ResourceType.MYTHRIL,
+    kind: "mythrilOre",
+    title: "Mythril",
+    label: "Mythril",
+    portId: "mythril-ore-out",
+    minimumMapNodeValue: MYTHRIL_MIN_MAP_NODE_VALUE,
     icon: Gem,
   },
   {
@@ -1061,6 +1142,7 @@ const MINING_DRILL_TARGETS: Array<{
     title: "Stone Deposit",
     label: "Stone",
     portId: "stone-out",
+    minimumMapNodeValue: 0,
     icon: Mountain,
   },
 ];
@@ -1207,6 +1289,8 @@ const makeResearchState = (): Runtime["research"] => ({
     treePlanter: 0,
     miningDrill: 0,
     exploration: 0,
+    mapNode: 0,
+    automataCore: 0,
   },
   logisticsUnlocked: false,
   kilnUnlocked: false,
@@ -1217,18 +1301,25 @@ const makeResearchState = (): Runtime["research"] => ({
   researchCenterUnlocked: false,
   roadUnlocked: false,
   areaExpansion1Unlocked: false,
+  areaExpansionLevel: 0,
   extractor2Unlocked: false,
   extractor3Unlocked: false,
   treePlanterUnlocked: false,
   miningDrillUnlocked: false,
   explorationUnlocked: false,
+  automataCoreUnlocked: false,
+  mapNodeResearchCompletions: 0,
 });
 
 const makeRuntime = (): Runtime => ({
-  ironOre: { remaining: RESOURCE_CAPACITIES.ironOre },
-  copperOre: { remaining: RESOURCE_CAPACITIES.copperOre },
-  stone: { remaining: RESOURCE_CAPACITIES.stone },
-  forest: { remaining: RESOURCE_CAPACITIES.forest, regenerationElapsed: 0 },
+  ironOre: { remaining: RESOURCE_CAPACITIES.ironOre, capacity: RESOURCE_CAPACITIES.ironOre },
+  copperOre: { remaining: RESOURCE_CAPACITIES.copperOre, capacity: RESOURCE_CAPACITIES.copperOre },
+  stone: { remaining: RESOURCE_CAPACITIES.stone, capacity: RESOURCE_CAPACITIES.stone },
+  forest: {
+    remaining: RESOURCE_CAPACITIES.forest,
+    capacity: RESOURCE_CAPACITIES.forest,
+    regenerationElapsed: 0,
+  },
   extractors: {},
   processors: {},
   generators: {},
@@ -1256,7 +1347,7 @@ const makeRuntime = (): Runtime => ({
 });
 
 type ExtractorNodeId = NodeId;
-type ExtractorProduct = ResourceType.IRON | ResourceType.COPPER | ResourceType.STONE | ResourceType.WOOD;
+type ExtractorProduct = ResourceType.IRON | ResourceType.COPPER | ResourceType.MYTHRIL | ResourceType.STONE | ResourceType.WOOD;
 
 const EXTRACTOR_BASE_CYCLE_DURATION = 5000;
 
@@ -1265,6 +1356,7 @@ const EXTRACTOR_RECIPES: Partial<Record<ResourceType, { product: ExtractorProduc
   [ResourceType.IRON]: { product: ResourceType.IRON, label: "Iron", duration: EXTRACTOR_BASE_CYCLE_DURATION },
   [ResourceType.COPPER_ORE]: { product: ResourceType.COPPER, label: "Copper", duration: EXTRACTOR_BASE_CYCLE_DURATION },
   [ResourceType.COPPER]: { product: ResourceType.COPPER, label: "Copper", duration: EXTRACTOR_BASE_CYCLE_DURATION },
+  [ResourceType.MYTHRIL]: { product: ResourceType.MYTHRIL, label: "Mythril", duration: EXTRACTOR_BASE_CYCLE_DURATION },
   [ResourceType.STONE_CHUNKS]: { product: ResourceType.STONE, label: "Stone", duration: EXTRACTOR_BASE_CYCLE_DURATION },
   [ResourceType.STONE]: { product: ResourceType.STONE, label: "Stone", duration: EXTRACTOR_BASE_CYCLE_DURATION },
   [ResourceType.FOREST]: { product: ResourceType.WOOD, label: "Wood", duration: EXTRACTOR_BASE_CYCLE_DURATION },
@@ -1349,15 +1441,21 @@ const EMPTY_ACHIEVEMENT_FLAVOR_TEXTS = [
 ] as const;
 const ACHIEVEMENT_UNLOCK_DETAILS: Record<AchievementId, {
   title: string;
+  description: string;
   flavorText: string;
+  icon: NodeSpec["icon"];
 }> = {
   oops: {
     title: "Oops.",
+    description: "Create a Black Hole by rapidly clicking an empty part of the field.",
     flavorText: "Did I do thaaaaat?",
+    icon: Trophy,
   },
   handHolding: {
     title: "Hand Holding",
+    description: "See the final tutorial after completing every previous tutorial.",
     flavorText: "You are either very deliberate, or very slow.  Or both?",
+    icon: BookOpenText,
   },
 };
 const isAchievementId = (value: unknown): value is AchievementId =>
@@ -1471,23 +1569,30 @@ const makeDefaultSaveNames = () =>
 const GENERATOR_MAX_POWER = 100;
 const POWER_PER_CHARCOAL = 50;
 const PRODUCTION_INGREDIENT_CAPACITY = 5;
+const RESEARCH_CORE_CAPACITY_PER_TYPE = 5;
 const RESEARCH_CYCLE_DURATION = 20000;
-const RESEARCH_UNLOCK_COST = 5;
+const RESEARCH_UNLOCK_COST = 10;
 const MAP_GRID_SIZE = 11;
 const MAP_HOME_INDEX = Math.floor(MAP_GRID_SIZE / 2);
 const MAP_HOME_SECTOR = `${MAP_HOME_INDEX},${MAP_HOME_INDEX}`;
 const LEGACY_MAP_GRID_SIZE = 13;
 const LEGACY_MAP_HOME_INDEX = Math.floor(LEGACY_MAP_GRID_SIZE / 2);
 const MAX_MAP_NODE_VALUE = 10;
-const MAP_NODE_MIN_RESOURCE_MULTIPLIER = 0.5;
-const MAP_NODE_RESOURCE_MULTIPLIER_PER_VALUE = 0.05;
+const TIER_3_MAP_NODE_UNLOCK_COUNT = 24;
+const MAP_NODE_RESEARCH_GROWTH_COMPLETION_CAP = TIER_3_MAP_NODE_UNLOCK_COUNT - 1;
+const MAP_NODE_RESEARCH_COST_STEP = 5;
+const MAP_NODE_RESOURCE_CAPACITY_PER_TIER = 200;
 const MAP_NODE_BLACK_HOLE_START_AREA_RATIO = 0.15;
 const MAP_NODE_BLACK_HOLE_MAX_AREA_RATIO = 0.5;
 const MAP_NODE_BLACK_HOLE_MAX_SCALING_TIER = 9;
 const MAP_NODE_MAX_OBSTRUCTION_AREA_RATIO = 0.6;
 const MAP_OBSTRUCTION_MARGIN = 72;
+const MYTHRIL_TIER_FOUR_SPAWN_CHANCE = 0.6;
+const MYTHRIL_GUARANTEED_MAP_NODE_VALUE = 9;
 const BLACK_HOLE_MIN_STONE_REQUIREMENT = 20;
 const BLACK_HOLE_MAX_STONE_REQUIREMENT = 20000;
+const BLACK_HOLE_TIER_ONE_REQUIREMENT_MULTIPLIER = 0.2;
+const BLACK_HOLE_FULL_REQUIREMENT_TIER = 9;
 const parseMapSectorKeyWithinSize = (sectorKey: string, gridSize: number): Position | null => {
   const [rawX, rawY, ...rest] = sectorKey.split(",");
   const x = Number(rawX);
@@ -1510,6 +1615,21 @@ const getMapNodeValue = (sectorKey: string) => {
   return coordinate
     ? Math.abs(coordinate.x - MAP_HOME_INDEX) + Math.abs(coordinate.y - MAP_HOME_INDEX)
     : 0;
+};
+const getMapNodeStartingResourceCapacity = (sectorKey: string) => {
+  const mapNodeValue = getMapNodeValue(sectorKey);
+  if (mapNodeValue >= MAX_MAP_NODE_VALUE) return 0;
+  return RESOURCE_CAPACITIES.ironOre + mapNodeValue * MAP_NODE_RESOURCE_CAPACITY_PER_TIER;
+};
+const getMythrilSpawnChance = (mapNodeValue: number) => {
+  if (mapNodeValue < MYTHRIL_MIN_MAP_NODE_VALUE || mapNodeValue >= MAX_MAP_NODE_VALUE) return 0;
+  const progression = Math.min(
+    1,
+    (mapNodeValue - MYTHRIL_MIN_MAP_NODE_VALUE) /
+      (MYTHRIL_GUARANTEED_MAP_NODE_VALUE - MYTHRIL_MIN_MAP_NODE_VALUE),
+  );
+  return MYTHRIL_TIER_FOUR_SPAWN_CHANCE +
+    (1 - MYTHRIL_TIER_FOUR_SPAWN_CHANCE) * progression;
 };
 const isMapNodeInRange = (sectorKey: string) =>
   Boolean(parseMapSectorKey(sectorKey)) && getMapNodeValue(sectorKey) <= MAX_MAP_NODE_VALUE;
@@ -1598,6 +1718,13 @@ const getRoadEdgePlacement = (
   };
   return { edge, adjacentSector, position: snappedPosition };
 };
+const getAreaExpansionLevel = (research: Partial<Runtime["research"]>) => Math.min(
+  MAX_AREA_EXPANSION_LEVEL,
+  Math.max(
+    research.areaExpansion1Unlocked ? 1 : 0,
+    Math.max(0, Math.floor(Number(research.areaExpansionLevel) || 0)),
+  ),
+);
 const getPlayAreaWorldSize = (
   research: Runtime["research"],
   sectorKey = MAP_HOME_SECTOR,
@@ -1606,9 +1733,8 @@ const getPlayAreaWorldSize = (
   const distanceMultiplier = 1 +
     (MAP_NODE_MAX_SIZE_MULTIPLIER - 1) *
       (Math.min(MAX_MAP_NODE_VALUE, mapNodeValue) / MAX_MAP_NODE_VALUE);
-  const researchMultiplier = research.areaExpansion1Unlocked
-    ? AREA_EXPANSION_1_MULTIPLIER
-    : 1;
+  const researchMultiplier = 1 +
+    getAreaExpansionLevel(research) * AREA_EXPANSION_SIZE_INCREMENT;
   const multiplier = distanceMultiplier * researchMultiplier;
   return {
     width: Math.round(WORLD_SIZE.width * multiplier),
@@ -1660,16 +1786,29 @@ const MAX_GENERATED_BLACK_HOLE_RADIUS = Math.max(
     );
   }),
 );
-const getBlackHoleStoneRequirement = (hole: Pick<BlackHoleObstacle, "radius">) => {
+const getBlackHoleStoneRequirementMultiplier = (mapNodeValue: number) => {
+  if (mapNodeValue <= 0) return 1;
+  const tier = Math.min(BLACK_HOLE_FULL_REQUIREMENT_TIER, Math.max(1, mapNodeValue));
+  const progression = (tier - 1) / (BLACK_HOLE_FULL_REQUIREMENT_TIER - 1);
+  return BLACK_HOLE_TIER_ONE_REQUIREMENT_MULTIPLIER +
+    (1 - BLACK_HOLE_TIER_ONE_REQUIREMENT_MULTIPLIER) * progression;
+};
+const getBlackHoleStoneRequirement = (
+  hole: Pick<BlackHoleObstacle, "radius">,
+  mapNodeValue = 0,
+) => {
   const sizeProgress = Math.max(0, Math.min(
     1,
     (hole.radius - BLACK_HOLE_RADIUS) /
       (MAX_GENERATED_BLACK_HOLE_RADIUS - BLACK_HOLE_RADIUS),
   ));
-  return Math.round(
+  const sizeRequirement = Math.round(
     BLACK_HOLE_MIN_STONE_REQUIREMENT +
       (BLACK_HOLE_MAX_STONE_REQUIREMENT - BLACK_HOLE_MIN_STONE_REQUIREMENT) * sizeProgress,
   );
+  return Math.max(1, Math.round(
+    sizeRequirement * getBlackHoleStoneRequirementMultiplier(mapNodeValue),
+  ));
 };
 const isMapNodeUnlocked = (progress: MapNodeProgressBySector, sectorKey: string) =>
   isMapNodeInRange(sectorKey) && progress[sectorKey]?.explored === true;
@@ -2006,6 +2145,13 @@ const RECIPE_GUIDE_ENTRIES: RecipeGuideEntry[] = [
     ResourceType.COPPER_PLATE,
   ),
   makeConcreteMaterialRecipeGuideEntry(
+    "furnace-mythril-plate",
+    "Furnace",
+    PROCESSOR_RECIPES.furnace,
+    ResourceType.MYTHRIL,
+    ResourceType.MYTHRIL_PLATE,
+  ),
+  makeConcreteMaterialRecipeGuideEntry(
     "refiner-iron-gear",
     "Refiner",
     REFINER_RECIPES.gear,
@@ -2020,6 +2166,13 @@ const RECIPE_GUIDE_ENTRIES: RecipeGuideEntry[] = [
     ResourceType.COPPER_GEAR,
   ),
   makeConcreteMaterialRecipeGuideEntry(
+    "refiner-mythril-gear",
+    "Refiner",
+    REFINER_RECIPES.gear,
+    ResourceType.MYTHRIL_PLATE,
+    ResourceType.MYTHRIL_GEAR,
+  ),
+  makeConcreteMaterialRecipeGuideEntry(
     "refiner-iron-wire",
     "Refiner",
     REFINER_RECIPES.wire,
@@ -2032,6 +2185,13 @@ const RECIPE_GUIDE_ENTRIES: RecipeGuideEntry[] = [
     REFINER_RECIPES.wire,
     ResourceType.COPPER_PLATE,
     ResourceType.COPPER_WIRE,
+  ),
+  makeConcreteMaterialRecipeGuideEntry(
+    "refiner-mythril-wire",
+    "Refiner",
+    REFINER_RECIPES.wire,
+    ResourceType.MYTHRIL_PLATE,
+    ResourceType.MYTHRIL_WIRE,
   ),
   makeProcessorRecipeGuideEntry("refiner-brick", "Refiner", REFINER_RECIPES.brick),
   ...Object.entries(ASSEMBLER_RECIPES).map(([id, recipe]) =>
@@ -2153,6 +2313,7 @@ const isNodeKind = (value: unknown): value is NodeKind =>
   typeof value === "string" && (
     value === "ironOre" ||
     value === "copperOre" ||
+    value === "mythrilOre" ||
     value === "stone" ||
     value === "forest" ||
     isPurchasableKind(value as NodeKind)
@@ -2167,7 +2328,7 @@ const isRetiredProductionNodeKind = (
   value === "circuitAConduit";
 
 const getNodeIcon = (kind: NodeKind): NodeSpec["icon"] => {
-  if (kind === "ironOre" || kind === "copperOre") return Gem;
+  if (kind === "ironOre" || kind === "copperOre" || kind === "mythrilOre") return Gem;
   if (kind === "stone") return Mountain;
   if (kind === "forest") return TreePine;
   if (kind === "extractor") return Pickaxe;
@@ -2202,9 +2363,11 @@ const hydrateNode = (node: SerializedNode): NodeSpec => ({
     ? "Research Center"
     : node.kind === "ironOre"
       ? "Iron"
-      : node.kind === "copperOre"
-        ? "Copper"
-        : node.title,
+    : node.kind === "copperOre"
+      ? "Copper"
+      : node.kind === "mythrilOre"
+        ? "Mythril"
+      : node.title,
   icon: getNodeIcon(node.kind),
   inputs: node.kind === "researchFoundry"
     ? [{ id: "research-core-in", label: "All Cores", type: ResourceType.CORE, direction: "input" }]
@@ -2217,6 +2380,8 @@ const hydrateNode = (node: SerializedNode): NodeSpec => ({
     ? [{ id: "ore-out", label: "Iron", type: ResourceType.IRON, direction: "output" }]
     : node.kind === "copperOre"
       ? [{ id: "copper-ore-out", label: "Copper", type: ResourceType.COPPER, direction: "output" }]
+    : node.kind === "mythrilOre"
+      ? [{ id: "mythril-ore-out", label: "Mythril", type: ResourceType.MYTHRIL, direction: "output" }]
   : node.kind === "stone"
     ? [{ id: "stone-out", label: "Stone", type: ResourceType.STONE, direction: "output" }]
     : node.kind === "forest"
@@ -2264,22 +2429,40 @@ const makeRemoteMapFactoryState = (
   runtime.produced = { ...globalRuntime.produced };
   runtime.extractorProduced = { ...globalRuntime.extractorProduced };
   const mapNodeValue = getMapNodeValue(sectorKey);
-  const resourceMultiplier = Math.min(
-    1,
-    MAP_NODE_MIN_RESOURCE_MULTIPLIER +
-      mapNodeValue * MAP_NODE_RESOURCE_MULTIPLIER_PER_VALUE,
-  );
-  runtime.ironOre.remaining = Math.round(RESOURCE_CAPACITIES.ironOre * resourceMultiplier);
-  runtime.copperOre.remaining = Math.round(RESOURCE_CAPACITIES.copperOre * resourceMultiplier);
-  runtime.stone.remaining = Math.round(RESOURCE_CAPACITIES.stone * resourceMultiplier);
-  runtime.forest.remaining = Math.round(RESOURCE_CAPACITIES.forest * resourceMultiplier);
-  const resourceNodes = INITIAL_NODES.filter((node) => isResourceNodeKind(node.kind));
+  const resourceCapacity = getMapNodeStartingResourceCapacity(sectorKey);
+  runtime.ironOre = { remaining: resourceCapacity, capacity: resourceCapacity };
+  runtime.copperOre = { remaining: resourceCapacity, capacity: resourceCapacity };
+  runtime.stone = { remaining: resourceCapacity, capacity: resourceCapacity };
+  runtime.forest = { remaining: resourceCapacity, capacity: resourceCapacity, regenerationElapsed: 0 };
+  const isEmptyTierTen = mapNodeValue === MAX_MAP_NODE_VALUE;
+  if (isEmptyTierTen) {
+    runtime.ironOre.remaining = 0;
+    runtime.copperOre.remaining = 0;
+    runtime.stone.remaining = 0;
+    runtime.forest.remaining = 0;
+  }
+  const hasMythrilDeposit = !isEmptyTierTen &&
+    Math.random() < getMythrilSpawnChance(mapNodeValue);
+  const resourceNodes = isEmptyTierTen
+    ? []
+    : [
+        ...INITIAL_NODES.filter((node) => isResourceNodeKind(node.kind)),
+        ...(hasMythrilDeposit ? [MYTHRIL_RESOURCE_NODE] : []),
+      ];
+  if (hasMythrilDeposit) {
+    const mythrilCapacity = resourceCapacity;
+    runtime.minedDeposits[MYTHRIL_RESOURCE_NODE.id] = {
+      type: ResourceType.MYTHRIL,
+      remaining: mythrilCapacity,
+      capacity: mythrilCapacity,
+    };
+  }
   const playAreaSize = getPlayAreaWorldSize(globalRuntime.research, sectorKey);
   const mapMargin = MAP_OBSTRUCTION_MARGIN;
   const holes: BlackHoleObstacle[] = [];
   const lakes: LakeObstacle[] = [];
 
-  if (mapNodeValue === 2 && tierTwoObstruction === "lake") {
+  if (!isEmptyTierTen && mapNodeValue === 2 && tierTwoObstruction === "lake") {
     const lakeAreaRatio = 0.15 + Math.random() * 0.1;
     const lake = createLakeObstacle(
       playAreaSize,
@@ -2288,7 +2471,7 @@ const makeRemoteMapFactoryState = (
       `lake-${sectorKey.replace(",", "-")}`,
     );
     lakes.push(lake);
-  } else if (mapNodeValue > 0) {
+  } else if (!isEmptyTierTen && mapNodeValue > 0) {
     const playArea = playAreaSize.width * playAreaSize.height;
     const targetBlackHoleAreaRatio = getMapNodeBlackHoleAreaRatio(mapNodeValue);
     const otherObstructionArea = lakes.reduce(
@@ -2424,6 +2607,152 @@ const makeRemoteMapFactoryState = (
   };
 };
 
+const redistributeUnknownMapFactoryForExpansion = (
+  factory: MapFactoryState,
+  sectorKey: string,
+  research: Runtime["research"],
+): MapFactoryState => {
+  const playAreaSize = getPlayAreaWorldSize(research, sectorKey);
+  const randomCoordinate = (minimum: number, maximum: number) =>
+    minimum + Math.random() * Math.max(0, maximum - minimum);
+  const lakes: LakeObstacle[] = [];
+
+  Object.values(factory.runtime.lakes ?? {}).forEach((lake) => {
+    const minimumX = MAP_OBSTRUCTION_MARGIN + lake.width / 2;
+    const maximumX = playAreaSize.width - MAP_OBSTRUCTION_MARGIN - lake.width / 2;
+    const minimumY = MAP_OBSTRUCTION_MARGIN + lake.height / 2;
+    const maximumY = playAreaSize.height - MAP_OBSTRUCTION_MARGIN - lake.height / 2;
+    let relocated: LakeObstacle | null = null;
+
+    for (let attempt = 0; attempt < 300 && !relocated; attempt += 1) {
+      const candidate = {
+        ...lake,
+        x: randomCoordinate(minimumX, Math.max(minimumX, maximumX)),
+        y: randomCoordinate(minimumY, Math.max(minimumY, maximumY)),
+      };
+      const candidateBounds = {
+        x: candidate.x - candidate.width / 2,
+        y: candidate.y - candidate.height / 2,
+        width: candidate.width,
+        height: candidate.height,
+      };
+      const overlapsLake = lakes.some((placedLake) => rectanglesOverlap(
+        candidateBounds,
+        {
+          x: placedLake.x - placedLake.width / 2,
+          y: placedLake.y - placedLake.height / 2,
+          width: placedLake.width,
+          height: placedLake.height,
+        },
+        NODE_CLEARANCE,
+      ));
+      if (!overlapsLake) relocated = candidate;
+    }
+
+    lakes.push(relocated ?? {
+      ...lake,
+      x: Math.max(minimumX, Math.min(maximumX, lake.x)),
+      y: Math.max(minimumY, Math.min(maximumY, lake.y)),
+    });
+  });
+
+  const holes: BlackHoleObstacle[] = [];
+  Object.values(factory.runtime.blackHoles ?? {}).forEach((hole) => {
+    const minimumX = MAP_OBSTRUCTION_MARGIN + hole.radius;
+    const maximumX = playAreaSize.width - MAP_OBSTRUCTION_MARGIN - hole.radius;
+    const minimumY = MAP_OBSTRUCTION_MARGIN + hole.radius;
+    const maximumY = playAreaSize.height - MAP_OBSTRUCTION_MARGIN - hole.radius;
+    let relocated: BlackHoleObstacle | null = null;
+
+    for (let attempt = 0; attempt < 600 && !relocated; attempt += 1) {
+      const candidate = {
+        ...hole,
+        x: randomCoordinate(minimumX, Math.max(minimumX, maximumX)),
+        y: randomCoordinate(minimumY, Math.max(minimumY, maximumY)),
+      };
+      const candidateBounds = {
+        x: candidate.x - candidate.radius,
+        y: candidate.y - candidate.radius,
+        width: candidate.radius * 2,
+        height: candidate.radius * 2,
+      };
+      const overlapsLake = lakes.some((lake) =>
+        rectangleIntersectsLake(candidateBounds, lake, 0)
+      );
+      const overlapsHole = holes.some((placedHole) =>
+        Math.hypot(candidate.x - placedHole.x, candidate.y - placedHole.y) <
+          (candidate.radius + placedHole.radius) * (BLACK_HOLE_GENERATION_CENTER_SPACING / 2)
+      );
+      if (!overlapsLake && !overlapsHole) relocated = candidate;
+    }
+
+    holes.push(relocated ?? {
+      ...hole,
+      x: Math.max(minimumX, Math.min(maximumX, hole.x)),
+      y: Math.max(minimumY, Math.min(maximumY, hole.y)),
+    });
+  });
+
+  const relocatedPositions: Positions = {};
+  const occupiedNodeBounds: Array<Position & NodeSize> = [];
+  const factoryNodes = getMapFactoryNodes(factory);
+  const isAvailable = (candidate: Position, size: NodeSize) => {
+    const candidateBounds = { ...candidate, ...size };
+    return !holes.some((hole) =>
+      rectangleIntersectsBlackHole(candidateBounds, hole, NODE_CLEARANCE * 2)
+    ) && !lakes.some((lake) =>
+      rectangleIntersectsLake(candidateBounds, lake, NODE_CLEARANCE * 2)
+    ) && !occupiedNodeBounds.some((bounds) => rectanglesOverlap(candidateBounds, bounds));
+  };
+
+  factoryNodes.forEach((node) => {
+    const size = getEstimatedNodeSize(node);
+    const minimumX = MAP_OBSTRUCTION_MARGIN;
+    const maximumX = Math.max(minimumX, playAreaSize.width - MAP_OBSTRUCTION_MARGIN - size.width);
+    const minimumY = MAP_OBSTRUCTION_MARGIN;
+    const maximumY = Math.max(minimumY, playAreaSize.height - MAP_OBSTRUCTION_MARGIN - size.height);
+    let relocated: Position | null = null;
+
+    for (let attempt = 0; attempt < 800 && !relocated; attempt += 1) {
+      const candidate = {
+        x: randomCoordinate(minimumX, maximumX),
+        y: randomCoordinate(minimumY, maximumY),
+      };
+      if (isAvailable(candidate, size)) relocated = candidate;
+    }
+
+    if (!relocated) {
+      const horizontalStep = Math.max(NODE_CLEARANCE, Math.min(80, size.width / 3));
+      const verticalStep = Math.max(NODE_CLEARANCE, Math.min(80, size.height / 3));
+      for (let y = minimumY; y <= maximumY && !relocated; y += verticalStep) {
+        for (let x = minimumX; x <= maximumX && !relocated; x += horizontalStep) {
+          const candidate = { x, y };
+          if (isAvailable(candidate, size)) relocated = candidate;
+        }
+      }
+    }
+
+    const previous = factory.positions[node.id] ?? { x: minimumX, y: minimumY };
+    const position = relocated ?? {
+      x: Math.max(minimumX, Math.min(maximumX, previous.x)),
+      y: Math.max(minimumY, Math.min(maximumY, previous.y)),
+    };
+    relocatedPositions[node.id] = position;
+    occupiedNodeBounds.push({ ...position, ...size });
+  });
+
+  return {
+    ...factory,
+    positions: relocatedPositions,
+    runtime: {
+      ...factory.runtime,
+      blackHoles: Object.fromEntries(holes.map((hole) => [hole.id, hole])),
+      lakes: Object.fromEntries(lakes.map((lake) => [lake.id, lake])),
+    },
+    viewport: { scrollLeft: 0, scrollTop: 0 },
+  };
+};
+
 const generateMapFactoriesAtGameStart = (
   globalRuntime: Runtime,
   zoom: number,
@@ -2514,6 +2843,24 @@ const isSplitterNode = (nodeId: NodeId) => nodeId.startsWith("splitter-");
 const isMergerNode = (nodeId: NodeId) => nodeId.startsWith("merger-");
 const isJointNode = (nodeId: NodeId) => nodeId.startsWith("joint-");
 const isRoadNode = (nodeId: NodeId) => nodeId.startsWith("road-");
+const getOppositeRoadMode = (mode: RoadMode): RoadMode => mode === "export" ? "import" : "export";
+const makeRoadRuntimeState = (
+  state?: Partial<Runtime["roads"][NodeId]> | null,
+  nodeId = "",
+): Runtime["roads"][NodeId] => ({
+  outboundType: state?.outboundType ?? null,
+  inboundType: state?.inboundType ?? null,
+  pairedSector: state?.pairedSector ?? null,
+  pairedRoadId: state?.pairedRoadId ?? null,
+  edge: state?.edge === "north" || state?.edge === "east" || state?.edge === "south" || state?.edge === "west"
+    ? state.edge
+    : null,
+  mode: state?.mode === "import" || state?.mode === "export"
+    ? state.mode
+    : nodeId.startsWith("road-pair-")
+      ? "import"
+      : "export",
+});
 const isGeneratorNode = (nodeId: NodeId) => nodeId.startsWith("generator-");
 const isPowerSplitterNode = (nodeId: NodeId) => nodeId.startsWith("powerSplitter-");
 const findPowerGeneratorId = (
@@ -2545,9 +2892,13 @@ const isMultiOutputPort = (nodeId: NodeId, portId: string) =>
   (nodeId.startsWith("inventorySource-") && portId === "inventory-out") ||
   (nodeId === "ironOre" && portId === "ore-out") ||
   (nodeId === "copperOre" && portId === "copper-ore-out") ||
+  (nodeId === "mythrilOre" && portId === "mythril-ore-out") ||
   (nodeId === "stone" && portId === "stone-out") ||
   (nodeId.startsWith("miningDrill-") && (
-    portId === "ore-out" || portId === "copper-ore-out" || portId === "stone-out"
+    portId === "ore-out" ||
+    portId === "copper-ore-out" ||
+    portId === "mythril-ore-out" ||
+    portId === "stone-out"
   )) ||
   (nodeId === "forest" && portId === "forest-out");
 const isMultiInputPort = (nodeId: NodeId, portId: string) =>
@@ -2610,12 +2961,10 @@ const getResearchFoundryCoreItems = (
   foundry: Runtime["researchFoundries"][NodeId] | undefined,
 ): CoreType[] => {
   if (Array.isArray(foundry?.coreItems)) {
-    return foundry.coreItems
-      .filter(isCoreType)
-      .slice(0, PRODUCTION_INGREDIENT_CAPACITY);
+    return foundry.coreItems.filter(isCoreType);
   }
   const legacyCount = Math.min(
-    PRODUCTION_INGREDIENT_CAPACITY,
+    RESEARCH_CORE_CAPACITY_PER_TYPE,
     Math.max(0, Math.floor(Number(foundry?.cores ?? (foundry?.coreLoaded ? 1 : 0)) || 0)),
   );
   return Array.from({ length: legacyCount }, (): CoreType => ResourceType.AUTOMATA_CORE);
@@ -2641,8 +2990,12 @@ type ManualIngredientSlot = {
 };
 
 const getManualIngredientChoices = (type: ResourceType): InventoryItemType[] => {
-  if (type === ResourceType.METAL) return [ResourceType.IRON, ResourceType.COPPER];
-  if (type === ResourceType.PLATE) return [ResourceType.IRON_PLATE, ResourceType.COPPER_PLATE];
+  if (type === ResourceType.METAL) {
+    return [ResourceType.IRON, ResourceType.COPPER, ResourceType.MYTHRIL];
+  }
+  if (type === ResourceType.PLATE) {
+    return [ResourceType.IRON_PLATE, ResourceType.COPPER_PLATE, ResourceType.MYTHRIL_PLATE];
+  }
   return isInventoryItemType(type) ? [type] : [];
 };
 
@@ -2670,7 +3023,7 @@ const getManualIngredientSlots = (
     return [{
       portId: "research-core-in",
       label: "All Cores",
-      capacity: PRODUCTION_INGREDIENT_CAPACITY,
+      capacity: RESEARCH_CORE_CAPACITY_PER_TYPE * 2,
       choices: [ResourceType.BASIC_CORE, ResourceType.AUTOMATA_CORE],
     }];
   }
@@ -2821,7 +3174,7 @@ const BUILD_CATALOG: Array<{
   {
     kind: "road",
     title: "Road",
-    description: "Transfers items through a paired Road on the opposite edge of an adjacent map node.",
+    description: "Creates paired edge terminals with a shared Import / Export direction toggle.",
     recipe: [
       { type: ResourceType.STONE, amount: 5 },
       { type: ResourceType.BRICK, amount: 5 },
@@ -2887,7 +3240,7 @@ const BUILD_CATALOG: Array<{
   {
     kind: "furnace",
     title: "Furnace",
-    description: "Smelts Iron or Copper with Charcoal into matching Plates.",
+    description: "Smelts metal with Charcoal into matching Plates.",
     recipe: [
       { type: ResourceType.STONE, amount: 4 },
       { type: ResourceType.IRON, amount: 2 },
@@ -2985,7 +3338,9 @@ type NodeShortcutBarProps = {
   grouped: boolean;
   snapReady: boolean;
   showGroupTooltip: boolean;
-  onBuild: (kind: PurchasableKind) => void;
+  onBuild: (kind: PurchasableKind) => boolean;
+  onBuildDragEnd: (clientX: number, clientY: number, repeatPlacement: boolean) => void;
+  onBuildDragCancel: () => void;
   onChange: (updater: (current: ShortcutBarConfig) => ShortcutBarConfig) => void;
   onElementRef: (element: HTMLElement | null) => void;
   onMoveStart: () => void;
@@ -3006,6 +3361,8 @@ const NodeShortcutBar = ({
   snapReady,
   showGroupTooltip,
   onBuild,
+  onBuildDragEnd,
+  onBuildDragCancel,
   onChange,
   onElementRef,
   onMoveStart,
@@ -3017,6 +3374,16 @@ const NodeShortcutBar = ({
   onDisableGroupTooltip,
 }: NodeShortcutBarProps) => {
   const [openAssignmentSlot, setOpenAssignmentSlot] = useState<number | null>(null);
+  const [draggingSlot, setDraggingSlot] = useState<number | null>(null);
+  const shortcutDragRef = useRef<{
+    pointerId: number;
+    slotIndex: number;
+    kind: PurchasableKind;
+    startX: number;
+    startY: number;
+    started: boolean;
+  } | null>(null);
+  const suppressShortcutClickRef = useRef<number | null>(null);
   const interactionRef = useRef<{
     mode: "move" | "resize";
     pointerId: number;
@@ -3072,6 +3439,60 @@ const NodeShortcutBar = ({
     interactionRef.current = null;
     if (interaction.mode === "move") onMoveEnd(commit);
     else onResizeEnd();
+  };
+
+  const beginShortcutDrag = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    slotIndex: number,
+    kind: PurchasableKind,
+  ) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    shortcutDragRef.current = {
+      pointerId: event.pointerId,
+      slotIndex,
+      kind,
+      startX: event.clientX,
+      startY: event.clientY,
+      started: false,
+    };
+  };
+
+  const updateShortcutDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = shortcutDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || drag.started) return;
+    if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!onBuild(drag.kind)) {
+      shortcutDragRef.current = null;
+      return;
+    }
+    drag.started = true;
+    suppressShortcutClickRef.current = drag.slotIndex;
+    setDraggingSlot(drag.slotIndex);
+  };
+
+  const finishShortcutDrag = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    commit: boolean,
+  ) => {
+    const drag = shortcutDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    shortcutDragRef.current = null;
+    setDraggingSlot(null);
+    if (!drag.started) return;
+    event.preventDefault();
+    event.stopPropagation();
+    suppressShortcutClickRef.current = drag.slotIndex;
+    window.setTimeout(() => {
+      if (suppressShortcutClickRef.current === drag.slotIndex) {
+        suppressShortcutClickRef.current = null;
+      }
+    }, 0);
+    if (commit) onBuildDragEnd(event.clientX, event.clientY, event.shiftKey);
+    else onBuildDragCancel();
   };
 
   if (!config.visible) return null;
@@ -3151,9 +3572,20 @@ const NodeShortcutBar = ({
                   <ContextMenuTrigger asChild>
                     <button
                       type="button"
-                      className={`shortcut-slot ${assignment ? "assigned" : "empty"} ${unavailable ? "unavailable" : ""}`}
+                      className={`shortcut-slot ${assignment ? "assigned" : "empty"} ${unavailable ? "unavailable" : ""} ${draggingSlot === index ? "dragging-build" : ""}`}
                       aria-label={option ? `Build ${option.title}; right-click to change node` : `Unassigned shortcut ${index + 1}; right-click to choose node`}
+                      onPointerDown={(event) => {
+                        if (option && !unavailable) beginShortcutDrag(event, index, option.kind);
+                      }}
+                      onPointerMove={updateShortcutDrag}
+                      onPointerUp={(event) => finishShortcutDrag(event, true)}
+                      onPointerCancel={(event) => finishShortcutDrag(event, false)}
                       onClick={(event) => {
+                        if (suppressShortcutClickRef.current === index) {
+                          suppressShortcutClickRef.current = null;
+                          event.preventDefault();
+                          return;
+                        }
                         if (!option) {
                           const button = event.currentTarget;
                           const bounds = button.getBoundingClientRect();
@@ -3193,7 +3625,7 @@ const NodeShortcutBar = ({
                       <span>{buttonStatus}</span>
                     </div>
                   </div>
-                  <p>Right-click to change the desired node.</p>
+                  <p>{option ? "Click or drag to build. Right-click to change the desired node." : "Right-click to choose a node."}</p>
                 </TooltipContent>
               </Tooltip>
               <ContextMenuContent className="shortcut-assignment-menu">
@@ -3424,6 +3856,7 @@ const RESEARCH_PROJECTS: Array<{
   unlock: string;
   flavorText?: string;
   icon: NodeSpec["icon"];
+  repeatable?: boolean;
 }> = [
   {
     id: "logistics",
@@ -3482,6 +3915,14 @@ const RESEARCH_PROJECTS: Array<{
     icon: Compass,
   },
   {
+    id: "mapNode",
+    title: "Map Node",
+    description: "Charts another location that can be activated beside an unlocked map node.",
+    unlock: "Awards 1 Map Point; the cost rises by 5 of each Core per completion through Tier 3",
+    icon: MapIcon,
+    repeatable: true,
+  },
+  {
     id: "road",
     title: "Road",
     description: "Establishes paired edge links that carry items between adjacent map nodes.",
@@ -3503,6 +3944,13 @@ const RESEARCH_PROJECTS: Array<{
     unlock: "All existing and future Extractors run at 90% cycle time",
     flavorText: "It's because we put that big spoiler on the back.",
     icon: Pickaxe,
+  },
+  {
+    id: "automataCore",
+    title: "Automata Core",
+    description: "Develops an advanced core by combining Circuit A with Brick.",
+    unlock: "Unlocks the Automata Core recipe in the Assembler",
+    icon: Atom,
   },
   {
     id: "extractor3",
@@ -3545,8 +3993,8 @@ const RESEARCH_MILESTONE_REQUIREMENTS: Partial<Record<ResearchProjectId, {
   logistics: { pending: "Build an Extractor", complete: "Extractor built" },
   kiln: { pending: "Extract 1 Wood with an Extractor", complete: "Wood extracted" },
   charcoalGenerator: { pending: "Produce at least 1 Motor", complete: "Motor produced" },
-  furnace: { pending: "Extract 1 Iron or Copper with an Extractor", complete: "Metal extracted" },
-  refiner: { pending: "Produce at least 1 Iron Plate or Copper Plate", complete: "Iron or Copper Plate produced" },
+  furnace: { pending: "Extract 1 metal with an Extractor", complete: "Metal extracted" },
+  refiner: { pending: "Produce at least 1 metal Plate", complete: "Metal Plate produced" },
   assembler: { pending: "Build your first Refiner", complete: "Refiner built" },
   researchCenter: { pending: "Build your first Assembler", complete: "Assembler built" },
 };
@@ -3555,63 +4003,118 @@ const getResearchMilestoneRequirement = (projectId: ResearchProjectId) =>
   RESEARCH_MILESTONE_REQUIREMENTS[projectId] ?? null;
 
 const isBasicCoreResearchProject = (projectId: ResearchProjectId) =>
-  projectId === "road" || projectId === "areaExpansion1" || projectId === "exploration" || projectId === "extractor2";
+  projectId === "road" || projectId === "areaExpansion1" || projectId === "exploration" || projectId === "automataCore" || projectId === "extractor2";
 
 const isMixedCoreResearchProject = (projectId: ResearchProjectId) =>
-  projectId === "extractor3" || projectId === "treePlanter" || projectId === "miningDrill";
+  projectId === "mapNode" || projectId === "extractor3" || projectId === "treePlanter" || projectId === "miningDrill";
 
 const getResearchProjectPrerequisite = (projectId: ResearchProjectId) =>
-  projectId === "extractor3" ? "Extractor 1" : null;
+  projectId === "extractor3"
+    ? "Extractor 1"
+    : projectId === "automataCore" || projectId === "mapNode"
+      ? "Exploration"
+      : null;
 
 const isResearchProjectPrerequisiteSatisfied = (
   research: Runtime["research"],
   projectId: ResearchProjectId,
-) => projectId !== "extractor3" || research.extractor2Unlocked;
+) => projectId === "extractor3"
+  ? research.extractor2Unlocked
+  : projectId === "automataCore" || projectId === "mapNode"
+    ? research.explorationUnlocked
+    : true;
 
-const getResearchProjectCost = (projectId: ResearchProjectId) =>
-  isMixedCoreResearchProject(projectId)
-    ? BASIC_CORE_RESEARCH_COST + RESEARCH_UNLOCK_COST
-    : isBasicCoreResearchProject(projectId)
-    ? BASIC_CORE_RESEARCH_COST
+const getResearchProjectCoreCosts = (
+  projectId: ResearchProjectId,
+  research?: Runtime["research"],
+) => {
+  if (projectId === "mapNode") {
+    const completions = Math.max(
+      0,
+      Math.floor(Number(research?.mapNodeResearchCompletions) || 0),
+    );
+    const costPerType = MAP_NODE_RESEARCH_COST_STEP * Math.min(
+      completions + 1,
+      MAP_NODE_RESEARCH_GROWTH_COMPLETION_CAP,
+    );
+    return { basic: costPerType, automata: costPerType };
+  }
+  if (projectId === "exploration") {
+    return { basic: EXPLORATION_RESEARCH_COST, automata: 0 };
+  }
+  if (isMixedCoreResearchProject(projectId)) {
+    return { basic: BASIC_CORE_RESEARCH_COST, automata: RESEARCH_UNLOCK_COST };
+  }
+  if (isBasicCoreResearchProject(projectId)) {
+    return { basic: BASIC_CORE_RESEARCH_COST, automata: 0 };
+  }
+  return null;
+};
+
+const getResearchProjectCost = (
+  projectId: ResearchProjectId,
+  research?: Runtime["research"],
+) => {
+  const coreCosts = getResearchProjectCoreCosts(projectId, research);
+  return coreCosts
+    ? coreCosts.basic + coreCosts.automata
     : getResearchMilestoneRequirement(projectId) ? 1 : RESEARCH_UNLOCK_COST;
+};
 
 const getResearchProjectRequiredCoreType = (
   projectId: ResearchProjectId | null,
   projectProgress = 0,
-): CoreType | null => (
-  projectId && isBasicCoreResearchProject(projectId)
+  research?: Runtime["research"],
+): CoreType | null => {
+  if (!projectId) return null;
+  const coreCosts = getResearchProjectCoreCosts(projectId, research);
+  if (!coreCosts) return null;
+  return projectProgress < coreCosts.basic
     ? ResourceType.BASIC_CORE
-    : projectId && isMixedCoreResearchProject(projectId)
-      ? projectProgress < BASIC_CORE_RESEARCH_COST
-        ? ResourceType.BASIC_CORE
-        : ResourceType.AUTOMATA_CORE
-    : null
-);
+    : ResourceType.AUTOMATA_CORE;
+};
 
-const getResearchProjectCoreLabel = (projectId: ResearchProjectId) =>
-  isMixedCoreResearchProject(projectId)
-    ? `Cores (${BASIC_CORE_RESEARCH_COST} Basic + ${RESEARCH_UNLOCK_COST} Automata)`
-    : isBasicCoreResearchProject(projectId)
-    ? "Basic Cores"
-    : "Cores";
+const getResearchProjectCoreLabel = (
+  projectId: ResearchProjectId,
+  research?: Runtime["research"],
+) => {
+  const coreCosts = getResearchProjectCoreCosts(projectId, research);
+  return coreCosts?.automata
+    ? `Cores (${coreCosts.basic} Basic + ${coreCosts.automata} Automata)`
+    : coreCosts?.basic
+      ? "Basic Cores"
+      : "Cores";
+};
 
 const getResearchFoundryProjectCoreCount = (
   foundry: Runtime["researchFoundries"][NodeId] | undefined,
   projectId: ResearchProjectId | null,
   projectProgress = 0,
+  research?: Runtime["research"],
 ) => {
-  const requiredType = getResearchProjectRequiredCoreType(projectId, projectProgress);
+  const requiredType = getResearchProjectRequiredCoreType(projectId, projectProgress, research);
   return requiredType
     ? getResearchFoundryCoreCount(foundry, requiredType)
     : getResearchFoundryCores(foundry);
 };
 
-const canSelectResearchProject = (runtime: Runtime, nodes: NodeSpec[]) =>
-  runtime.research.available || nodes.some((node) => {
+const hasCompletedResearchCenter = (runtime: Runtime, nodes: Array<Pick<NodeSpec, "id" | "kind">>) =>
+  nodes.some((node) => {
     if (node.kind !== "researchFoundry") return false;
     const construction = runtime.construction[node.id];
     return !construction || construction.complete;
   });
+
+const canSelectResearchProject = (
+  runtime: Runtime,
+  nodes: NodeSpec[],
+  mapFactories: MapFactoriesBySector = {},
+  activeSector?: string,
+) => runtime.research.available ||
+  hasCompletedResearchCenter(runtime, nodes) ||
+  Object.entries(mapFactories).some(([sectorKey, factory]) =>
+    sectorKey !== activeSector && hasCompletedResearchCenter(factory.runtime, factory.nodes)
+  );
 
 const isResearchProjectUnlocked = (
   research: Runtime["research"],
@@ -3640,8 +4143,12 @@ const isResearchProjectUnlocked = (
                     ? research.extractor3Unlocked
                     : projectId === "treePlanter"
                       ? research.treePlanterUnlocked
-                      : projectId === "miningDrill"
-                        ? research.miningDrillUnlocked
+                    : projectId === "miningDrill"
+                      ? research.miningDrillUnlocked
+                      : projectId === "mapNode"
+                        ? false
+                      : projectId === "automataCore"
+                        ? research.automataCoreUnlocked
                         : research.explorationUnlocked;
 
 const getResearchProject = (projectId: ResearchProjectId | null) =>
@@ -3678,7 +4185,11 @@ const hasProducedAny = (runtime: Runtime, types: InventoryItemType[]) =>
   types.some((type) => hasProducedItem(runtime, type));
 
 const hasProducedPlate = (runtime: Runtime) =>
-  hasProducedAny(runtime, [ResourceType.IRON_PLATE, ResourceType.COPPER_PLATE]);
+  hasProducedAny(runtime, [
+    ResourceType.IRON_PLATE,
+    ResourceType.COPPER_PLATE,
+    ResourceType.MYTHRIL_PLATE,
+  ]);
 
 const isResearchMilestoneSatisfied = (
   projectId: ResearchProjectId,
@@ -3689,7 +4200,7 @@ const isResearchMilestoneSatisfied = (
   : projectId === "charcoalGenerator"
     ? hasProducedItem(runtime, ResourceType.MOTOR)
     : projectId === "furnace"
-      ? [ResourceType.IRON, ResourceType.COPPER]
+      ? [ResourceType.IRON, ResourceType.COPPER, ResourceType.MYTHRIL]
         .some((type) => (runtime.extractorProduced?.[type] ?? 0) > 0)
       : projectId === "refiner"
         ? hasProducedPlate(runtime)
@@ -3741,7 +4252,7 @@ const BUILD_UNLOCK_RULES: Record<PurchasableKind, BuildUnlockRule> = {
     isSatisfied: ({ runtime }) => runtime.research.kilnUnlocked,
   },
   furnace: {
-    requirement: "Complete Furnace research by producing at least 1 Iron or Copper.",
+    requirement: "Complete Furnace research by producing at least 1 metal.",
     isSatisfied: ({ runtime }) => runtime.research.furnaceUnlocked,
   },
   generator: {
@@ -4067,14 +4578,17 @@ const getSmartProcessorOutput = (
   if (isFurnaceNode(nodeId)) {
     if (inputType === ResourceType.IRON) return { type: ResourceType.IRON_PLATE, label: "Iron Plate" };
     if (inputType === ResourceType.COPPER) return { type: ResourceType.COPPER_PLATE, label: "Copper Plate" };
+    if (inputType === ResourceType.MYTHRIL) return { type: ResourceType.MYTHRIL_PLATE, label: "Mythril Plate" };
   }
   if (isRefinerNode(nodeId) && processor?.refinerRecipe === "gear") {
     if (inputType === ResourceType.IRON_PLATE) return { type: ResourceType.IRON_GEAR, label: "Iron Gear" };
     if (inputType === ResourceType.COPPER_PLATE) return { type: ResourceType.COPPER_GEAR, label: "Copper Gear" };
+    if (inputType === ResourceType.MYTHRIL_PLATE) return { type: ResourceType.MYTHRIL_GEAR, label: "Mythril Gear" };
   }
   if (isRefinerNode(nodeId) && processor?.refinerRecipe === "wire") {
     if (inputType === ResourceType.IRON_PLATE) return { type: ResourceType.IRON_WIRE, label: "Iron Wire" };
     if (inputType === ResourceType.COPPER_PLATE) return { type: ResourceType.COPPER_WIRE, label: "Copper Wire" };
+    if (inputType === ResourceType.MYTHRIL_PLATE) return { type: ResourceType.MYTHRIL_WIRE, label: "Mythril Wire" };
   }
   return null;
 };
@@ -4366,7 +4880,10 @@ const cloneStoredMaterialRuntime = (runtime: Runtime): Runtime => ({
     }]),
   ),
   roads: Object.fromEntries(
-    Object.entries(runtime.roads ?? {}).map(([nodeId, road]) => [nodeId, { ...road }]),
+    Object.entries(runtime.roads ?? {}).map(([nodeId, road]) => [
+      nodeId,
+      makeRoadRuntimeState(road, nodeId),
+    ]),
   ),
   filters: Object.fromEntries(
     Object.entries(runtime.filters ?? {}).map(([nodeId, filter]) => [nodeId, { ...filter }]),
@@ -4575,6 +5092,58 @@ const addBuildMaterialAvailability = (
   });
 };
 
+const applyResearchProjectCompletion = (
+  runtime: Runtime,
+  projectId: ResearchProjectId,
+) => {
+  if (projectId === "logistics") {
+    runtime.research.logisticsUnlocked = true;
+  } else if (projectId === "kiln") {
+    runtime.research.kilnUnlocked = true;
+  } else if (projectId === "charcoalGenerator") {
+    runtime.research.charcoalGeneratorUnlocked = true;
+  } else if (projectId === "furnace") {
+    runtime.research.furnaceUnlocked = true;
+  } else if (projectId === "refiner") {
+    runtime.research.refinerUnlocked = true;
+  } else if (projectId === "assembler") {
+    runtime.research.assemblerUnlocked = true;
+  } else if (projectId === "researchCenter") {
+    runtime.research.researchCenterUnlocked = true;
+  } else if (projectId === "road") {
+    runtime.research.roadUnlocked = true;
+  } else if (projectId === "areaExpansion1") {
+    runtime.research.areaExpansion1Unlocked = true;
+    runtime.research.areaExpansionLevel = Math.max(
+      1,
+      getAreaExpansionLevel(runtime.research),
+    );
+  } else if (projectId === "extractor2") {
+    runtime.research.extractor2Unlocked = true;
+  } else if (projectId === "extractor3") {
+    runtime.research.extractor3Unlocked = true;
+  } else if (projectId === "treePlanter") {
+    runtime.research.treePlanterUnlocked = true;
+  } else if (projectId === "miningDrill") {
+    runtime.research.miningDrillUnlocked = true;
+  } else if (projectId === "mapNode") {
+    runtime.mapPoints = Math.max(0, runtime.mapPoints) + 1;
+    runtime.research.mapNodeResearchCompletions = Math.max(
+      0,
+      runtime.research.mapNodeResearchCompletions,
+    ) + 1;
+    runtime.research.progress.mapNode = 0;
+  } else if (projectId === "automataCore") {
+    runtime.research.automataCoreUnlocked = true;
+  } else {
+    if (!runtime.research.explorationUnlocked) {
+      runtime.mapPoints = Math.max(0, runtime.mapPoints) + 1;
+    }
+    runtime.research.explorationUnlocked = true;
+  }
+  runtime.research.activeProject = null;
+};
+
 const getGlobalBuildMaterialAvailability = (
   activeRuntime: Runtime,
   activeNodes: NodeSpec[],
@@ -4775,13 +5344,18 @@ const getEffectivePort = (nodeId: NodeId, port: Port, edges: Connection[]): Port
   return port;
 };
 
-type DynamicPortRuntime = Pick<Runtime, "woodenChests" | "extractors" | "processors" | "blackHoles" | "lakes">;
+type DynamicPortRuntime = Pick<Runtime, "woodenChests" | "extractors" | "processors" | "blackHoles" | "lakes" | "roads">;
 
 const isAssemblerPortDisabled = (
   nodeId: NodeId,
   portId: string,
   runtime: DynamicPortRuntime,
 ) => {
+  if (isRoadNode(nodeId)) {
+    const mode = runtime.roads?.[nodeId]?.mode ?? "export";
+    if (portId === "road-in") return mode !== "export";
+    if (portId === "road-out") return mode !== "import";
+  }
   const kind = isAssemblerNode(nodeId)
     ? "assembler"
     : isRefinerNode(nodeId)
@@ -4953,16 +5527,23 @@ const isCompatible = (a: Port, b: Port) => {
         output.type === ResourceType.IRON ||
         output.type === ResourceType.COPPER_ORE ||
         output.type === ResourceType.COPPER ||
+        output.type === ResourceType.MYTHRIL ||
         output.type === ResourceType.STONE_CHUNKS ||
         output.type === ResourceType.STONE ||
         output.type === ResourceType.FOREST ||
         output.type === ResourceType.WOOD)) ||
     (input.type === ResourceType.METAL &&
-      (output.type === ResourceType.IRON || output.type === ResourceType.COPPER)) ||
+      (output.type === ResourceType.IRON ||
+        output.type === ResourceType.COPPER ||
+        output.type === ResourceType.MYTHRIL)) ||
     (input.type === ResourceType.PLATE &&
-      (output.type === ResourceType.IRON_PLATE || output.type === ResourceType.COPPER_PLATE)) ||
+      (output.type === ResourceType.IRON_PLATE ||
+        output.type === ResourceType.COPPER_PLATE ||
+        output.type === ResourceType.MYTHRIL_PLATE)) ||
     (input.type === ResourceType.GEAR &&
-      (output.type === ResourceType.IRON_GEAR || output.type === ResourceType.COPPER_GEAR))
+      (output.type === ResourceType.IRON_GEAR ||
+        output.type === ResourceType.COPPER_GEAR ||
+        output.type === ResourceType.MYTHRIL_GEAR))
   );
 };
 
@@ -5112,9 +5693,11 @@ const StarterActionHint = ({
 const CursorObstructionTooltip = ({
   tooltip,
   runtime,
+  mapNodeValue,
 }: {
   tooltip: ObstructionTooltipState;
   runtime: Runtime;
+  mapNodeValue: number;
 }) => {
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({
@@ -5145,7 +5728,7 @@ const CursorObstructionTooltip = ({
   const hole = tooltip.kind === "blackHole" ? runtime.blackHoles[tooltip.nodeId] : null;
   const lake = tooltip.kind === "lake" ? runtime.lakes[tooltip.nodeId] : null;
   if (!hole && !lake) return null;
-  const requiredStone = hole ? getBlackHoleStoneRequirement(hole) : 0;
+  const requiredStone = hole ? getBlackHoleStoneRequirement(hole, mapNodeValue) : 0;
 
   return (
     <div
@@ -5371,7 +5954,10 @@ const cloneRuntimeForBackgroundSimulation = (runtime: Runtime): Runtime => ({
     }]),
   ),
   roads: Object.fromEntries(
-    Object.entries(runtime.roads ?? {}).map(([nodeId, road]) => [nodeId, { ...road }]),
+    Object.entries(runtime.roads ?? {}).map(([nodeId, road]) => [
+      nodeId,
+      makeRoadRuntimeState(road, nodeId),
+    ]),
   ),
   storages: Object.fromEntries(
     Object.entries(runtime.storages ?? {}).map(([nodeId, storage]) => [nodeId, {
@@ -5392,10 +5978,21 @@ const cloneRuntimeForBackgroundSimulation = (runtime: Runtime): Runtime => ({
  * global, so an inactive map inherits unlocks but does not independently spend
  * research cores. Its physical production and routing graph continue normally.
  */
+type BackgroundSimulationRequest = {
+  sectorKey: string;
+  elapsedMs: number;
+  sharedResearch: Runtime["research"];
+  sharedMapPoints: number;
+};
+
 const advanceMapFactoryInBackground = (
   factory: MapFactoryState,
-  elapsedMs: number,
-  sharedResearch: Runtime["research"],
+  {
+    sectorKey,
+    elapsedMs,
+    sharedResearch,
+    sharedMapPoints,
+  }: BackgroundSimulationRequest,
 ): MapFactoryState => {
   const simulatedElapsed = Math.min(
     MAX_BACKGROUND_CATCH_UP_MS,
@@ -5414,12 +6011,20 @@ const advanceMapFactoryInBackground = (
   let edges = factory.connections
     .filter((edge) => validNodeIds.has(edge.sourceNode) && validNodeIds.has(edge.targetNode))
     .map((edge) => ({ ...edge }));
+  const resourceCapacity = getMapNodeStartingResourceCapacity(sectorKey);
   const next = cloneRuntimeForBackgroundSimulation(factory.runtime);
+  next.ironOre = normalizeBaseResourceState(next.ironOre, resourceCapacity);
+  next.copperOre = normalizeBaseResourceState(next.copperOre, resourceCapacity);
+  next.stone = normalizeBaseResourceState(next.stone, resourceCapacity);
+  next.forest = {
+    ...normalizeBaseResourceState(next.forest, resourceCapacity),
+    regenerationElapsed: Math.max(0, Number(next.forest.regenerationElapsed) || 0),
+  };
   next.research = {
     ...sharedResearch,
-    activeProject: null,
     progress: { ...sharedResearch.progress },
   };
+  next.mapPoints = sharedMapPoints;
 
   let remainingElapsed = simulatedElapsed;
   while (remainingElapsed > 0) {
@@ -5440,18 +6045,18 @@ const advanceMapFactoryInBackground = (
       else outgoingEdgesByPort.set(key, [edge]);
     });
 
-    if (next.forest.remaining >= RESOURCE_CAPACITIES.forest) {
+    if (next.forest.remaining >= next.forest.capacity) {
       next.forest.regenerationElapsed = 0;
     } else {
       const accumulated = next.forest.regenerationElapsed + elapsed;
       const regenerated = Math.floor(accumulated / FOREST_BASE_REGENERATION_DURATION);
       if (regenerated > 0) {
         next.forest.remaining = Math.min(
-          RESOURCE_CAPACITIES.forest,
+          next.forest.capacity,
           next.forest.remaining + regenerated,
         );
       }
-      next.forest.regenerationElapsed = next.forest.remaining >= RESOURCE_CAPACITIES.forest
+      next.forest.regenerationElapsed = next.forest.remaining >= next.forest.capacity
         ? 0
         : accumulated % FOREST_BASE_REGENERATION_DURATION;
     }
@@ -5507,7 +6112,10 @@ const advanceMapFactoryInBackground = (
         edge.targetPort === BLACK_HOLE_INPUT_PORT.id &&
         product === ResourceType.STONE
       ) {
-        const requiredStone = getBlackHoleStoneRequirement(targetBlackHole);
+        const requiredStone = getBlackHoleStoneRequirement(
+          targetBlackHole,
+          getMapNodeValue(sectorKey),
+        );
         if (targetBlackHole.stoneFilled >= requiredStone) return false;
         targetBlackHole.stoneFilled = Math.min(requiredStone, targetBlackHole.stoneFilled + 1);
         return true;
@@ -5539,7 +6147,7 @@ const advanceMapFactoryInBackground = (
         };
         next.researchFoundries[edge.targetNode] = foundry;
         const coreItems = getResearchFoundryCoreItems(foundry);
-        if (coreItems.length < PRODUCTION_INGREDIENT_CAPACITY) {
+        if (getResearchFoundryCoreCount(foundry, product) < RESEARCH_CORE_CAPACITY_PER_TYPE) {
           foundry.coreItems = [...coreItems, product];
           foundry.cores = foundry.coreItems.length;
           foundry.coreLoaded = undefined;
@@ -5570,9 +6178,9 @@ const advanceMapFactoryInBackground = (
         targetNode.kind === "forest" &&
         edge.targetPort === "forest-growth-in" &&
         product === ResourceType.FOREST_GROWTH &&
-        next.forest.remaining < RESOURCE_CAPACITIES.forest
+        next.forest.remaining < next.forest.capacity
       ) {
-        next.forest.remaining = Math.min(RESOURCE_CAPACITIES.forest, next.forest.remaining + 1);
+        next.forest.remaining = Math.min(next.forest.capacity, next.forest.remaining + 1);
         return true;
       }
 
@@ -5650,7 +6258,12 @@ const advanceMapFactoryInBackground = (
         isInventoryItemType(product)
       ) {
         const road = next.roads[edge.targetNode];
-        if (road && road.outboundType === null && road.pairedRoadId && road.pairedSector) {
+        if (
+          road?.mode === "export" &&
+          road.outboundType === null &&
+          road.pairedRoadId &&
+          road.pairedSector
+        ) {
           road.outboundType = product;
           return true;
         }
@@ -5770,7 +6383,11 @@ const advanceMapFactoryInBackground = (
       .filter((node) => node.kind === "road")
       .forEach((node) => {
         const road = next.roads[node.id];
-        if (road?.inboundType && deliverProduct(node.id, "road-out", road.inboundType)) {
+        if (
+          road?.mode === "import" &&
+          road.inboundType &&
+          deliverProduct(node.id, "road-out", road.inboundType)
+        ) {
           road.inboundType = null;
         }
       });
@@ -5913,6 +6530,74 @@ const advanceMapFactoryInBackground = (
       });
 
     simulationNodes
+      .filter((node) => node.kind === "researchFoundry")
+      .forEach((node) => {
+        const construction = next.construction[node.id];
+        const foundry = next.researchFoundries[node.id] ?? {
+          progress: 0,
+          cores: 0,
+          coreItems: [],
+        };
+        next.researchFoundries[node.id] = foundry;
+        const coreItems = getResearchFoundryCoreItems(foundry);
+        foundry.coreItems = coreItems;
+        foundry.cores = coreItems.length;
+
+        if (construction && !construction.complete) {
+          foundry.progress = 0;
+          foundry.cores = 0;
+          foundry.coreItems = [];
+          return;
+        }
+
+        next.research.available = true;
+        const activeProject = next.research.activeProject;
+        if (!activeProject || isResearchProjectUnlocked(next.research, activeProject)) {
+          foundry.progress = 0;
+          return;
+        }
+        const activeProjectProgress = next.research.progress[activeProject];
+        if (getResearchFoundryProjectCoreCount(
+          foundry,
+          activeProject,
+          activeProjectProgress,
+          next.research,
+        ) <= 0) {
+          foundry.progress = 0;
+          return;
+        }
+
+        foundry.progress = Math.min(
+          100,
+          foundry.progress + (elapsed / RESEARCH_CYCLE_DURATION) * 100,
+        );
+        if (foundry.progress < 100) return;
+
+        foundry.progress = 0;
+        const requiredCoreType = getResearchProjectRequiredCoreType(
+          activeProject,
+          activeProjectProgress,
+          next.research,
+        );
+        const consumedCoreIndex = requiredCoreType
+          ? coreItems.findIndex((coreType) => coreType === requiredCoreType)
+          : 0;
+        if (consumedCoreIndex < 0) return;
+        const remainingCoreItems = coreItems.filter((_, index) => index !== consumedCoreIndex);
+        foundry.coreItems = remainingCoreItems;
+        foundry.cores = remainingCoreItems.length;
+        const projectCost = getResearchProjectCost(activeProject, next.research);
+        next.research.progress[activeProject] = Math.min(
+          projectCost,
+          next.research.progress[activeProject] + 1,
+        );
+        if (next.research.progress[activeProject] >= projectCost) {
+          applyResearchProjectCompletion(next, activeProject);
+          announceResearchCompletion(activeProject);
+        }
+      });
+
+    simulationNodes
       .filter((node) => node.kind === "treePlanter")
       .forEach((node) => {
         const build = next.construction[node.id];
@@ -5930,7 +6615,7 @@ const advanceMapFactoryInBackground = (
           !outputEdge ||
           !generator ||
           generator.power < TREE_PLANTER_POWER_COST ||
-          next.forest.remaining >= RESOURCE_CAPACITIES.forest
+          next.forest.remaining >= next.forest.capacity
         ) {
           planter.progress = 0;
           return;
@@ -6041,11 +6726,22 @@ const transferRoadItemsAcrossMaps = (
     Object.keys(runtime.roads ?? {}).sort().forEach((roadId) => {
       const currentRuntime = getRuntime(sectorKey);
       const road = currentRuntime?.roads[roadId];
-      if (!road?.outboundType || !road.pairedSector || !road.pairedRoadId) return;
+      if (
+        road?.mode !== "export" ||
+        !road.outboundType ||
+        !road.pairedSector ||
+        !road.pairedRoadId
+      ) return;
       if (!isMapNodeUnlocked(mapNodeProgress, road.pairedSector)) return;
       const targetRuntime = getRuntime(road.pairedSector);
       const targetRoad = targetRuntime?.roads[road.pairedRoadId];
-      if (!targetRoad || targetRoad.inboundType !== null) return;
+      if (
+        !targetRoad ||
+        targetRoad.mode !== "import" ||
+        targetRoad.inboundType !== null ||
+        targetRoad.pairedSector !== sectorKey ||
+        targetRoad.pairedRoadId !== roadId
+      ) return;
       const mutableSource = getMutableRuntime(sectorKey);
       const mutableTarget = getMutableRuntime(road.pairedSector);
       if (!mutableSource || !mutableTarget) return;
@@ -6181,23 +6877,26 @@ const rectangleIntersectsBlackHole = (
   return Math.hypot(hole.x - nearestX, hole.y - nearestY) <= hole.radius + clearance;
 };
 
-const getLakePolygonWorldPoints = (lake: LakeObstacle, clearance = 0): Position[] =>
+const getLakeNormalizedPolygonPoints = (lake: LakeObstacle): Position[] =>
   lake.shape.map((scale, index) => {
     const angle = (Math.PI * 2 * index) / lake.shape.length;
     return {
-      x: lake.x + Math.cos(angle) * (lake.width / 2 + clearance) * scale,
-      y: lake.y + Math.sin(angle) * (lake.height / 2 + clearance) * scale,
+      x: Math.cos(angle) * scale,
+      y: Math.sin(angle) * scale,
     };
   });
 
+const getLakePolygonWorldPoints = (lake: LakeObstacle, clearance = 0): Position[] =>
+  getLakeNormalizedPolygonPoints(lake).map((point) => ({
+    x: lake.x + point.x * (lake.width / 2 + clearance),
+    y: lake.y + point.y * (lake.height / 2 + clearance),
+  }));
+
 const getLakePolygonSvgPointList = (lake: LakeObstacle): Position[] =>
-  lake.shape.map((scale, index) => {
-    const angle = (Math.PI * 2 * index) / lake.shape.length;
-    return {
-      x: 50 + Math.cos(angle) * 50 * scale,
-      y: 50 + Math.sin(angle) * 50 * scale,
-    };
-  });
+  getLakeNormalizedPolygonPoints(lake).map((point) => ({
+    x: 50 + point.x * 50,
+    y: 50 + point.y * 50,
+  }));
 
 const getLakePolygonSvgPoints = (lake: LakeObstacle) =>
   getLakePolygonSvgPointList(lake).map((point) => `${point.x},${point.y}`).join(" ");
@@ -6322,7 +7021,9 @@ const collapseDepletedResourceNodes = (
         ? ResourceType.IRON
         : node.kind === "copperOre"
           ? ResourceType.COPPER
-          : ResourceType.STONE
+          : node.kind === "mythrilOre"
+            ? ResourceType.MYTHRIL
+            : ResourceType.STONE
     );
     return getDirectResourceRemaining(runtime, node.id, resourceType) <= 0;
   });
@@ -6600,6 +7301,7 @@ export default function Home() {
   const [mapOpen, setMapOpen] = useState(false);
   const [selectedMapSector, setSelectedMapSector] = useState<string | null>(null);
   const [activeMapSector, setActiveMapSector] = useState(MAP_HOME_SECTOR);
+  const [, setBackgroundResearchRevision] = useState(0);
   const [mapNodeDialogSector, setMapNodeDialogSector] = useState<string | null>(null);
   const [mapNodeDialogOpen, setMapNodeDialogOpen] = useState(false);
   const [mapNodeDraftName, setMapNodeDraftName] = useState("");
@@ -6608,7 +7310,7 @@ export default function Home() {
   );
   const [journalOpen, setJournalOpen] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
-  const [journalCategory, setJournalCategory] = useState<BuildCategory>("all");
+  const [journalCategory, setJournalCategory] = useState<JournalCategory>("all");
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [keyboardShortcutFilter, setKeyboardShortcutFilter] = useState<KeyboardShortcutFilter>("all");
@@ -6664,6 +7366,7 @@ export default function Home() {
   const [configuringMiningDrillId, setConfiguringMiningDrillId] = useState<NodeId | null>(null);
   const [configuringAssemblerId, setConfiguringAssemblerId] = useState<NodeId | null>(null);
   const [configuringRecipeMachineKind, setConfiguringRecipeMachineKind] = useState<"assembler" | "refiner">("assembler");
+  const [hoveredRecipeOptionId, setHoveredRecipeOptionId] = useState<AssemblerRecipeId | RefinerRecipeId | null>(null);
   const [pendingAssemblerRecipeChange, setPendingAssemblerRecipeChange] = useState<{
     nodeId: NodeId;
     kind: "assembler" | "refiner";
@@ -6715,6 +7418,7 @@ export default function Home() {
   const activeMapSectorRef = useRef(activeMapSector);
   const mapFactoriesRef = useRef<MapFactoriesBySector>({});
   const mapFactoriesGeneratedAtStartRef = useRef(false);
+  const appliedAreaExpansionLayoutLevelRef = useRef(getAreaExpansionLevel(runtime.research));
   const mapNodeProgressRef = useRef(mapNodeProgress);
   const shortcutsListRef = useRef<HTMLDivElement>(null);
   const recipesListRef = useRef<HTMLDivElement>(null);
@@ -7365,6 +8069,24 @@ export default function Home() {
   }, [activeMapSector]);
 
   useEffect(() => {
+    const resourceCapacity = getMapNodeStartingResourceCapacity(activeMapSector);
+    setRuntime((current) => {
+      const next: Runtime = {
+        ...current,
+        ironOre: normalizeBaseResourceState(current.ironOre, resourceCapacity),
+        copperOre: normalizeBaseResourceState(current.copperOre, resourceCapacity),
+        stone: normalizeBaseResourceState(current.stone, resourceCapacity),
+        forest: {
+          ...normalizeBaseResourceState(current.forest, resourceCapacity),
+          regenerationElapsed: Math.max(0, Number(current.forest.regenerationElapsed) || 0),
+        },
+      };
+      runtimeRef.current = next;
+      return next;
+    });
+  }, [activeMapSector]);
+
+  useEffect(() => {
     mapNodeProgressRef.current = mapNodeProgress;
   }, [mapNodeProgress]);
 
@@ -7381,6 +8103,27 @@ export default function Home() {
     runtimeRef.current = runtime;
   }, [runtime]);
 
+  const areaExpansionLevel = getAreaExpansionLevel(runtime.research);
+  useEffect(() => {
+    if (areaExpansionLevel <= appliedAreaExpansionLayoutLevelRef.current) {
+      appliedAreaExpansionLayoutLevelRef.current = areaExpansionLevel;
+      return;
+    }
+    appliedAreaExpansionLayoutLevelRef.current = areaExpansionLevel;
+    mapFactoriesRef.current = Object.fromEntries(
+      Object.entries(mapFactoriesRef.current).map(([sectorKey, factory]) => [
+        sectorKey,
+        isMapNodeUnlocked(mapNodeProgressRef.current, sectorKey)
+          ? factory
+          : redistributeUnknownMapFactoryForExpansion(
+              factory,
+              sectorKey,
+              runtimeRef.current.research,
+            ),
+      ]),
+    );
+  }, [areaExpansionLevel]);
+
   useEffect(() => {
     connectionsRef.current = connections;
   }, [connections]);
@@ -7393,12 +8136,17 @@ export default function Home() {
     isRunningRef.current = isRunning;
   }, [isRunning]);
 
+  useEffect(() => {
+    if (!configuringAssemblerId) setHoveredRecipeOptionId(null);
+  }, [configuringAssemblerId]);
+
   const unlockAchievement = useCallback((achievementId: AchievementId) => {
     if (unlockedAchievementsRef.current.has(achievementId)) return;
     const next = new Set(unlockedAchievementsRef.current);
     next.add(achievementId);
     unlockedAchievementsRef.current = next;
     setUnlockedAchievements(next);
+    if (!journalOpen) setJournalAttention(true);
     const achievement = ACHIEVEMENT_UNLOCK_DETAILS[achievementId];
     toast(`${achievement.title} achievement unlocked`, {
       id: `achievement-unlocked-${achievementId}`,
@@ -7407,7 +8155,7 @@ export default function Home() {
       className: "achievement-unlock-toast",
       duration: 6500,
     });
-  }, []);
+  }, [journalOpen]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -7648,38 +8396,91 @@ export default function Home() {
       const now = Date.now();
       const activeSector = activeMapSectorRef.current;
       let changed = false;
-      const advancedFactories = Object.fromEntries(
-        Object.entries(mapFactoriesRef.current).map(([sectorKey, factory]) => {
-          if (sectorKey === activeSector) return [sectorKey, factory];
-          if (!isMapNodeUnlocked(mapNodeProgressRef.current, sectorKey)) {
-            return [sectorKey, factory];
-          }
-          const elapsed = Math.max(0, now - factory.lastSimulatedAt);
-          if (elapsed <= 0) return [sectorKey, factory];
-          changed = true;
-          return [
-            sectorKey,
-            advanceMapFactoryInBackground(
-              factory,
-              elapsed,
-              runtimeRef.current.research,
-            ),
-          ];
-        }),
-      ) as MapFactoriesBySector;
+      let researchChanged = false;
+      let inactiveResearchProgressChanged = false;
+      let sharedResearch = runtimeRef.current.research;
+      let sharedMapPoints = runtimeRef.current.mapPoints;
+      const advancedFactories: MapFactoriesBySector = {};
+      Object.entries(mapFactoriesRef.current).forEach(([sectorKey, factory]) => {
+        if (
+          sectorKey === activeSector ||
+          !isMapNodeUnlocked(mapNodeProgressRef.current, sectorKey)
+        ) {
+          advancedFactories[sectorKey] = factory;
+          return;
+        }
+        const elapsed = Math.max(0, now - factory.lastSimulatedAt);
+        if (elapsed <= 0) {
+          advancedFactories[sectorKey] = factory;
+          return;
+        }
+        changed = true;
+        const previousResearchProgress = Object.values(factory.runtime.researchFoundries)
+          .reduce((total, foundry) => total + foundry.progress, 0);
+        const advanced = advanceMapFactoryInBackground(factory, {
+          sectorKey,
+          elapsedMs: elapsed,
+          sharedResearch,
+          sharedMapPoints,
+        });
+        advancedFactories[sectorKey] = advanced;
+        const nextResearchProgress = Object.values(advanced.runtime.researchFoundries)
+          .reduce((total, foundry) => total + foundry.progress, 0);
+        if (nextResearchProgress !== previousResearchProgress) {
+          inactiveResearchProgressChanged = true;
+        }
+        if (
+          JSON.stringify(advanced.runtime.research) !== JSON.stringify(sharedResearch) ||
+          advanced.runtime.mapPoints !== sharedMapPoints
+        ) {
+          sharedResearch = advanced.runtime.research;
+          sharedMapPoints = advanced.runtime.mapPoints;
+          researchChanged = true;
+        }
+      });
       const transferred = transferRoadItemsAcrossMaps(
         activeSector,
         runtimeRef.current,
         changed ? advancedFactories : mapFactoriesRef.current,
         mapNodeProgressRef.current,
       );
-      if (changed || transferred.factoriesChanged) {
-        mapFactoriesRef.current = transferred.mapFactories;
+      let nextMapFactories = transferred.mapFactories;
+      let nextActiveRuntime = transferred.activeRuntime;
+      if (researchChanged) {
+        nextActiveRuntime = {
+          ...nextActiveRuntime,
+          mapPoints: sharedMapPoints,
+          research: {
+            ...sharedResearch,
+            progress: { ...sharedResearch.progress },
+          },
+        };
+        nextMapFactories = Object.fromEntries(
+          Object.entries(nextMapFactories).map(([sectorKey, factory]) => [
+            sectorKey,
+            {
+              ...factory,
+              runtime: {
+                ...factory.runtime,
+                mapPoints: sharedMapPoints,
+                research: {
+                  ...sharedResearch,
+                  progress: { ...sharedResearch.progress },
+                },
+              },
+            },
+          ]),
+        );
       }
-      if (transferred.activeChanged) {
-        runtimeRef.current = transferred.activeRuntime;
+      if (changed || transferred.factoriesChanged) {
+        mapFactoriesRef.current = nextMapFactories;
+      }
+      if (transferred.activeChanged || researchChanged) {
+        runtimeRef.current = nextActiveRuntime;
         lastPublishedRuntimeSignatureRef.current = null;
-        setRuntime(transferred.activeRuntime);
+        setRuntime(nextActiveRuntime);
+      } else if (inactiveResearchProgressChanged) {
+        setBackgroundResearchRevision((revision) => revision + 1);
       }
     }, BACKGROUND_SIMULATION_STEP_MS);
     return () => window.clearInterval(timer);
@@ -8179,12 +8980,80 @@ export default function Home() {
     return true;
   }, [captureGraphUndoSnapshot, measureAnchors, pushUndoEntry]);
 
+  const toggleRoadMode = useCallback((nodeId: NodeId) => {
+    const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+    const currentRoad = runtimeRef.current.roads[nodeId];
+    if (node?.kind !== "road" || !currentRoad) return false;
+    const pairedFactory = currentRoad.pairedSector
+      ? mapFactoriesRef.current[currentRoad.pairedSector]
+      : null;
+    const pairedRoad = currentRoad.pairedRoadId
+      ? pairedFactory?.runtime.roads[currentRoad.pairedRoadId]
+      : null;
+    const localConnected = connectionsRef.current.some(
+      (connection) => connection.sourceNode === nodeId || connection.targetNode === nodeId,
+    );
+    const remoteConnected = Boolean(
+      currentRoad.pairedRoadId && pairedFactory?.connections.some(
+        (connection) => (
+          connection.sourceNode === currentRoad.pairedRoadId ||
+          connection.targetNode === currentRoad.pairedRoadId
+        ),
+      ),
+    );
+    const hasBufferedItem = Boolean(
+      currentRoad.outboundType ||
+      currentRoad.inboundType ||
+      pairedRoad?.outboundType ||
+      pairedRoad?.inboundType,
+    );
+    if (localConnected || remoteConnected || hasBufferedItem) {
+      toast.error("Road direction is in use", {
+        description: "Disconnect and empty both road endpoints before changing direction.",
+      });
+      return false;
+    }
+
+    const undoSnapshot = captureGraphUndoSnapshot();
+    const nextMode = getOppositeRoadMode(currentRoad.mode);
+    const nextRuntime = cloneStoredMaterialRuntime(runtimeRef.current);
+    nextRuntime.roads[nodeId] = { ...nextRuntime.roads[nodeId], mode: nextMode };
+    if (currentRoad.pairedSector && currentRoad.pairedRoadId && pairedFactory && pairedRoad) {
+      undoSnapshot.mapFactoryStates = {
+        ...(undoSnapshot.mapFactoryStates ?? {}),
+        [currentRoad.pairedSector]: structuredClone(pairedFactory),
+      };
+      const nextPairedRuntime = cloneStoredMaterialRuntime(pairedFactory.runtime);
+      nextPairedRuntime.roads[currentRoad.pairedRoadId] = {
+        ...nextPairedRuntime.roads[currentRoad.pairedRoadId],
+        mode: getOppositeRoadMode(nextMode),
+      };
+      mapFactoriesRef.current = {
+        ...mapFactoriesRef.current,
+        [currentRoad.pairedSector]: {
+          ...pairedFactory,
+          runtime: nextPairedRuntime,
+        },
+      };
+    }
+    runtimeRef.current = nextRuntime;
+    lastPublishedRuntimeSignatureRef.current = null;
+    setRuntime(nextRuntime);
+    pushUndoEntry({ kind: "graph", snapshot: undoSnapshot });
+    window.requestAnimationFrame(measureAnchors);
+    return true;
+  }, [captureGraphUndoSnapshot, measureAnchors, pushUndoEntry]);
+
   const getNodeSize = useCallback((nodeId: NodeId, fallbackNode?: NodeSpec): NodeSize => {
+    const node = fallbackNode ?? nodesRef.current.find((candidate) => candidate.id === nodeId);
+    const nodeScale = node?.kind === "researchFoundry" ? RESEARCH_CENTER_NODE_SCALE : 1;
     const element = nodeRefs.current[nodeId];
     if (element?.offsetWidth && element.offsetHeight) {
-      return { width: element.offsetWidth, height: element.offsetHeight };
+      return {
+        width: element.offsetWidth * nodeScale,
+        height: element.offsetHeight * nodeScale,
+      };
     }
-    const node = fallbackNode ?? nodesRef.current.find((candidate) => candidate.id === nodeId);
     return node ? getEstimatedNodeSize(node) : { width: 258, height: 201 };
   }, []);
 
@@ -8243,6 +9112,97 @@ export default function Home() {
     return curveIntersectsBlackHole(start, end, connection.sourcePort, holes) ||
       curveIntersectsLake(start, end, connection.sourcePort, lakes);
   }), [getPortWorldPosition]);
+
+  const getPairedRoadMovePlan = useCallback((
+    roadNode: NodeSpec,
+    candidatePosition: Position,
+  ) => {
+    if (roadNode.kind !== "road") return null;
+    const sourceSector = activeMapSectorRef.current;
+    const sourceRoad = runtimeRef.current.roads[roadNode.id];
+    if (!sourceRoad?.pairedSector || !sourceRoad.pairedRoadId) return null;
+
+    const sourceSize = getEstimatedNodeSize(roadNode);
+    const sourcePlayArea = getPlayAreaWorldSize(runtimeRef.current.research, sourceSector);
+    const placement = getRoadEdgePlacement(
+      candidatePosition,
+      sourceSize,
+      sourcePlayArea,
+      sourceSector,
+      mapNodeProgressRef.current,
+    );
+    if (
+      !placement ||
+      placement.edge !== sourceRoad.edge ||
+      placement.adjacentSector !== sourceRoad.pairedSector
+    ) return null;
+    if (Object.entries(runtimeRef.current.roads ?? {}).some(([nodeId, road]) =>
+      nodeId !== roadNode.id && road.edge === placement.edge
+    )) return null;
+
+    const pairedFactory = mapFactoriesRef.current[sourceRoad.pairedSector];
+    if (!pairedFactory) return null;
+    const pairedNode = getMapFactoryNodes(pairedFactory).find(
+      (node) => node.id === sourceRoad.pairedRoadId && node.kind === "road",
+    );
+    const pairedRoad = pairedFactory.runtime.roads[sourceRoad.pairedRoadId];
+    const oppositeEdge = OPPOSITE_MAP_EDGE[placement.edge];
+    if (!pairedNode || !pairedRoad || pairedRoad.edge !== oppositeEdge) return null;
+    if (Object.entries(pairedFactory.runtime.roads ?? {}).some(([nodeId, road]) =>
+      nodeId !== sourceRoad.pairedRoadId && road.edge === oppositeEdge
+    )) return null;
+
+    const destinationPlayArea = getPlayAreaWorldSize(
+      runtimeRef.current.research,
+      sourceRoad.pairedSector,
+    );
+    const pairedSize = getEstimatedNodeSize(pairedNode);
+    const sourceCenterX = placement.position.x + sourceSize.width / 2;
+    const sourceCenterY = placement.position.y + sourceSize.height / 2;
+    const proportionalCenter = placement.edge === "east" || placement.edge === "west"
+      ? sourceCenterY / sourcePlayArea.height * destinationPlayArea.height
+      : sourceCenterX / sourcePlayArea.width * destinationPlayArea.width;
+    const baseParallelPosition = placement.edge === "east" || placement.edge === "west"
+      ? proportionalCenter - pairedSize.height / 2
+      : proportionalCenter - pairedSize.width / 2;
+    const pairedPosition = oppositeEdge === "west" || oppositeEdge === "east"
+      ? {
+          x: oppositeEdge === "west" ? 0 : destinationPlayArea.width - pairedSize.width,
+          y: Math.max(
+            12,
+            Math.min(destinationPlayArea.height - pairedSize.height - 12, baseParallelPosition),
+          ),
+        }
+      : {
+          x: Math.max(
+            12,
+            Math.min(destinationPlayArea.width - pairedSize.width - 12, baseParallelPosition),
+          ),
+          y: oppositeEdge === "north" ? 0 : destinationPlayArea.height - pairedSize.height,
+        };
+    const pairedRect = { ...pairedPosition, ...pairedSize };
+    if (Object.values(pairedFactory.runtime.blackHoles ?? {}).some((hole) =>
+      rectangleIntersectsBlackHole(pairedRect, hole)
+    )) return null;
+    if (Object.values(pairedFactory.runtime.lakes ?? {}).some((lake) =>
+      rectangleIntersectsLake(pairedRect, lake)
+    )) return null;
+    if (getMapFactoryNodes(pairedFactory).some((node) => {
+      if (node.id === sourceRoad.pairedRoadId) return false;
+      const position = pairedFactory.positions[node.id];
+      return Boolean(position && rectanglesOverlap(
+        pairedRect,
+        { ...position, ...getEstimatedNodeSize(node) },
+      ));
+    })) return null;
+
+    return {
+      sourcePosition: placement.position,
+      pairedSector: sourceRoad.pairedSector,
+      pairedRoadId: sourceRoad.pairedRoadId,
+      pairedPosition,
+    };
+  }, []);
 
   const recordRapidFieldClick = useCallback((
     point: Position,
@@ -8336,7 +9296,10 @@ export default function Home() {
 
   const removeFilledBlackHole = useCallback((holeId: NodeId) => {
     const hole = runtimeRef.current.blackHoles[holeId];
-    if (!hole || hole.stoneFilled < getBlackHoleStoneRequirement(hole)) return;
+    if (!hole || hole.stoneFilled < getBlackHoleStoneRequirement(
+      hole,
+      getMapNodeValue(activeMapSectorRef.current),
+    )) return;
     const undoSnapshot = captureGraphUndoSnapshot();
     const nextRuntime = cloneStoredMaterialRuntime(runtimeRef.current);
     delete nextRuntime.blackHoles[holeId];
@@ -8623,6 +9586,7 @@ export default function Home() {
                       pairedSector: null,
                       pairedRoadId: null,
                       edge: null,
+                      mode: "export" as const,
                     },
                   },
                 }
@@ -8876,13 +9840,16 @@ export default function Home() {
     const construction = current.construction[nodeId];
     if (construction && !construction.complete) return;
     const excludedNodeIds = new Set([nodeId]);
-    const available = getStoredItemAmount(
-      current,
-      nodesRef.current,
-      connectionsRef.current,
-      itemType,
-      excludedNodeIds,
-    );
+    const isResearchCoreFeed = node.kind === "researchFoundry" && isCoreType(itemType);
+    const available = isResearchCoreFeed
+      ? normalizeItemStore(current.inventory, BASE_INVENTORY_CAPACITY)[itemType] ?? 0
+      : getStoredItemAmount(
+          current,
+          nodesRef.current,
+          connectionsRef.current,
+          itemType,
+          excludedNodeIds,
+        );
     if (available <= 0) return;
 
     if (isProcessorKind(node.kind)) {
@@ -9023,18 +9990,10 @@ export default function Home() {
       };
       const coreItems = getResearchFoundryCoreItems(foundry);
       const stored = getResearchFoundryCores(foundry);
-      const remainingCapacity = Math.max(0, PRODUCTION_INGREDIENT_CAPACITY - stored);
-      const transferred = Math.min(remainingCapacity, available);
+      const transferred = Math.min(1, available);
       if (transferred <= 0) return;
       const next = cloneStoredMaterialRuntime(current);
-      consumeStoredMaterialInPlace(
-        next,
-        nodesRef.current,
-        connectionsRef.current,
-        itemType,
-        transferred,
-        excludedNodeIds,
-      );
+      next.inventory[itemType] = Math.max(0, (next.inventory[itemType] ?? 0) - transferred);
       next.researchFoundries = {
           ...next.researchFoundries,
           [nodeId]: {
@@ -9104,6 +10063,10 @@ export default function Home() {
   const configureMiningDrill = useCallback((nodeId: NodeId, targetType: MiningDrillTarget) => {
     const target = getMiningTarget(targetType);
     if (!target) return;
+    if (getMapNodeValue(activeMapSectorRef.current) < target.minimumMapNodeValue) {
+      toast.error(`${target.title} requires a tier ${target.minimumMapNodeValue} map node`);
+      return;
+    }
     const updatedNodes = nodesRef.current.map((node) =>
       node.id === nodeId && node.kind === "miningDrill"
         ? { ...node, color: RESOURCE_COLORS[targetType] }
@@ -9544,6 +10507,7 @@ export default function Home() {
           researchCenterUnlocked: true,
           roadUnlocked: true,
           areaExpansion1Unlocked: true,
+          automataCoreUnlocked: true,
           treePlanterUnlocked: true,
           miningDrillUnlocked: true,
         },
@@ -9569,7 +10533,7 @@ export default function Home() {
   const unlockAllResearchForDevelopment = useCallback(() => {
     const current = runtimeRef.current;
     const newlyCompletedProjects = RESEARCH_PROJECTS.filter(
-      (project) => !isResearchProjectUnlocked(current.research, project.id),
+      (project) => !project.repeatable && !isResearchProjectUnlocked(current.research, project.id),
     );
     const next: Runtime = {
       ...current,
@@ -9579,7 +10543,10 @@ export default function Home() {
         available: true,
         activeProject: null,
         progress: Object.fromEntries(
-          RESEARCH_PROJECTS.map((project) => [project.id, getResearchProjectCost(project.id)]),
+          RESEARCH_PROJECTS.map((project) => [
+            project.id,
+            project.repeatable ? 0 : getResearchProjectCost(project.id, current.research),
+          ]),
         ) as Record<ResearchProjectId, number>,
         logisticsUnlocked: true,
         kilnUnlocked: true,
@@ -9595,6 +10562,7 @@ export default function Home() {
         treePlanterUnlocked: true,
         miningDrillUnlocked: true,
         explorationUnlocked: true,
+        automataCoreUnlocked: true,
       },
       researchFoundries: Object.fromEntries(
         Object.entries(current.researchFoundries).map(([nodeId, foundry]) => [
@@ -10240,6 +11208,7 @@ export default function Home() {
                 pairedSector: null,
                 pairedRoadId: null,
                 edge: null,
+                mode: "export" as const,
               }),
               outboundType: null,
             },
@@ -10549,6 +11518,9 @@ export default function Home() {
       mapNodeProgressRef.current,
     );
     if (!placement) return false;
+    if (Object.entries(runtimeRef.current.roads ?? {}).some(([nodeId, road]) => (
+      nodeId !== roadNode.id && road.edge === placement.edge
+    ))) return false;
     const destinationFactory = mapFactoriesRef.current[placement.adjacentSector];
     if (!destinationFactory) return false;
 
@@ -10561,6 +11533,9 @@ export default function Home() {
     const pairNode = createBuildableNode("road", pairId, nextSequence);
     const pairSize = getEstimatedNodeSize(pairNode);
     const oppositeEdge = OPPOSITE_MAP_EDGE[placement.edge];
+    if (Object.values(destinationFactory.runtime.roads ?? {}).some((road) => road.edge === oppositeEdge)) {
+      return false;
+    }
     const sourceCenterX = placement.position.x + sourceSize.width / 2;
     const sourceCenterY = placement.position.y + sourceSize.height / 2;
     const proportionalCenter = placement.edge === "east" || placement.edge === "west"
@@ -10588,30 +11563,22 @@ export default function Home() {
         );
       });
     };
-    const candidateOffsets = [
-      0,
-      ...Array.from({ length: 30 }, (_, index) => (index + 1) * 80)
-        .flatMap((offset) => [-offset, offset]),
-    ];
-    const pairPosition = candidateOffsets.flatMap((offset) => {
-      if (oppositeEdge === "west" || oppositeEdge === "east") {
-        return [{
+    const pairPosition = oppositeEdge === "west" || oppositeEdge === "east"
+      ? {
           x: oppositeEdge === "west" ? 0 : destinationPlayArea.width - pairSize.width,
           y: Math.max(
             12,
-            Math.min(destinationPlayArea.height - pairSize.height - 12, baseParallelPosition + offset),
+            Math.min(destinationPlayArea.height - pairSize.height - 12, baseParallelPosition),
           ),
-        }];
-      }
-      return [{
-        x: Math.max(
-          12,
-          Math.min(destinationPlayArea.width - pairSize.width - 12, baseParallelPosition + offset),
-        ),
-        y: oppositeEdge === "north" ? 0 : destinationPlayArea.height - pairSize.height,
-      }];
-    }).find((candidate) => !isDestinationBlocked(candidate));
-    if (!pairPosition) return false;
+        }
+      : {
+          x: Math.max(
+            12,
+            Math.min(destinationPlayArea.width - pairSize.width - 12, baseParallelPosition),
+          ),
+          y: oppositeEdge === "north" ? 0 : destinationPlayArea.height - pairSize.height,
+        };
+    if (isDestinationBlocked(pairPosition)) return false;
 
     if (placementUndo) {
       placementUndo.snapshot.mapFactoryStates = {
@@ -10620,12 +11587,14 @@ export default function Home() {
       };
     }
     const destinationRuntime = cloneStoredMaterialRuntime(destinationFactory.runtime);
+    const sourceRoad = makeRoadRuntimeState(runtimeRef.current.roads[roadNode.id], roadNode.id);
     destinationRuntime.roads[pairId] = {
       outboundType: null,
       inboundType: null,
       pairedSector: sourceSector,
       pairedRoadId: roadNode.id,
       edge: oppositeEdge,
+      mode: getOppositeRoadMode(sourceRoad.mode),
     };
     destinationRuntime.construction[pairId] = { progress: 100, complete: true };
     mapFactoriesRef.current = {
@@ -10643,13 +11612,7 @@ export default function Home() {
     };
     const activeRuntime = cloneStoredMaterialRuntime(runtimeRef.current);
     activeRuntime.roads[roadNode.id] = {
-      ...(activeRuntime.roads[roadNode.id] ?? {
-        outboundType: null,
-        inboundType: null,
-        pairedSector: null,
-        pairedRoadId: null,
-        edge: null,
-      }),
+      ...sourceRoad,
       pairedSector: placement.adjacentSector,
       pairedRoadId: pairId,
       edge: placement.edge,
@@ -10658,6 +11621,37 @@ export default function Home() {
     setRuntime(activeRuntime);
     return true;
   }, []);
+
+  const commitPairedRoadMove = useCallback((
+    roadNode: NodeSpec,
+    sourcePosition: Position,
+    origin: Position,
+  ) => {
+    const plan = getPairedRoadMovePlan(roadNode, sourcePosition);
+    if (!plan) return false;
+    const pairedFactory = mapFactoriesRef.current[plan.pairedSector];
+    if (!pairedFactory) return false;
+
+    const undoSnapshot = captureGraphUndoSnapshot();
+    undoSnapshot.positions[roadNode.id] = { ...origin };
+    undoSnapshot.mapFactoryStates = {
+      ...(undoSnapshot.mapFactoryStates ?? {}),
+      [plan.pairedSector]: structuredClone(pairedFactory),
+    };
+    mapFactoriesRef.current = {
+      ...mapFactoriesRef.current,
+      [plan.pairedSector]: {
+        ...pairedFactory,
+        positions: {
+          ...pairedFactory.positions,
+          [plan.pairedRoadId]: { ...plan.pairedPosition },
+        },
+      },
+    };
+    pushUndoEntry({ kind: "graph", snapshot: undoSnapshot });
+    window.requestAnimationFrame(measureAnchors);
+    return true;
+  }, [captureGraphUndoSnapshot, getPairedRoadMovePlan, measureAnchors, pushUndoEntry]);
 
   const finishNodePlacement = useCallback((repeatPlacement: boolean) => {
     const nodeId = placingNodeRef.current;
@@ -10749,7 +11743,7 @@ export default function Home() {
       }
       updatePlacementBlocked(true);
       toast.error("Road endpoint blocked", {
-        description: "There is no open matching position on the opposite edge of the adjacent map.",
+        description: "The exact matching position is blocked, or that side of the adjacent map already has a Road.",
       });
       return false;
     }
@@ -10811,6 +11805,73 @@ export default function Home() {
     unlockLogisticsBuildings,
     updatePlacementBlocked,
   ]);
+
+  const movePlacingNodeToPointer = useCallback((clientX: number, clientY: number) => {
+    const nodeId = placingNodeRef.current;
+    if (!nodeId) return false;
+    const placingNode = nodesRef.current.find((node) => node.id === nodeId);
+    if (!placingNode) return false;
+    const { width: placementWidth, height: placementHeight } = getNodeSize(nodeId, placingNode);
+    const placementOffsetY = placingNode.kind === "joint" || placingNode.kind === "road" || placingNode.kind === "powerSplitter"
+      ? placementHeight / 2
+      : 42;
+    const point = pointFromEvent(clientX, clientY);
+    const playAreaWorldSize = getPlayAreaWorldSize(
+      runtimeRef.current.research,
+      activeMapSectorRef.current,
+    );
+    let position = {
+      x: Math.max(12, Math.min(playAreaWorldSize.width - placementWidth - 12, point.x - placementWidth / 2)),
+      y: Math.max(52, Math.min(playAreaWorldSize.height - placementHeight - 12, point.y - placementOffsetY)),
+    };
+    const roadPlacement = placingNode.kind === "road"
+      ? getRoadEdgePlacement(
+          position,
+          { width: placementWidth, height: placementHeight },
+          playAreaWorldSize,
+          activeMapSectorRef.current,
+          mapNodeProgressRef.current,
+        )
+      : null;
+    if (roadPlacement) position = roadPlacement.position;
+    const nextPositions = {
+      ...positionsRef.current,
+      [nodeId]: position,
+    };
+    positionsRef.current = nextPositions;
+    setPositions(nextPositions);
+    const blocked = overlapsAnotherNode(placingNode, position) ||
+      (placingNode.kind === "road" && !roadPlacement);
+    updatePlacementBlocked(blocked);
+    const splitterInsertionTarget = placingNode.kind === "splitter" && !blocked
+      ? findInsertionTarget(nodeId, position)
+      : null;
+    insertionTargetRef.current = splitterInsertionTarget;
+    setInsertionTarget(splitterInsertionTarget);
+    return true;
+  }, [findInsertionTarget, getNodeSize, overlapsAnotherNode, pointFromEvent, updatePlacementBlocked]);
+
+  const finishShortcutBuildDrag = useCallback((
+    clientX: number,
+    clientY: number,
+    repeatPlacement: boolean,
+  ) => {
+    const bounds = workspaceRef.current?.getBoundingClientRect();
+    const releasedOnField = Boolean(
+      bounds &&
+      clientX >= bounds.left &&
+      clientX <= bounds.right &&
+      clientY >= bounds.top &&
+      clientY <= bounds.bottom,
+    );
+    if (!releasedOnField) {
+      cancelNodeInHand();
+      return;
+    }
+    lastCanvasPointerRef.current = { x: clientX, y: clientY };
+    movePlacingNodeToPointer(clientX, clientY);
+    finishNodePlacement(repeatPlacement);
+  }, [cancelNodeInHand, finishNodePlacement, movePlacingNodeToPointer]);
 
   useEffect(() => {
     const getSelectionBoxHits = (start: Position, end: Position) => {
@@ -10973,46 +12034,7 @@ export default function Home() {
         lastCanvasPointerRef.current = { x: event.clientX, y: event.clientY };
       }
       if (placingNodeRef.current && bounds) {
-        const nodeId = placingNodeRef.current;
-        const placingNode = nodesRef.current.find((node) => node.id === nodeId);
-        if (!placingNode) return;
-        const { width: placementWidth, height: placementHeight } = getNodeSize(nodeId, placingNode);
-        const placementOffsetY = placingNode?.kind === "joint" || placingNode?.kind === "road" || placingNode?.kind === "powerSplitter"
-          ? placementHeight / 2
-          : 42;
-        const point = pointFromEvent(event.clientX, event.clientY);
-        const playAreaWorldSize = getPlayAreaWorldSize(
-          runtimeRef.current.research,
-          activeMapSectorRef.current,
-        );
-        let position = {
-          x: Math.max(12, Math.min(playAreaWorldSize.width - placementWidth - 12, point.x - placementWidth / 2)),
-          y: Math.max(52, Math.min(playAreaWorldSize.height - placementHeight - 12, point.y - placementOffsetY)),
-        };
-        const roadPlacement = placingNode.kind === "road"
-          ? getRoadEdgePlacement(
-              position,
-              { width: placementWidth, height: placementHeight },
-              playAreaWorldSize,
-              activeMapSectorRef.current,
-              mapNodeProgressRef.current,
-            )
-          : null;
-        if (roadPlacement) position = roadPlacement.position;
-        const nextPositions = {
-          ...positionsRef.current,
-          [nodeId]: position,
-        };
-        positionsRef.current = nextPositions;
-        setPositions(nextPositions);
-        const blocked = overlapsAnotherNode(placingNode, position) ||
-          (placingNode.kind === "road" && !roadPlacement);
-        updatePlacementBlocked(blocked);
-        const splitterInsertionTarget = placingNode.kind === "splitter" && !blocked
-          ? findInsertionTarget(nodeId, position)
-          : null;
-        insertionTargetRef.current = splitterInsertionTarget;
-        setInsertionTarget(splitterInsertionTarget);
+        movePlacingNodeToPointer(event.clientX, event.clientY);
         return;
       }
       if (panRef.current) {
@@ -11102,6 +12124,13 @@ export default function Home() {
         });
 
         const movingNodeIds = new Set(drag.nodeIds);
+        const primaryNode = nodesRef.current.find((node) => node.id === drag.primaryNodeId);
+        const roadMovePlan = primaryNode?.kind === "road" && drag.nodeIds.length === 1
+          ? getPairedRoadMovePlan(primaryNode, nextPositions[drag.primaryNodeId])
+          : undefined;
+        if (roadMovePlan) {
+          nextPositions[drag.primaryNodeId] = { ...roadMovePlan.sourcePosition };
+        }
         const blockedByNode = drag.nodeIds.some((nodeId) => {
           const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
           const position = nextPositions[nodeId];
@@ -11111,7 +12140,8 @@ export default function Home() {
           nextPositions,
           movingNodeIds,
         );
-        const movementBlocked = blockedByNode || blockedByBlackHoleCable;
+        const blockedByRoadPair = primaryNode?.kind === "road" && !roadMovePlan;
+        const movementBlocked = blockedByNode || blockedByBlackHoleCable || blockedByRoadPair;
         drag.overlapping = movementBlocked;
         if (!movementBlocked) {
           drag.lastValidPositions = Object.fromEntries(
@@ -11126,9 +12156,7 @@ export default function Home() {
         setPositions(nextPositions);
         const primaryPosition = nextPositions[drag.primaryNodeId];
         setDragCollisionBlocked(movementBlocked);
-        const allowsDirectSplitterInsertion = nodesRef.current.find(
-          (node) => node.id === drag.primaryNodeId,
-        )?.kind === "splitter";
+        const allowsDirectSplitterInsertion = primaryNode?.kind === "splitter";
         const target =
           drag.nodeIds.length === 1 &&
           drag.moved &&
@@ -11228,6 +12256,8 @@ export default function Home() {
       }
       if (dragRef.current) {
         const drag = dragRef.current;
+        const draggedNode = nodesRef.current.find((node) => node.id === drag.primaryNodeId);
+        const isRoadMove = draggedNode?.kind === "road" && drag.nodeIds.length === 1;
         let insertedIntoConnection = false;
         if (drag.overlapping) {
           const restoredPositions = { ...positionsRef.current };
@@ -11257,7 +12287,7 @@ export default function Home() {
             pushUndoEntry({ kind: "graph", snapshot: insertionUndoSnapshot });
           }
         }
-        const positionChanged = drag.nodeIds.some((nodeId) => {
+        let positionChanged = drag.nodeIds.some((nodeId) => {
           const origin = drag.origins[nodeId];
           const current = positionsRef.current[nodeId];
           return Boolean(
@@ -11266,7 +12296,25 @@ export default function Home() {
             (Math.abs(origin.x - current.x) > 0.01 || Math.abs(origin.y - current.y) > 0.01)
           );
         });
-        if (!insertedIntoConnection && drag.moved && positionChanged) {
+        let pairedRoadMoveCommitted = false;
+        if (isRoadMove && draggedNode && drag.moved && positionChanged) {
+          const origin = drag.origins[draggedNode.id];
+          const current = positionsRef.current[draggedNode.id];
+          if (event.type === "pointerup" && origin && current) {
+            pairedRoadMoveCommitted = commitPairedRoadMove(draggedNode, current, origin);
+          }
+          if (!pairedRoadMoveCommitted) {
+            const restoredPositions = { ...positionsRef.current };
+            Object.entries(drag.origins).forEach(([nodeId, position]) => {
+              if (position) restoredPositions[nodeId] = { ...position };
+            });
+            positionsRef.current = restoredPositions;
+            setPositions(restoredPositions);
+            positionChanged = false;
+            window.requestAnimationFrame(measureAnchors);
+          }
+        }
+        if (!isRoadMove && !insertedIntoConnection && drag.moved && positionChanged) {
           pushUndoEntry({
             kind: "movement",
             positions: Object.fromEntries(
@@ -11331,6 +12379,7 @@ export default function Home() {
     };
   }, [
     captureGraphUndoSnapshot,
+    commitPairedRoadMove,
     connectPorts,
     connecting,
     announceMultiNodeSelection,
@@ -11338,7 +12387,10 @@ export default function Home() {
     findInsertionTarget,
     findPortHandle,
     getNodeSize,
+    getPairedRoadMovePlan,
     insertNodeIntoConnection,
+    measureAnchors,
+    movePlacingNodeToPointer,
     movedConnectionsCrossBlackHole,
     openMultiConnectionManager,
     overlapsAnotherNode,
@@ -11364,8 +12416,8 @@ export default function Home() {
       const previous = runtimeRef.current;
       const next: Runtime = {
         ironOre: { ...previous.ironOre },
-        copperOre: { ...(previous.copperOre ?? { remaining: RESOURCE_CAPACITIES.copperOre }) },
-        stone: { ...(previous.stone ?? { remaining: RESOURCE_CAPACITIES.stone }) },
+        copperOre: { ...(previous.copperOre ?? makeRuntime().copperOre) },
+        stone: { ...(previous.stone ?? makeRuntime().stone) },
         forest: {
           ...previous.forest,
           regenerationElapsed: previous.forest.regenerationElapsed ?? 0,
@@ -11425,6 +12477,10 @@ export default function Home() {
         research: {
           ...makeResearchState(),
           ...previous.research,
+          mapNodeResearchCompletions: Math.max(
+            0,
+            Math.floor(Number(previous.research?.mapNodeResearchCompletions) || 0),
+          ),
           progress: {
             ...makeResearchState().progress,
             ...(previous.research?.progress ?? {}),
@@ -11440,7 +12496,10 @@ export default function Home() {
           Object.entries(previous.joints ?? {}).map(([id, state]) => [id, { ...state }]),
         ),
         roads: Object.fromEntries(
-          Object.entries(previous.roads ?? {}).map(([id, state]) => [id, { ...state }]),
+          Object.entries(previous.roads ?? {}).map(([id, state]) => [
+            id,
+            makeRoadRuntimeState(state, id),
+          ]),
         ),
         inventorySources: Object.fromEntries(
           Object.entries(previous.inventorySources ?? {}).map(([id, state]) => [
@@ -11538,7 +12597,7 @@ export default function Home() {
       };
       let dynamicConnectionsDirty = false;
 
-      if (next.forest.remaining >= RESOURCE_CAPACITIES.forest) {
+      if (next.forest.remaining >= next.forest.capacity) {
         next.forest.regenerationElapsed = 0;
       } else {
         const accumulatedRegeneration = next.forest.regenerationElapsed + elapsed;
@@ -11547,11 +12606,11 @@ export default function Home() {
         );
         if (regeneratedLogs > 0) {
           next.forest.remaining = Math.min(
-            RESOURCE_CAPACITIES.forest,
+            next.forest.capacity,
             next.forest.remaining + regeneratedLogs,
           );
         }
-        next.forest.regenerationElapsed = next.forest.remaining >= RESOURCE_CAPACITIES.forest
+        next.forest.regenerationElapsed = next.forest.remaining >= next.forest.capacity
           ? 0
           : accumulatedRegeneration % FOREST_BASE_REGENERATION_DURATION;
       }
@@ -11608,7 +12667,10 @@ export default function Home() {
           edge.targetPort === BLACK_HOLE_INPUT_PORT.id &&
           product === ResourceType.STONE
         ) {
-          const requiredStone = getBlackHoleStoneRequirement(targetBlackHole);
+          const requiredStone = getBlackHoleStoneRequirement(
+            targetBlackHole,
+            getMapNodeValue(activeMapSectorRef.current),
+          );
           if (targetBlackHole.stoneFilled < requiredStone) {
             targetBlackHole.stoneFilled = Math.min(
               requiredStone,
@@ -11647,7 +12709,7 @@ export default function Home() {
           };
           next.researchFoundries[edge.targetNode] = foundry;
           const coreItems = getResearchFoundryCoreItems(foundry);
-          if (coreItems.length < PRODUCTION_INGREDIENT_CAPACITY) {
+          if (getResearchFoundryCoreCount(foundry, product) < RESEARCH_CORE_CAPACITY_PER_TYPE) {
             const nextCoreItems = [...coreItems, product as CoreType];
             foundry.coreItems = nextCoreItems;
             foundry.cores = nextCoreItems.length;
@@ -11689,10 +12751,10 @@ export default function Home() {
           targetReady &&
           edge.targetPort === "forest-growth-in" &&
           product === ResourceType.FOREST_GROWTH &&
-          next.forest.remaining < RESOURCE_CAPACITIES.forest
+          next.forest.remaining < next.forest.capacity
         ) {
           next.forest.remaining = Math.min(
-            RESOURCE_CAPACITIES.forest,
+            next.forest.capacity,
             next.forest.remaining + 1,
           );
           fired.push(edge.id);
@@ -11793,6 +12855,25 @@ export default function Home() {
             targetFilter.bufferedType === null
           ) {
             targetFilter.bufferedType = product;
+            fired.push(edge.id);
+            return true;
+          }
+        }
+
+        if (
+          targetNode?.kind === "road" &&
+          targetReady &&
+          edge.targetPort === "road-in" &&
+          isInventoryItemType(product)
+        ) {
+          const road = next.roads[edge.targetNode];
+          if (
+            road?.mode === "export" &&
+            road.outboundType === null &&
+            road.pairedRoadId &&
+            road.pairedSector
+          ) {
+            road.outboundType = product;
             fired.push(edge.id);
             return true;
           }
@@ -11922,20 +13003,6 @@ export default function Home() {
               next.produced[ResourceType.WATER] += 1;
               break;
             }
-          }
-        }
-
-        if (
-          targetNode?.kind === "road" &&
-          targetReady &&
-          edge.targetPort === "road-in" &&
-          isInventoryItemType(product)
-        ) {
-          const road = next.roads[edge.targetNode];
-          if (road && road.outboundType === null && road.pairedRoadId && road.pairedSector) {
-            road.outboundType = product;
-            fired.push(edge.id);
-            return true;
           }
         }
       });
@@ -12174,7 +13241,12 @@ export default function Home() {
             return;
           }
           const activeProjectProgress = next.research.progress[activeProject];
-          if (getResearchFoundryProjectCoreCount(foundry, activeProject, activeProjectProgress) <= 0) {
+          if (getResearchFoundryProjectCoreCount(
+            foundry,
+            activeProject,
+            activeProjectProgress,
+            next.research,
+          ) <= 0) {
             foundry.progress = 0;
             return;
           }
@@ -12188,6 +13260,7 @@ export default function Home() {
             const requiredCoreType = getResearchProjectRequiredCoreType(
               activeProject,
               activeProjectProgress,
+              next.research,
             );
             const consumedCoreIndex = requiredCoreType
               ? coreItems.findIndex((coreType) => coreType === requiredCoreType)
@@ -12195,46 +13268,14 @@ export default function Home() {
             const remainingCoreItems = coreItems.filter((_, index) => index !== consumedCoreIndex);
             foundry.coreItems = remainingCoreItems;
             foundry.cores = remainingCoreItems.length;
-            const projectCost = getResearchProjectCost(activeProject);
+            const projectCost = getResearchProjectCost(activeProject, next.research);
             next.research.progress[activeProject] = Math.min(
               projectCost,
               next.research.progress[activeProject] + 1,
             );
             if (next.research.progress[activeProject] >= projectCost) {
-              if (activeProject === "logistics") {
-                next.research.logisticsUnlocked = true;
-              } else if (activeProject === "kiln") {
-                next.research.kilnUnlocked = true;
-              } else if (activeProject === "charcoalGenerator") {
-                next.research.charcoalGeneratorUnlocked = true;
-              } else if (activeProject === "furnace") {
-                next.research.furnaceUnlocked = true;
-              } else if (activeProject === "refiner") {
-                next.research.refinerUnlocked = true;
-              } else if (activeProject === "assembler") {
-                next.research.assemblerUnlocked = true;
-              } else if (activeProject === "researchCenter") {
-                next.research.researchCenterUnlocked = true;
-              } else if (activeProject === "road") {
-                next.research.roadUnlocked = true;
-              } else if (activeProject === "areaExpansion1") {
-                next.research.areaExpansion1Unlocked = true;
-              } else if (activeProject === "extractor2") {
-                next.research.extractor2Unlocked = true;
-              } else if (activeProject === "extractor3") {
-                next.research.extractor3Unlocked = true;
-              } else if (activeProject === "treePlanter") {
-                next.research.treePlanterUnlocked = true;
-              } else if (activeProject === "miningDrill") {
-                next.research.miningDrillUnlocked = true;
-              } else {
-                if (!next.research.explorationUnlocked) {
-                  next.mapPoints = Math.max(0, next.mapPoints) + 1;
-                }
-                next.research.explorationUnlocked = true;
-              }
+              applyResearchProjectCompletion(next, activeProject);
               announceResearchCompletion(activeProject);
-              next.research.activeProject = null;
             }
           }
         });
@@ -12262,7 +13303,7 @@ export default function Home() {
             !outputEdge ||
             !generator ||
             generator.power < TREE_PLANTER_POWER_COST ||
-            next.forest.remaining >= RESOURCE_CAPACITIES.forest
+            next.forest.remaining >= next.forest.capacity
           ) {
             planter.progress = 0;
             return;
@@ -12500,7 +13541,11 @@ export default function Home() {
           const construction = next.construction[node.id];
           const road = next.roads[node.id];
           if (!road || (construction && !construction.complete)) return;
-          if (road.inboundType && deliverProduct(node.id, "road-out", road.inboundType)) {
+          if (
+            road.mode === "import" &&
+            road.inboundType &&
+            deliverProduct(node.id, "road-out", road.inboundType)
+          ) {
             road.inboundType = null;
           }
         });
@@ -12755,9 +13800,15 @@ export default function Home() {
       suppressedNodeContextMenuRef.current = null;
       selectionBoxRef.current = null;
       const interruptedDrag = dragRef.current;
-      if (interruptedDrag?.overlapping) {
+      const interruptedNode = interruptedDrag
+        ? nodesRef.current.find((node) => node.id === interruptedDrag.primaryNodeId)
+        : null;
+      if (interruptedDrag && (interruptedDrag.overlapping || interruptedNode?.kind === "road")) {
         const restoredPositions = { ...positionsRef.current };
-        Object.entries(interruptedDrag.lastValidPositions).forEach(([nodeId, position]) => {
+        const positionsToRestore = interruptedNode?.kind === "road"
+          ? interruptedDrag.origins
+          : interruptedDrag.lastValidPositions;
+        Object.entries(positionsToRestore).forEach(([nodeId, position]) => {
           if (position) restoredPositions[nodeId] = position;
         });
         positionsRef.current = restoredPositions;
@@ -12830,17 +13881,6 @@ export default function Home() {
       }
       return;
     }
-    if (clickedNode?.kind === "road") {
-      selectedNodesRef.current = [nodeId];
-      prioritizedBoxSelectionRef.current = [];
-      setSelectedNodes([nodeId]);
-      setSelectedConnection(null);
-      setActiveControlGroupId(null);
-      individualControlNodeRef.current = nodeId;
-      setIndividualControlNodeId(nodeId);
-      return;
-    }
-
     const controlGroup = controlGroupsRef.current.find((group) => group.nodeIds.includes(nodeId));
     const isIndividualControl = individualControlNodeRef.current === nodeId || event.detail >= 2;
     const currentSelection = selectedNodesRef.current;
@@ -12871,6 +13911,7 @@ export default function Home() {
       individualControlNodeRef.current = null;
       setIndividualControlNodeId(null);
     }
+    if (clickedNode?.kind === "road") nodeIds = [nodeId];
     nodeIds = nodeIds.filter((selectedNodeId) => {
       const selectedNode = nodesRef.current.find((node) => node.id === selectedNodeId);
       return Boolean(selectedNode && !isResourceNodeKind(selectedNode.kind));
@@ -13037,7 +14078,12 @@ export default function Home() {
     const current = runtimeRef.current;
     if (
       getResearchMilestoneRequirement(projectId) ||
-      !canSelectResearchProject(current, nodesRef.current) ||
+      !canSelectResearchProject(
+        current,
+        nodesRef.current,
+        mapFactoriesRef.current,
+        activeMapSectorRef.current,
+      ) ||
       !isResearchProjectPrerequisiteSatisfied(current.research, projectId) ||
       isResearchProjectUnlocked(current.research, projectId)
     ) return;
@@ -13057,6 +14103,29 @@ export default function Home() {
     };
     runtimeRef.current = next;
     setRuntime(next);
+    mapFactoriesRef.current = Object.fromEntries(
+      Object.entries(mapFactoriesRef.current).map(([sectorKey, factory]) => [
+        sectorKey,
+        sectorKey === activeMapSectorRef.current
+          ? factory
+          : {
+              ...factory,
+              runtime: {
+                ...factory.runtime,
+                research: {
+                  ...next.research,
+                  progress: { ...next.research.progress },
+                },
+                researchFoundries: Object.fromEntries(
+                  Object.entries(factory.runtime.researchFoundries).map(([nodeId, foundry]) => [
+                    nodeId,
+                    { ...foundry, progress: 0 },
+                  ]),
+                ),
+              },
+            },
+      ]),
+    );
   }, []);
 
   const unlockSelectedMapNode = useCallback(() => {
@@ -13158,17 +14227,18 @@ export default function Home() {
       });
       return;
     }
-    const destination = advanceMapFactoryInBackground(
-      destinationSnapshot,
-      Date.now() - destinationSnapshot.lastSimulatedAt,
-      currentRuntime.research,
-    );
+    const destination = advanceMapFactoryInBackground(destinationSnapshot, {
+      sectorKey,
+      elapsedMs: Date.now() - destinationSnapshot.lastSimulatedAt,
+      sharedResearch: currentRuntime.research,
+      sharedMapPoints: currentRuntime.mapPoints,
+    });
     const destinationRuntime = cloneStoredMaterialRuntime(destination.runtime);
     destinationRuntime.research = {
-      ...currentRuntime.research,
-      progress: { ...currentRuntime.research.progress },
+      ...destination.runtime.research,
+      progress: { ...destination.runtime.research.progress },
     };
-    destinationRuntime.mapPoints = currentRuntime.mapPoints;
+    destinationRuntime.mapPoints = destination.runtime.mapPoints;
     destinationRuntime.produced = Object.fromEntries(
       INVENTORY_ITEMS.map(({ type }) => [
         type,
@@ -13360,6 +14430,7 @@ export default function Home() {
     setSelectedMapSector(null);
     activeMapSectorRef.current = MAP_HOME_SECTOR;
     mapFactoriesGeneratedAtStartRef.current = true;
+    appliedAreaExpansionLayoutLevelRef.current = 0;
     mapFactoriesRef.current = generateMapFactoriesAtGameStart(fresh, MIN_ZOOM);
     setActiveMapSector(MAP_HOME_SECTOR);
     setMapNodeDialogSector(null);
@@ -13676,6 +14747,7 @@ export default function Home() {
         normalizedActiveMapSector &&
         isMapNodeUnlocked(nextMapNodeProgress, normalizedActiveMapSector)
       ) ? normalizedActiveMapSector : MAP_HOME_SECTOR;
+      const loadedActiveResourceCapacity = getMapNodeStartingResourceCapacity(loadedActiveMapSector);
       const loadedMapFactories = Object.fromEntries(
         Object.entries(payload.mapFactories ?? {}).map(([sectorKey, factory]) => {
           const normalizedSectorKey = normalizeStoredMapSectorKey(
@@ -13689,10 +14761,21 @@ export default function Home() {
             Array.isArray(factory.connections) &&
             factory.runtime
           )) return null;
+          const startingResourceCapacity = getMapNodeStartingResourceCapacity(normalizedSectorKey);
           return [normalizedSectorKey, {
             ...factory,
             runtime: {
               ...factory.runtime,
+              ironOre: normalizeBaseResourceState(factory.runtime.ironOre, startingResourceCapacity),
+              copperOre: normalizeBaseResourceState(factory.runtime.copperOre, startingResourceCapacity),
+              stone: normalizeBaseResourceState(factory.runtime.stone, startingResourceCapacity),
+              forest: {
+                ...normalizeBaseResourceState(factory.runtime.forest, startingResourceCapacity),
+                regenerationElapsed: Math.max(
+                  0,
+                  Number(factory.runtime.forest?.regenerationElapsed) || 0,
+                ),
+              },
               blackHoles: normalizeBlackHoles(factory.runtime.blackHoles),
               lakes: normalizeLakes(factory.runtime.lakes),
               inventoryCapacity: BASE_INVENTORY_CAPACITY,
@@ -13702,6 +14785,12 @@ export default function Home() {
               ),
               produced: normalizeItemStore(factory.runtime.produced),
               extractorProduced: normalizeItemStore(factory.runtime.extractorProduced),
+              roads: Object.fromEntries(
+                Object.entries(factory.runtime.roads ?? {}).map(([id, road]) => [
+                  id,
+                  makeRoadRuntimeState(road, id),
+                ]),
+              ),
             },
             lastSimulatedAt: Number(factory.lastSimulatedAt) || Date.now(),
             producedBaseline: normalizeItemStore(factory.producedBaseline),
@@ -13785,6 +14874,9 @@ export default function Home() {
       const nextRuntime: Runtime = {
         ...makeRuntime(),
         ...payload.runtime,
+        ironOre: normalizeBaseResourceState(payload.runtime.ironOre, loadedActiveResourceCapacity),
+        copperOre: normalizeBaseResourceState(payload.runtime.copperOre, loadedActiveResourceCapacity),
+        stone: normalizeBaseResourceState(payload.runtime.stone, loadedActiveResourceCapacity),
         blackHoles: nextBlackHoles,
         lakes: nextLakes,
         mapPoints: Math.max(
@@ -13794,8 +14886,11 @@ export default function Home() {
           ) || 0),
         ),
         forest: {
-          ...makeRuntime().forest,
-          ...(payload.runtime.forest ?? {}),
+          ...normalizeBaseResourceState(payload.runtime.forest, loadedActiveResourceCapacity),
+          regenerationElapsed: Math.max(
+            0,
+            Number(payload.runtime.forest?.regenerationElapsed) || 0,
+          ),
         },
         produced: {
           ...makeEmptyItemStore(),
@@ -13808,6 +14903,11 @@ export default function Home() {
         research: {
           ...makeResearchState(),
           ...(payload.runtime.research ?? {}),
+          areaExpansionLevel: getAreaExpansionLevel(payload.runtime.research ?? {}),
+          mapNodeResearchCompletions: Math.max(
+            0,
+            Math.floor(Number(payload.runtime.research?.mapNodeResearchCompletions) || 0),
+          ),
           progress: {
             ...makeResearchState().progress,
             ...(payload.runtime.research?.progress ?? {}),
@@ -13877,6 +14977,11 @@ export default function Home() {
             id,
             { nextOutput: splitter.nextOutput === "b" ? "b" as const : "a" as const },
           ]),
+        ),
+        roads: Object.fromEntries(
+          Object.entries(payload.runtime.roads ?? {})
+            .filter(([id]) => validNodeIds.has(id))
+            .map(([id, road]) => [id, makeRoadRuntimeState(road, id)]),
         ),
         woodenChests: nextWoodenChests,
         storages: nextStorages,
@@ -14118,6 +15223,7 @@ export default function Home() {
       setPositions(nextPositions);
       connectionsRef.current = nextConnections;
       setConnections(nextConnections);
+      appliedAreaExpansionLayoutLevelRef.current = getAreaExpansionLevel(nextRuntime.research);
       runtimeRef.current = nextRuntime;
       setRuntime(nextRuntime);
       controlGroupsRef.current = nextControlGroups;
@@ -14341,9 +15447,9 @@ export default function Home() {
           cables: connectionsRef.current.length,
           logisticsUnlocked: logisticsUnlockedRef.current,
           ironOre: { ...runtimeRef.current.ironOre },
-          copperOre: { ...(runtimeRef.current.copperOre ?? { remaining: RESOURCE_CAPACITIES.copperOre }) },
-          stone: { ...(runtimeRef.current.stone ?? { remaining: RESOURCE_CAPACITIES.stone }) },
-          forest: { ...(runtimeRef.current.forest ?? { remaining: RESOURCE_CAPACITIES.forest }) },
+          copperOre: { ...(runtimeRef.current.copperOre ?? makeRuntime().copperOre) },
+          stone: { ...(runtimeRef.current.stone ?? makeRuntime().stone) },
+          forest: { ...(runtimeRef.current.forest ?? makeRuntime().forest) },
           minedDeposits: { ...(runtimeRef.current.minedDeposits ?? {}) },
           ironExtractor: {
             ...runtimeRef.current.extractors.ironExtractor,
@@ -14442,7 +15548,7 @@ export default function Home() {
           type: "object",
           properties: {
             sourceNode: { type: "string", description: "ID of any node with an output socket" },
-            sourcePort: { type: "string", enum: ["ore-out", "copper-ore-out", "stone-out", "forest-out", "lake-water-out-north", "lake-water-out", "lake-water-out-south", "lake-water-out-west", "product-out", "charcoal-out", "plate-out", "gear-out", "wire-out", "automata-core-out", "assembler-out", "refiner-out", "power-out", "power-split-top", "power-split-out", "power-split-bottom", "forest-growth-out", "split-a-out", "split-b-out", "merge-out", "joint-out", "road-out", "inventory-out", "filter-out", "chest-out"] },
+            sourcePort: { type: "string", enum: ["ore-out", "copper-ore-out", "mythril-ore-out", "stone-out", "forest-out", "lake-water-out-north", "lake-water-out", "lake-water-out-south", "lake-water-out-west", "product-out", "charcoal-out", "plate-out", "gear-out", "wire-out", "automata-core-out", "assembler-out", "refiner-out", "power-out", "power-split-top", "power-split-out", "power-split-bottom", "forest-growth-out", "split-a-out", "split-b-out", "merge-out", "joint-out", "road-out", "inventory-out", "filter-out", "chest-out"] },
             targetNode: { type: "string", description: "ID of any node with an input socket" },
             targetPort: { type: "string", enum: ["resource-in", "wood-in", "metal-in", "charcoal-in", "generator-charcoal-in", "research-core-in", "motor-in", "power-in", "power-split-in", "forest-growth-in", "plate-a-in", "plate-b-in", "wire-plate-in", "core-circuit-in", "core-plate-in", "assembler-a-in", "assembler-b-in", "refiner-in", "split-in", "merge-a-in", "merge-b-in", "joint-in", "road-in", "filter-in", "storage-in", "chest-in"] },
           },
@@ -14659,13 +15765,26 @@ export default function Home() {
   };
   const processorIsWaiting = (nodeId: NodeId, kind: ProcessorKind) =>
     processorNeedsInputs(nodeId, kind);
+  const activeMapResourceCapacity = getMapNodeStartingResourceCapacity(activeMapSector);
   const getNodeProgress = (node: NodeSpec) => {
     const minedDeposit = runtime.minedDeposits[node.id];
     if (minedDeposit) return (minedDeposit.remaining / minedDeposit.capacity) * 100;
-    if (node.kind === "ironOre") return (runtime.ironOre.remaining / RESOURCE_CAPACITIES.ironOre) * 100;
-    if (node.kind === "copperOre") return (runtime.copperOre.remaining / RESOURCE_CAPACITIES.copperOre) * 100;
-    if (node.kind === "stone") return (runtime.stone.remaining / RESOURCE_CAPACITIES.stone) * 100;
-    if (node.kind === "forest") return (runtime.forest.remaining / RESOURCE_CAPACITIES.forest) * 100;
+    if (node.kind === "ironOre") {
+      const capacity = runtime.ironOre.capacity ?? activeMapResourceCapacity;
+      return capacity > 0 ? (runtime.ironOre.remaining / capacity) * 100 : 0;
+    }
+    if (node.kind === "copperOre") {
+      const capacity = runtime.copperOre.capacity ?? activeMapResourceCapacity;
+      return capacity > 0 ? (runtime.copperOre.remaining / capacity) * 100 : 0;
+    }
+    if (node.kind === "stone") {
+      const capacity = runtime.stone.capacity ?? activeMapResourceCapacity;
+      return capacity > 0 ? (runtime.stone.remaining / capacity) * 100 : 0;
+    }
+    if (node.kind === "forest") {
+      const capacity = runtime.forest.capacity ?? activeMapResourceCapacity;
+      return capacity > 0 ? (runtime.forest.remaining / capacity) * 100 : 0;
+    }
     if (node.kind === "storage") return 100;
     if (node.kind === "woodenChest") return 100;
     if (isExtractorKind(node.kind)) {
@@ -14991,7 +16110,7 @@ export default function Home() {
   ]);
   const buildFromShortcut = useCallback((kind: PurchasableKind) => {
     const item = VISIBLE_BUILD_CATALOG.find((candidate) => candidate.kind === kind);
-    if (item) buildNode(item.kind, item.recipe);
+    return item ? buildNode(item.kind, item.recipe) : false;
   }, [buildNode]);
   const hoveredPortConnectionOptions = useMemo(() => {
     if (!hoveredPort) return [];
@@ -15150,16 +16269,28 @@ export default function Home() {
 
     return INVENTORY_ITEMS.filter((item) => visibleTypes.has(item.type));
   }, [buildMaterialAvailability, nodes, runtime.construction, runtime.produced]);
-  const researchSelectionAvailable = canSelectResearchProject(runtime, nodes);
+  const researchSelectionAvailable = canSelectResearchProject(
+    runtime,
+    nodes,
+    mapFactoriesRef.current,
+    activeMapSector,
+  );
   const activeResearchProject = getResearchProject(runtime.research.activeProject);
   const activeResearchProjectCost = activeResearchProject
-    ? getResearchProjectCost(activeResearchProject.id)
+    ? getResearchProjectCost(activeResearchProject.id, runtime.research)
     : 0;
   const activeResearchCompleted = activeResearchProject
     ? runtime.research.progress[activeResearchProject.id]
     : 0;
   const activeResearchInFlight = activeResearchProject
-    ? Object.values(runtime.researchFoundries).reduce(
+    ? [
+        ...Object.values(runtime.researchFoundries),
+        ...Object.entries(mapFactoriesRef.current).flatMap(([sectorKey, factory]) =>
+          sectorKey === activeMapSector
+            ? []
+            : Object.values(factory.runtime.researchFoundries)
+        ),
+      ].reduce(
         (total, foundry) => total + Math.max(0, Math.min(100, foundry.progress)) / 100,
         0,
       )
@@ -15171,8 +16302,9 @@ export default function Home() {
   const activeResearchProgressPercent = activeResearchProjectCost > 0
     ? (activeResearchDisplayProgress / activeResearchProjectCost) * 100
     : 0;
+  const permanentResearchCount = RESEARCH_PROJECTS.filter((project) => !project.repeatable).length;
   const completedResearchCount = RESEARCH_PROJECTS.filter((project) =>
-    isResearchProjectUnlocked(runtime.research, project.id)
+    !project.repeatable && isResearchProjectUnlocked(runtime.research, project.id)
   ).length;
   const orderedResearchProjects = [
     ...RESEARCH_PROJECTS.filter((project) =>
@@ -15213,11 +16345,12 @@ export default function Home() {
   };
   const getMapNodeResourceSummary = (sectorKey: string) => {
     const nodeRuntime = getMapNodeRuntime(sectorKey);
+    const startingResourceCapacity = getMapNodeStartingResourceCapacity(sectorKey);
     const baseResources = [
-      { label: "Iron Ore", amount: nodeRuntime?.ironOre.remaining ?? RESOURCE_CAPACITIES.ironOre },
-      { label: "Copper Ore", amount: nodeRuntime?.copperOre.remaining ?? RESOURCE_CAPACITIES.copperOre },
-      { label: "Stone", amount: nodeRuntime?.stone.remaining ?? RESOURCE_CAPACITIES.stone },
-      { label: "Forest", amount: nodeRuntime?.forest.remaining ?? RESOURCE_CAPACITIES.forest },
+      { label: "Iron", amount: nodeRuntime?.ironOre.remaining ?? startingResourceCapacity },
+      { label: "Copper", amount: nodeRuntime?.copperOre.remaining ?? startingResourceCapacity },
+      { label: "Stone", amount: nodeRuntime?.stone.remaining ?? startingResourceCapacity },
+      { label: "Forest", amount: nodeRuntime?.forest.remaining ?? startingResourceCapacity },
     ];
     const minedResources = Object.values(nodeRuntime?.minedDeposits ?? {}).map((deposit) => ({
       label: getMiningTarget(deposit.type)?.title ?? formatResourceType(deposit.type),
@@ -15260,9 +16393,6 @@ export default function Home() {
     );
   };
   const currentMapNodeName = getMapNodeDisplayName(activeMapSector);
-  const mapNodeDialogPlayArea = mapNodeDialogSector
-    ? getPlayAreaWorldSize(runtime.research, mapNodeDialogSector)
-    : null;
   const mapNodeDialogResources = mapNodeDialogSector
     ? getMapNodeResourceSummary(mapNodeDialogSector)
     : [];
@@ -15295,11 +16425,13 @@ export default function Home() {
         recipe: REFINER_RECIPES[option.id],
         selected: configuringAssembler?.refinerRecipe === option.id,
       }))
-    : ASSEMBLER_RECIPE_OPTIONS.map((option) => ({
-        ...option,
-        recipe: ASSEMBLER_RECIPES[option.id],
-        selected: configuringAssembler?.assemblerRecipe === option.id,
-      }));
+    : ASSEMBLER_RECIPE_OPTIONS
+        .filter((option) => option.id !== "automataCore" || runtime.research.automataCoreUnlocked)
+        .map((option) => ({
+          ...option,
+          recipe: ASSEMBLER_RECIPES[option.id],
+          selected: configuringAssembler?.assemblerRecipe === option.id,
+        }));
   const pendingRecipeMachineTitle = pendingAssemblerRecipeChange?.kind === "refiner"
     ? "Refiner"
     : "Assembler";
@@ -15320,9 +16452,18 @@ export default function Home() {
     },
     { production: 0, logistics: 0, storage: 0 },
   );
-  const visibleJournalEntries = journalCategory === "all"
-    ? journalEntries
-    : journalEntries.filter((entry) => getBuildCategory(entry.item.kind) === journalCategory);
+  const journalAchievementEntries = Array.from(unlockedAchievements)
+    .reverse()
+    .map((id) => ({ id, ...ACHIEVEMENT_UNLOCK_DETAILS[id] }));
+  const visibleJournalAchievements = journalCategory === "all" || journalCategory === "achievements"
+    ? journalAchievementEntries
+    : [];
+  const visibleJournalEntries = journalCategory === "achievements"
+    ? []
+    : journalCategory === "all"
+      ? journalEntries
+      : journalEntries.filter((entry) => getBuildCategory(entry.item.kind) === journalCategory);
+  const journalHasVisibleEntries = visibleJournalAchievements.length > 0 || visibleJournalEntries.length > 0;
   const pendingDeletionConnection = pendingDeletionConnectionId
     ? connections.find((connection) => connection.id === pendingDeletionConnectionId) ?? null
     : null;
@@ -15398,7 +16539,7 @@ export default function Home() {
                   <div>
                     <DialogTitle>Node Map</DialogTitle>
                     <DialogDescription>
-                      Spend Map Points to unlock connected map nodes.
+                      The swarm hungers.
                     </DialogDescription>
                   </div>
                 </DialogHeader>
@@ -15552,24 +16693,6 @@ export default function Home() {
                   }}
                 />
               </label>
-              <div className="map-node-dialog-summary">
-                <span>
-                  Node Value
-                  <strong>
-                    {mapNodeDialogSector
-                      ? getMapNodeValue(mapNodeDialogSector)
-                      : 0}
-                  </strong>
-                </span>
-                <span>
-                  Field Size
-                  <strong>
-                    {mapNodeDialogPlayArea
-                      ? `${mapNodeDialogPlayArea.width.toLocaleString()} × ${mapNodeDialogPlayArea.height.toLocaleString()}`
-                      : "—"}
-                  </strong>
-                </span>
-              </div>
               <div className="map-node-dialog-resources">
                 <span>Resources</span>
                 <div>
@@ -15607,14 +16730,14 @@ export default function Home() {
           >
             <DialogTrigger asChild>
               <Button
-                className={`research-trigger ${researchSelectionAvailable && !activeResearchProject && completedResearchCount < RESEARCH_PROJECTS.length ? "attention" : ""}`}
+                className={`research-trigger ${researchSelectionAvailable && !activeResearchProject && completedResearchCount < permanentResearchCount ? "attention" : ""}`}
                 size="sm"
                 variant="outline"
-                aria-label={`Research, ${completedResearchCount} of ${RESEARCH_PROJECTS.length} projects complete${activeResearchProject ? `, researching ${activeResearchProject.title}` : researchSelectionAvailable ? "" : ", awaiting Research Center"}`}
+                aria-label={`Research, ${completedResearchCount} of ${permanentResearchCount} permanent projects complete, ${runtime.research.mapNodeResearchCompletions} Map Node research completions${activeResearchProject ? `, researching ${activeResearchProject.title}` : researchSelectionAvailable ? "" : ", awaiting Research Center"}`}
               >
                 <FlaskConical aria-hidden="true" />
                 <span className="research-trigger-label">Research</span>
-                <span className="research-trigger-count">{completedResearchCount}/{RESEARCH_PROJECTS.length}</span>
+                <span className="research-trigger-count">{completedResearchCount}/{permanentResearchCount}</span>
               </Button>
             </DialogTrigger>
             <DialogContent className="research-dialog topbar-modal">
@@ -15629,12 +16752,12 @@ export default function Home() {
                 </DialogHeader>
                 <div className={`research-summary ${activeResearchProject ? "with-progress" : ""}`}>
                   <span>Active project</span>
-                  <strong>{activeResearchProject?.title ?? (completedResearchCount === RESEARCH_PROJECTS.length ? "All research complete" : "Choose a project")}</strong>
+                  <strong>{activeResearchProject?.title ?? (isAllResearchComplete(runtime.research) ? "All research complete" : "Choose a project")}</strong>
                   {activeResearchProject ? (
                     <div className="research-summary-progress">
                       <Progress
                         value={activeResearchProgressPercent}
-                        aria-label={`${activeResearchProject.title}, ${activeResearchDisplayProgress.toFixed(1)} of ${activeResearchProjectCost} ${getResearchProjectCoreLabel(activeResearchProject.id)} analyzed`}
+                        aria-label={`${activeResearchProject.title}, ${activeResearchDisplayProgress.toFixed(1)} of ${activeResearchProjectCost} ${getResearchProjectCoreLabel(activeResearchProject.id, runtime.research)} analyzed`}
                       />
                       <small>
                         {activeResearchCompleted} / {activeResearchProjectCost}
@@ -15646,8 +16769,8 @@ export default function Home() {
                   {orderedResearchProjects.map((project) => {
                     const Icon = project.icon;
                     const projectProgress = runtime.research.progress[project.id];
-                    const projectCost = getResearchProjectCost(project.id);
-                    const projectCoreLabel = getResearchProjectCoreLabel(project.id);
+                    const projectCost = getResearchProjectCost(project.id, runtime.research);
+                    const projectCoreLabel = getResearchProjectCoreLabel(project.id, runtime.research);
                     const milestoneRequirement = getResearchMilestoneRequirement(project.id);
                     const prerequisite = getResearchProjectPrerequisite(project.id);
                     const prerequisiteSatisfied = isResearchProjectPrerequisiteSatisfied(
@@ -15656,6 +16779,9 @@ export default function Home() {
                     );
                     const unlocked = isResearchProjectUnlocked(runtime.research, project.id);
                     const active = runtime.research.activeProject === project.id;
+                    const repeatableCompletions = project.repeatable
+                      ? runtime.research.mapNodeResearchCompletions
+                      : 0;
                     const selectable = !milestoneRequirement &&
                       prerequisiteSatisfied &&
                       researchSelectionAvailable &&
@@ -15673,13 +16799,15 @@ export default function Home() {
                             ? "Active"
                             : projectProgress > 0
                               ? "Continue research"
-                              : "Available research";
+                              : project.repeatable
+                                ? `Repeatable · ${repeatableCompletions} completed`
+                                : "Available research";
                     return (
                       <Tooltip open={hoveredResearchProject === project.id} key={project.id}>
                         <TooltipTrigger asChild>
                           <button
                             type="button"
-                            className={`research-card ${active ? "active" : ""} ${unlocked ? "complete" : ""} ${locked ? "locked" : ""}`}
+                            className={`research-card ${active ? "active" : ""} ${unlocked ? "complete" : ""} ${locked ? "locked" : ""} ${project.repeatable ? "repeatable" : ""}`}
                             aria-disabled={!selectable}
                             aria-pressed={active}
                             aria-label={`${project.title}. ${status ? `${status}. ` : ""}${project.description} ${project.unlock}. ${milestoneRequirement ? projectProgress >= projectCost ? `${milestoneRequirement.complete}.` : `Cost: ${milestoneRequirement.pending}.` : `${projectProgress} of ${projectCost} ${projectCoreLabel} analyzed.`}`}
@@ -16240,8 +17368,8 @@ export default function Home() {
                 size="sm"
                 variant="outline"
                 aria-label={journalAttention
-                  ? `Journal, new discovery, ${journalEntries.length} nodes unlocked`
-                  : `Journal, ${journalEntries.length} nodes unlocked`}
+                  ? `Journal, new discovery, ${journalEntries.length} nodes and ${journalAchievementEntries.length} achievements unlocked`
+                  : `Journal, ${journalEntries.length} nodes and ${journalAchievementEntries.length} achievements unlocked`}
                 title={journalAttention ? "New discovery recorded" : undefined}
               >
                 <span className="journal-trigger-icon"><BookOpenText aria-hidden="true" /></span>
@@ -16299,8 +17427,40 @@ export default function Home() {
                   <span>Storage</span>
                   <span className="journal-category-count">{journalCategoryCounts.storage}</span>
                 </Button>
+                <Button
+                  className={`journal-category-filter achievements ${journalCategory === "achievements" ? "active" : ""}`}
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  aria-pressed={journalCategory === "achievements"}
+                  onClick={() => setJournalCategory((current) => current === "achievements" ? "all" : "achievements")}
+                >
+                  <Trophy aria-hidden="true" />
+                  <span>Achievements</span>
+                  <span className="journal-category-count">{journalAchievementEntries.length}</span>
+                </Button>
               </div>
-              <div className="journal-list" aria-label="Unlocked node timeline">
+              <div className="journal-list" aria-label="Unlocked node and achievement timeline">
+                {visibleJournalAchievements.map(({ id, title, description, flavorText, icon: AchievementIcon }) => (
+                  <article className="journal-entry journal-achievement-entry" key={`achievement-${id}`}>
+                    <div className="journal-timeline journal-achievement-timeline" aria-hidden="true">
+                      <span><Trophy /></span>
+                    </div>
+                    <span className="journal-entry-icon achievement">
+                      <AchievementIcon aria-hidden="true" />
+                    </span>
+                    <div className="journal-entry-copy">
+                      <span>Achievement</span>
+                      <strong>{title}</strong>
+                      <small>{description}</small>
+                      <em>{flavorText}</em>
+                    </div>
+                    <div className="journal-entry-time journal-achievement-status">
+                      <span>Unlocked</span>
+                      <strong>Shiny!</strong>
+                    </div>
+                  </article>
+                ))}
                 {visibleJournalEntries.map(({ item, unlockedAt }) => {
                   const Icon = item.icon;
                   const category = getBuildCategory(item.kind);
@@ -16331,11 +17491,15 @@ export default function Home() {
                     </article>
                   );
                 })}
-                {visibleJournalEntries.length === 0 ? (
+                {!journalHasVisibleEntries ? (
                   <div className="journal-empty-state">
-                    <BookOpenText aria-hidden="true" />
+                    {journalCategory === "achievements"
+                      ? <Trophy aria-hidden="true" />
+                      : <BookOpenText aria-hidden="true" />}
                     <strong>No {journalCategory} discoveries yet</strong>
-                    <span>New nodes will be recorded here as they unlock.</span>
+                    <span>{journalCategory === "achievements"
+                      ? "Unlocked achievements will be recorded here."
+                      : "New nodes will be recorded here as they unlock."}</span>
                   </div>
                 ) : null}
               </div>
@@ -17084,6 +18248,8 @@ export default function Home() {
               snapReady={snapReady}
               showGroupTooltip={!skipShortcutBarGroupTooltip}
               onBuild={buildFromShortcut}
+              onBuildDragEnd={finishShortcutBuildDrag}
+              onBuildDragCancel={cancelNodeInHand}
               onChange={(updater) => updateShortcutBar(barId, updater)}
               onElementRef={(element) => { shortcutBarElementsRef.current[barId] = element; }}
               onMoveStart={() => beginShortcutBarMove(barId)}
@@ -17140,8 +18306,8 @@ export default function Home() {
               <Palette />
             </div>
             <DialogTitle>Create a Control Group</DialogTitle>
-            <DialogDescription>
-              You can create a control group by right-clicking while multiple nodes are selected.
+            <DialogDescription className="control-group-flavor-text">
+              You don&apos;t have to carry the whole team, well maybe you do.
             </DialogDescription>
           </DialogHeader>
           <label className="inventory-overflow-suppression">
@@ -17651,12 +18817,14 @@ export default function Home() {
           <div className="filter-choice-grid mining-drill-choice-grid" role="listbox" aria-label="Mining Drill ore resource">
             {MINING_DRILL_TARGETS.map((target) => {
               const selected = configuringMiningDrill?.selectedType === target.type;
+              const available = getMapNodeValue(activeMapSector) >= target.minimumMapNodeValue;
               return (
                 <button
                   type="button"
                   role="option"
                   aria-selected={selected}
                   className={`filter-choice ${selected ? "selected" : ""}`}
+                  disabled={!available}
                   key={target.type}
                   style={{ "--item-color": RESOURCE_COLORS[target.type] } as React.CSSProperties}
                   onClick={() => {
@@ -17668,7 +18836,9 @@ export default function Home() {
                   <span className="filter-choice-swatch" />
                   <span className="filter-choice-copy">
                     <strong>{target.title}</strong>
-                    <small>{MINED_DEPOSIT_CAPACITY.toLocaleString()} unit deposit</small>
+                    <small>{available
+                      ? `${MINED_DEPOSIT_CAPACITY.toLocaleString()} unit deposit`
+                      : `Requires tier ${target.minimumMapNodeValue} map node or higher`}</small>
                   </span>
                   {selected ? <span className="filter-choice-current">ACTIVE</span> : null}
                 </button>
@@ -17751,7 +18921,10 @@ export default function Home() {
       <Dialog
         open={Boolean(configuringAssemblerId)}
         onOpenChange={(open) => {
-          if (!open) setConfiguringAssemblerId(null);
+          if (!open) {
+            setConfiguringAssemblerId(null);
+            setHoveredRecipeOptionId(null);
+          }
         }}
       >
         <DialogContent className="filter-dialog assembler-recipe-dialog">
@@ -17768,7 +18941,10 @@ export default function Home() {
               const selected = option.selected;
               const ingredientTotals = getRecipeIngredientTotals(recipe);
               return (
-                <Tooltip key={option.id}>
+                <Tooltip
+                  key={option.id}
+                  open={hoveredRecipeOptionId === option.id}
+                >
                   <TooltipTrigger asChild>
                     <button
                       type="button"
@@ -17776,6 +18952,12 @@ export default function Home() {
                       aria-selected={selected}
                       className={`filter-choice assembler-recipe-choice ${selected ? "selected" : ""}`}
                       style={{ "--item-color": recipe.color } as React.CSSProperties}
+                      onPointerEnter={(event) => {
+                        if (event.pointerType === "mouse") setHoveredRecipeOptionId(option.id);
+                      }}
+                      onPointerLeave={() => setHoveredRecipeOptionId((current) => (
+                        current === option.id ? null : current
+                      ))}
                       onClick={() => {
                         if (configuringAssemblerId) {
                           requestAssemblerRecipeChange(configuringAssemblerId, option.id);
@@ -17990,7 +19172,10 @@ export default function Home() {
           </svg>
 
           {Object.values(runtime.blackHoles ?? {}).map((hole) => {
-            const requiredStone = getBlackHoleStoneRequirement(hole);
+            const requiredStone = getBlackHoleStoneRequirement(
+              hole,
+              getMapNodeValue(activeMapSector),
+            );
             const isFilled = hole.stoneFilled >= requiredStone;
             const hasStoneConnection = connections.some(
               (connection) =>
@@ -18110,7 +19295,7 @@ export default function Home() {
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => event.stopPropagation()}
               >
-                    <svg viewBox="0 0 100 100" aria-hidden="true">
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                       <polygon className="lake-shore" points={getLakePolygonSvgPoints(lake)} />
                       <polygon className="lake-water" points={getLakePolygonSvgPoints(lake)} />
                       <path className="lake-ripple lake-ripple-one" d="M25 48 C38 40 61 41 76 49" />
@@ -18141,7 +19326,7 @@ export default function Home() {
                               type="button"
                               className={`port-socket multi-connection ${getPortConnectionClass(lake.id, port)} ${hasWaterConnection ? "filled" : ""}`}
                               style={{
-                                "--port-color": RESOURCE_COLORS[ResourceType.WATER],
+                                "--port-color": LAKE_CONNECTOR_COLOR,
                               } as React.CSSProperties}
                               data-port-node={lake.id}
                               data-port-id={port.id}
@@ -18240,6 +19425,7 @@ export default function Home() {
           {nodes.map((node) => {
             const isIronOreDeposit = node.kind === "ironOre";
             const isCopperOreDeposit = node.kind === "copperOre";
+            const isMythrilOreDeposit = node.kind === "mythrilOre";
             const isStoneDeposit = node.kind === "stone";
             const isForest = node.kind === "forest";
             const starterCollectHintVisible =
@@ -18249,7 +19435,8 @@ export default function Home() {
               ? stoneCollectHintEncouraging
               : forestCollectHintEncouraging;
             const starterCollectHintTarget = isForest ? "Forest" : "Stone";
-            const isFiniteResource = isIronOreDeposit || isCopperOreDeposit || isStoneDeposit || isForest;
+            const isFiniteResource =
+              isIronOreDeposit || isCopperOreDeposit || isMythrilOreDeposit || isStoneDeposit || isForest;
             const manualResourceProduct = isFiniteResource
               ? getManualResourceProductType(node)
               : null;
@@ -18268,12 +19455,12 @@ export default function Home() {
             );
             const resourceCapacity = minedDeposit?.capacity ?? (
               isForest
-                ? RESOURCE_CAPACITIES.forest
+                ? runtime.forest.capacity ?? activeMapResourceCapacity
                 : isStoneDeposit
-                  ? RESOURCE_CAPACITIES.stone
+                  ? runtime.stone.capacity ?? activeMapResourceCapacity
                   : isCopperOreDeposit
-                    ? RESOURCE_CAPACITIES.copperOre
-                    : RESOURCE_CAPACITIES.ironOre
+                    ? runtime.copperOre.capacity ?? activeMapResourceCapacity
+                    : runtime.ironOre.capacity ?? activeMapResourceCapacity
             );
             const isExtractor = isExtractorKind(node.kind);
             const isGenerator = node.kind === "generator";
@@ -18284,6 +19471,9 @@ export default function Home() {
             const isMerger = node.kind === "merger";
             const isJoint = node.kind === "joint";
             const isRoad = node.kind === "road";
+            const roadState = isRoad ? runtime.roads[node.id] : null;
+            const roadMode = roadState?.mode ?? "export";
+            const roadEdge = roadState?.edge ?? "west";
             const isPowerSplitter = node.kind === "powerSplitter";
             const isInventorySource = node.kind === "inventorySource";
             const isFilter = node.kind === "filter";
@@ -18343,6 +19533,23 @@ export default function Home() {
               ? runtime.researchFoundries[node.id]
               : null;
             const researchFoundryCores = getResearchFoundryCores(researchFoundryState ?? undefined);
+            const researchFoundryBasicCores = getResearchFoundryCoreCount(
+              researchFoundryState ?? undefined,
+              ResourceType.BASIC_CORE,
+            );
+            const researchFoundryAutomataCores = getResearchFoundryCoreCount(
+              researchFoundryState ?? undefined,
+              ResourceType.AUTOMATA_CORE,
+            );
+            const researchFoundryBaseInventory = isResearchFoundry
+              ? normalizeItemStore(runtime.inventory, BASE_INVENTORY_CAPACITY)
+              : null;
+            const researchFoundryBasicCoresAvailable = isResearchFoundry
+              ? researchFoundryBaseInventory?.[ResourceType.BASIC_CORE] ?? 0
+              : 0;
+            const researchFoundryAutomataCoresAvailable = isResearchFoundry
+              ? researchFoundryBaseInventory?.[ResourceType.AUTOMATA_CORE] ?? 0
+              : 0;
             const activeResearchProjectProgress = runtime.research.activeProject
               ? runtime.research.progress[runtime.research.activeProject]
               : 0;
@@ -18350,10 +19557,12 @@ export default function Home() {
               researchFoundryState ?? undefined,
               runtime.research.activeProject,
               activeResearchProjectProgress,
+              runtime.research,
             );
             const requiredResearchCoreType = getResearchProjectRequiredCoreType(
               runtime.research.activeProject,
               activeResearchProjectProgress,
+              runtime.research,
             );
             const researchIsProducing = Boolean(
               isResearchFoundry &&
@@ -18457,7 +19666,7 @@ export default function Home() {
                 ? !treePlanterPowerConnection ||
                   !treePlanterForestConnection ||
                   treePlanterAvailablePower < TREE_PLANTER_POWER_COST ||
-                  runtime.forest.remaining >= RESOURCE_CAPACITIES.forest
+                  runtime.forest.remaining >= (runtime.forest.capacity ?? activeMapResourceCapacity)
                 : false) ||
               (isMiningDrill
                 ? !miningDrillTarget ||
@@ -18539,7 +19748,7 @@ export default function Home() {
                             : processorRecipe?.activeLabel.toLowerCase() ?? "producing"
                         }`
                     : isTreePlanter
-                      ? runtime.forest.remaining >= RESOURCE_CAPACITIES.forest
+                      ? runtime.forest.remaining >= (runtime.forest.capacity ?? activeMapResourceCapacity)
                         ? "Forest deposit full"
                         : !treePlanterForestConnection
                           ? "Connect to Forest"
@@ -18588,7 +19797,7 @@ export default function Home() {
                             !getSmartProcessorOutputPortId(node.id, processorState)
                             ? "Waiting for inputs"
                             : processorKind === "furnace"
-                              ? "Connect Iron or Copper"
+                              ? "Connect metal"
                               : "Connect a Plate"
                           : processorRecipe
                             ? processorRecipe.activeLabel
@@ -18605,6 +19814,19 @@ export default function Home() {
               .map((port) => getRuntimeAwarePort(node.id, port, connections, runtime));
             const effectiveOutputs = node.outputs.map((port) =>
               getRuntimeAwarePort(node.id, port, connections, runtime)
+            );
+            const roadPort = isRoad
+              ? roadMode === "export"
+                ? effectiveInputs.find((port) => port.id === "road-in") ?? null
+                : effectiveOutputs.find((port) => port.id === "road-out") ?? null
+              : null;
+            const roadPortConnected = Boolean(roadPort && connections.some((connection) => (
+              roadMode === "export"
+                ? connection.targetNode === node.id && connection.targetPort === roadPort.id
+                : connection.sourceNode === node.id && connection.sourcePort === roadPort.id
+            )));
+            const roadPortFilled = Boolean(
+              roadPortConnected || roadState?.outboundType || roadState?.inboundType,
             );
             const hoveredNodePort = hoveredPort?.nodeId === node.id ? hoveredPort.port : null;
             const isProductionNode = isPurchasableKind(node.kind) && !isLogisticsNode;
@@ -18683,9 +19905,10 @@ export default function Home() {
               <section
                 key={node.id}
                 ref={(element) => { nodeRefs.current[node.id] = element; }}
-                className={`node-card ${isFiniteResource ? "resource-node" : ""} ${isJoint || isPowerSplitter ? "joint-node" : ""} ${isJoint && jointState?.orientation === "vertical" ? "joint-vertical" : ""} ${isPowerSplitter ? "power-splitter-node" : ""} ${isSplitter || isMerger || isFilter || isRoad ? "compact-routing-node routing-node" : ""} ${isSplitter ? "splitter-node" : ""} ${isMerger ? "merger-node" : ""} ${isFilter ? "filter-node" : ""} ${isRoad ? "road-node" : ""} ${isStorage ? "storage-node" : ""} ${isWoodenChest ? "wooden-chest-node" : ""} ${isConfigurableProcessor ? "assembler-node" : ""} ${nodeControlGroup ? "control-group-member" : ""} ${isActiveControlGroup ? "control-group-active" : ""} ${nodeControlGroup && individualControlNodeId === node.id && selectedNodes.includes(node.id) ? "individual-control" : ""} ${selectedNodes.includes(node.id) ? "selected" : ""} ${draggingNode && selectedNodes.includes(node.id) ? "dragging" : ""} ${(draggingNode === node.id || placingNodeId === node.id) && insertionTarget ? "insert-ready" : ""} ${placingNodeId === node.id ? "placing" : ""} ${placingNodeId === node.id && placementBlocked ? "placement-blocked" : ""} ${draggingNode === node.id && dragCollisionBlocked ? "collision-blocked" : ""} ${isBuilding ? "building" : ""} ${outputPaused ? "output-paused" : ""}`}
+                className={`node-card ${isFiniteResource ? "resource-node" : ""} ${isResearchFoundry ? "research-center-node" : ""} ${isJoint || isPowerSplitter ? "joint-node" : ""} ${isJoint && jointState?.orientation === "vertical" ? "joint-vertical" : ""} ${isPowerSplitter ? "power-splitter-node" : ""} ${isSplitter || isMerger || isFilter || isRoad ? "compact-routing-node routing-node" : ""} ${isSplitter ? "splitter-node" : ""} ${isMerger ? "merger-node" : ""} ${isFilter ? "filter-node" : ""} ${isRoad ? "road-node" : ""} ${isStorage ? "storage-node" : ""} ${isWoodenChest ? "wooden-chest-node" : ""} ${isConfigurableProcessor ? "assembler-node" : ""} ${nodeControlGroup ? "control-group-member" : ""} ${isActiveControlGroup ? "control-group-active" : ""} ${nodeControlGroup && individualControlNodeId === node.id && selectedNodes.includes(node.id) ? "individual-control" : ""} ${selectedNodes.includes(node.id) ? "selected" : ""} ${draggingNode && selectedNodes.includes(node.id) ? "dragging" : ""} ${(draggingNode === node.id || placingNodeId === node.id) && insertionTarget ? "insert-ready" : ""} ${placingNodeId === node.id ? "placing" : ""} ${placingNodeId === node.id && placementBlocked ? "placement-blocked" : ""} ${draggingNode === node.id && dragCollisionBlocked ? "collision-blocked" : ""} ${isBuilding ? "building" : ""} ${outputPaused ? "output-paused" : ""}`}
                 style={{
-                  transform: `translate3d(${positions[node.id]?.x ?? 0}px, ${positions[node.id]?.y ?? 0}px, 0)`,
+                  transform: `translate3d(${positions[node.id]?.x ?? 0}px, ${positions[node.id]?.y ?? 0}px, 0) scale(${isResearchFoundry ? RESEARCH_CENTER_NODE_SCALE : 1})`,
+                  transformOrigin: isResearchFoundry ? "top left" : undefined,
                   "--control-group-color": nodeControlGroup?.color ?? "transparent",
                   "--node-color": extractorResourceColor
                     ? extractorResourceColor
@@ -18875,7 +20098,43 @@ export default function Home() {
                   ) : null}
                 </div>
 
-                {isPowerSplitter ? (
+                {isRoad && roadPort ? (
+                  <div className={`road-terminal road-edge-${roadEdge} road-mode-${roadMode}`}>
+                    <button
+                      type="button"
+                      className={`road-mode-toggle ${roadMode}`}
+                      disabled={isBuilding}
+                      aria-label={`Road direction: ${roadMode}. Change to ${getOppositeRoadMode(roadMode)}.`}
+                      title={`Road is set to ${roadMode}. Click to switch both endpoints.`}
+                      onPointerDown={(event) => {
+                        if (event.button === 0) event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleRoadMode(node.id);
+                      }}
+                    >
+                      {roadMode === "export" ? "EXPORT" : "IMPORT"}
+                    </button>
+                    <span className={`road-terminal-port ${roadMode === "export" ? "input-port" : "output-port"}`}>
+                      <button
+                        ref={(element) => { portRefs.current[`${node.id}:${roadPort.id}`] = element; }}
+                        type="button"
+                        disabled={isBuilding}
+                        className={`port-socket ${isBuilding ? "disabled" : ""} ${getPortConnectionClass(node.id, roadPort)} ${roadPortFilled ? "filled" : ""}`}
+                        style={{ "--port-color": RESOURCE_COLORS[roadPort.type] } as React.CSSProperties}
+                        data-port-node={node.id}
+                        data-port-id={roadPort.id}
+                        aria-label={`${node.title} ${roadPort.label} ${roadPort.direction}, ${roadPort.type} type`}
+                        onPointerEnter={() => setHoveredPort({ nodeId: node.id, port: roadPort })}
+                        onPointerLeave={() => clearHoveredPort(node.id, roadPort.id)}
+                        onFocus={() => setHoveredPort({ nodeId: node.id, port: roadPort })}
+                        onBlur={() => clearHoveredPort(node.id, roadPort.id)}
+                        onPointerDown={(event) => beginConnection(event, node.id, roadPort)}
+                      />
+                    </span>
+                  </div>
+                ) : isPowerSplitter ? (
                   <div className="power-splitter-ports">
                     {effectiveInputs.map((port) => {
                       const connected = connections.some(
@@ -18929,7 +20188,7 @@ export default function Home() {
                   </div>
                 ) : (
                 <div className="port-list">
-                  {Array.from({ length: rows }).map((_, index) => {
+                   {Array.from({ length: rows }).map((_, index) => {
                     const input = effectiveInputs[index];
                     const output = effectiveOutputs[index];
                     const inputDisabled = Boolean(
@@ -18944,7 +20203,7 @@ export default function Home() {
                     const processorInputCount = processorInput
                       ? processorState?.inputs[processorInput.id] ?? 0
                       : 0;
-                    const manualIngredientSlot = !isBuilding && input
+                    const manualIngredientSlot = !isBuilding && input && !isResearchFoundry
                       ? nodeManualIngredientSlots.find((slot) => slot.portId === input.id) ?? null
                       : null;
                     const manualIngredientStored = processorInput
@@ -18998,7 +20257,9 @@ export default function Home() {
                         (connection) => connection.targetNode === node.id && connection.targetPort === input.id,
                       )),
                     );
-                    const inputStatus = inputFilled
+                    const inputStatus = isResearchFoundry
+                      ? null
+                      : inputFilled
                         ? "READY"
                       : isTreePlanterPowerInput && treePlanterPowerConnection
                           ? `${treePlanterAvailablePower}W`
@@ -19047,7 +20308,7 @@ export default function Home() {
                                 {isMultiInputPort(node.id, input.id) ? <span className="multi-port-star" aria-hidden="true" /> : null}
                               </button>
                               </MultiConnectionSocketTooltip>
-                              <PortLabel label={input.label} />
+                              {!isResearchFoundry ? <PortLabel label={input.label} /> : null}
                               {manualIngredientSlot ? (
                                 <span className="ingredient-quantity-control">
                                   <span className="input-check">
@@ -19064,7 +20325,12 @@ export default function Home() {
                                       );
                                       const remainingCapacity = Math.max(
                                         0,
-                                        manualIngredientSlot.capacity - manualIngredientStored,
+                                        isResearchFoundry && isCoreType(choice)
+                                          ? RESEARCH_CORE_CAPACITY_PER_TYPE - getResearchFoundryCoreCount(
+                                              researchFoundryState ?? undefined,
+                                              choice,
+                                            )
+                                          : manualIngredientSlot.capacity - manualIngredientStored,
                                       );
                                       const disabled =
                                         available <= 0 ||
@@ -19156,8 +20422,51 @@ export default function Home() {
                           ) : null}
                         </div>
                       </div>
-                    );
-                  })}
+                     );
+                   })}
+                  {isResearchFoundry && !isBuilding ? (
+                    <div
+                      className="research-core-storage-summary"
+                      aria-label={`${researchFoundryBasicCores} Basic Cores and ${researchFoundryAutomataCores} Automata Cores stored`}
+                    >
+                      <button
+                        type="button"
+                        disabled={researchFoundryBasicCoresAvailable <= 0}
+                        title={`Feed 1 Basic Core · ${researchFoundryBasicCoresAvailable} in base inventory`}
+                        aria-label={`Feed one Basic Core from base inventory to Research Center, ${researchFoundryBasicCores} currently loaded and ${researchFoundryBasicCoresAvailable} in base inventory`}
+                        style={{ "--core-color": RESOURCE_COLORS[ResourceType.BASIC_CORE] } as React.CSSProperties}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          manuallyFillIngredient(node.id, "research-core-in", ResourceType.BASIC_CORE);
+                        }}
+                      >
+                        <b>Basic</b>
+                        <strong>{researchFoundryBasicCores}/{RESEARCH_CORE_CAPACITY_PER_TYPE}</strong>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={researchFoundryAutomataCoresAvailable <= 0}
+                        title={`Feed 1 Automata Core · ${researchFoundryAutomataCoresAvailable} in base inventory`}
+                        aria-label={`Feed one Automata Core from base inventory to Research Center, ${researchFoundryAutomataCores} currently loaded and ${researchFoundryAutomataCoresAvailable} in base inventory`}
+                        style={{ "--core-color": RESOURCE_COLORS[ResourceType.AUTOMATA_CORE] } as React.CSSProperties}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          manuallyFillIngredient(node.id, "research-core-in", ResourceType.AUTOMATA_CORE);
+                        }}
+                      >
+                        <b>Automata</b>
+                        <strong>{researchFoundryAutomataCores}/{RESEARCH_CORE_CAPACITY_PER_TYPE}</strong>
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 )}
 
@@ -19545,7 +20854,11 @@ export default function Home() {
       ) : null}
 
       {obstructionTooltip ? (
-        <CursorObstructionTooltip tooltip={obstructionTooltip} runtime={runtime} />
+        <CursorObstructionTooltip
+          tooltip={obstructionTooltip}
+          runtime={runtime}
+          mapNodeValue={getMapNodeValue(activeMapSector)}
+        />
       ) : null}
 
       <Toaster
