@@ -191,7 +191,7 @@ type PortDirection = "input" | "output";
 type JointOrientation = "horizontal" | "vertical";
 type UnlockTimes = Partial<Record<PurchasableKind, number>>;
 type ResearchProjectId = "logistics" | "kiln" | "charcoalGenerator" | "furnace" | "refiner" | "assembler" | "researchCenter" | "road" | "areaExpansion1" | "extractor2" | "extractor3" | "treePlanter" | "miningDrill" | "exploration" | "mapNode" | "automataCore";
-type AchievementId = "oops" | "handHolding";
+type AchievementId = "oops";
 type MiningDrillTarget = ResourceType.IRON | ResourceType.COPPER | ResourceType.MYTHRIL | ResourceType.STONE;
 type CoreType = ResourceType.BASIC_CORE | ResourceType.AUTOMATA_CORE;
 type MapEdge = "north" | "east" | "south" | "west";
@@ -496,16 +496,16 @@ type StarterTutorialSeenState = {
 };
 
 const makeStarterTutorialSeenState = (): StarterTutorialSeenState => ({
-  stoneFirst: false,
-  stoneSecond: false,
-  forestFirst: false,
-  forestSecond: false,
-  extractorBuilding: false,
+  stoneFirst: true,
+  stoneSecond: true,
+  forestFirst: true,
+  forestSecond: true,
+  extractorBuilding: true,
   connectionMaking: false,
 });
 
 const hasSeenEveryStarterTutorial = (seen: StarterTutorialSeenState) =>
-  Object.values(seen).every(Boolean);
+  seen.connectionMaking;
 
 type MapFactoryState = {
   nodes: SaveSerializedNode[];
@@ -571,6 +571,7 @@ type SaveGamePayload = {
   isRunning: boolean;
   buildAttention: boolean;
   journalAttention: boolean;
+  researchAttention?: boolean;
   promptPreferences?: PromptPreferences;
   shortcutBars?: ShortcutBarsState;
   shortcutBarGroups?: ShortcutBarGroup[];
@@ -638,7 +639,7 @@ const RAPID_CLICK_TARGET = 6;
 const RAPID_CLICK_WINDOW_MS = 2500;
 const RAPID_CLICK_SEQUENCE_WINDOW_MS = 12000;
 const RAPID_CLICK_ANIMATION_DURATION_MS = 1400;
-const STONE_COLLECT_HINT_DELAY_MS = 60_000;
+const STARTER_CONNECTION_HINT_DELAY_MS = 15_000;
 const SUBSEQUENT_COLLECT_HINT_DELAY_MS = 20_000;
 const STONE_COLLECT_HINT_ARROW_COUNT = 12;
 const BLACK_HOLE_RADIUS = 38;
@@ -848,8 +849,8 @@ const formatResourceType = (type: ResourceType) =>
 
 const STORAGE_NODE_CAPACITY = 10;
 const WOODEN_CHEST_CAPACITY = 20;
-const BASE_INVENTORY_CAPACITY = 10;
-const BASE_INVENTORY_NODE_ID = "base-inventory";
+// Retained in version-1 save data for compatibility; player-held storage is disabled.
+const BASE_INVENTORY_CAPACITY = 0;
 const BASE_PRODUCTION_STORAGE_CAPACITY = 5;
 const EXTRACTOR_CAPACITY = BASE_PRODUCTION_STORAGE_CAPACITY;
 const PROCESSOR_CAPACITY = BASE_PRODUCTION_STORAGE_CAPACITY;
@@ -981,6 +982,36 @@ const INITIAL_NODES: NodeSpec[] = [
     inputs: [],
     outputs: [{ id: "forest-out", label: "Wood", type: ResourceType.WOOD, direction: "output" }],
   },
+  {
+    id: "ironExtractor",
+    kind: "extractor",
+    title: "Extractor",
+    eyebrow: "EXTRACTOR 01",
+    color: RESOURCE_COLORS.RESOURCE,
+    icon: Pickaxe,
+    inputs: [{ id: "resource-in", label: "Resource", type: ResourceType.RESOURCE, direction: "input" }],
+    outputs: [{ id: "product-out", label: "Output", type: ResourceType.RESOURCE, direction: "output" }],
+  },
+  {
+    id: "extractor-2",
+    kind: "extractor",
+    title: "Extractor",
+    eyebrow: "EXTRACTOR 02",
+    color: RESOURCE_COLORS.RESOURCE,
+    icon: Pickaxe,
+    inputs: [{ id: "resource-in", label: "Resource", type: ResourceType.RESOURCE, direction: "input" }],
+    outputs: [{ id: "product-out", label: "Output", type: ResourceType.RESOURCE, direction: "output" }],
+  },
+  {
+    id: "starter-wooden-chest",
+    kind: "woodenChest",
+    title: "Wooden Chest",
+    eyebrow: "CHEST 01",
+    color: RESOURCE_COLORS.WOOD,
+    icon: Archive,
+    inputs: [{ id: "chest-in", label: PRODUCTION_PORT_LABEL, type: ResourceType.ANY, direction: "input" }],
+    outputs: [{ id: "chest-out", label: PRODUCTION_PORT_LABEL, type: ResourceType.ANY, direction: "output" }],
+  },
 ];
 
 const MYTHRIL_RESOURCE_NODE: NodeSpec = {
@@ -1063,12 +1094,20 @@ const INITIAL_POSITIONS: Positions = {
   forest: { x: STARTING_RESOURCE_X, y: 120 + STARTING_RESOURCE_STEP },
   copperOre: { x: STARTING_RESOURCE_X, y: 120 + STARTING_RESOURCE_STEP * 2 },
   ironOre: { x: STARTING_RESOURCE_X, y: 120 + STARTING_RESOURCE_STEP * 3 },
+  ironExtractor: { x: 700, y: 120 },
+  "extractor-2": { x: 960, y: 120 + STARTING_RESOURCE_STEP - 60 },
+  "starter-wooden-chest": { x: 1100, y: 170 },
 };
 
 const STARTING_RESOURCE_BOUNDS = {
   left: STARTING_RESOURCE_X,
   top: INITIAL_POSITIONS.stone.y,
-  right: STARTING_RESOURCE_X + RESOURCE_NODE_SIZE.width,
+  right: Math.max(
+    STARTING_RESOURCE_X + RESOURCE_NODE_SIZE.width,
+    INITIAL_POSITIONS.ironExtractor.x + 258,
+    INITIAL_POSITIONS["extractor-2"].x + 258,
+    INITIAL_POSITIONS["starter-wooden-chest"].x + WOODEN_CHEST_NODE_SIZE.width,
+  ),
   bottom: INITIAL_POSITIONS.ironOre.y + RESOURCE_NODE_SIZE.height,
 };
 
@@ -1320,7 +1359,10 @@ const makeRuntime = (): Runtime => ({
     capacity: RESOURCE_CAPACITIES.forest,
     regenerationElapsed: 0,
   },
-  extractors: {},
+  extractors: {
+    ironExtractor: { progress: 0, stored: 0, full: false, materialType: null },
+    "extractor-2": { progress: 0, stored: 0, full: false, materialType: null },
+  },
   processors: {},
   generators: {},
   researchFoundries: {},
@@ -1336,12 +1378,18 @@ const makeRuntime = (): Runtime => ({
   roads: {},
   inventorySources: {},
   filters: {},
-  woodenChests: {},
+  woodenChests: {
+    "starter-wooden-chest": { itemType: null, stored: 0 },
+  },
   storages: {},
-  inventoryCapacity: BASE_INVENTORY_CAPACITY,
+  inventoryCapacity: 0,
   inventory: makeEmptyItemStore(),
   pausedOutputs: {},
-  construction: {},
+  construction: {
+    ironExtractor: { progress: 100, complete: true },
+    "extractor-2": { progress: 100, complete: true },
+    "starter-wooden-chest": { progress: 100, complete: true },
+  },
   produced: makeEmptyItemStore(),
   extractorProduced: makeEmptyItemStore(),
 });
@@ -1361,12 +1409,6 @@ const EXTRACTOR_RECIPES: Partial<Record<ResourceType, { product: ExtractorProduc
   [ResourceType.STONE]: { product: ResourceType.STONE, label: "Stone", duration: EXTRACTOR_BASE_CYCLE_DURATION },
   [ResourceType.FOREST]: { product: ResourceType.WOOD, label: "Wood", duration: EXTRACTOR_BASE_CYCLE_DURATION },
   [ResourceType.WOOD]: { product: ResourceType.WOOD, label: "Wood", duration: EXTRACTOR_BASE_CYCLE_DURATION },
-};
-
-const getManualResourceProductType = (node: NodeSpec): ExtractorProduct | null => {
-  if (!isResourceNodeKind(node.kind)) return null;
-  const outputType = node.outputs[0]?.type;
-  return outputType ? EXTRACTOR_RECIPES[outputType]?.product ?? null : null;
 };
 
 const formatCycleDuration = (duration: number) =>
@@ -1405,7 +1447,7 @@ const BUILD_TIMES = {
 } as const;
 
 const makeBuildSequence = (): BuildSequence => ({
-  extractor: 0,
+  extractor: 2,
   generator: 0,
   powerSplitter: 0,
   researchFoundry: 0,
@@ -1423,7 +1465,7 @@ const makeBuildSequence = (): BuildSequence => ({
   inventorySource: 0,
   filter: 0,
   storage: 0,
-  woodenChest: 0,
+  woodenChest: 1,
 });
 
 const SAVE_STORAGE_KEY = "factorinode.save-slots.v1";
@@ -1451,15 +1493,9 @@ const ACHIEVEMENT_UNLOCK_DETAILS: Record<AchievementId, {
     flavorText: "Did I do thaaaaat?",
     icon: Trophy,
   },
-  handHolding: {
-    title: "Hand Holding",
-    description: "See the final tutorial after completing every previous tutorial.",
-    flavorText: "You are either very deliberate, or very slow.  Or both?",
-    icon: BookOpenText,
-  },
 };
 const isAchievementId = (value: unknown): value is AchievementId =>
-  value === "oops" || value === "handHolding";
+  value === "oops";
 const SHORTCUT_SLOT_COUNT = 5;
 const SHORTCUT_BAR_SCALE_MIN = 0.72;
 const SHORTCUT_BAR_SCALE_MAX = 1.55;
@@ -3113,10 +3149,7 @@ const BUILD_CATALOG: Array<{
     kind: "extractor",
     title: "Extractor",
     description: "Automate resource gathering",
-    recipe: [
-      { type: ResourceType.WOOD, amount: 2 },
-      { type: ResourceType.STONE, amount: 2 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.extractor,
     icon: Pickaxe,
   },
@@ -3124,10 +3157,7 @@ const BUILD_CATALOG: Array<{
     kind: "storage",
     title: "Storage",
     description: `Stores up to ${STORAGE_NODE_CAPACITY} of every material type. One Storage node can accept connections from multiple item-producing nodes at the same time.`,
-    recipe: [
-      { type: ResourceType.WOOD, amount: 4 },
-      { type: ResourceType.STONE, amount: 4 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.storage,
     icon: PackageOpen,
   },
@@ -3135,9 +3165,7 @@ const BUILD_CATALOG: Array<{
     kind: "woodenChest",
     title: "Wooden Chest",
     description: `Stores up to ${WOODEN_CHEST_CAPACITY} of one production material in its own container.`,
-    recipe: [
-      { type: ResourceType.WOOD, amount: 2 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.woodenChest,
     icon: Archive,
   },
@@ -3145,9 +3173,7 @@ const BUILD_CATALOG: Array<{
     kind: "splitter",
     title: "Splitter",
     description: "Alternates each incoming item between two smart outputs.",
-    recipe: [
-      { type: ResourceType.STONE, amount: 1 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.splitter,
     icon: Split,
   },
@@ -3155,9 +3181,7 @@ const BUILD_CATALOG: Array<{
     kind: "merger",
     title: "Merger",
     description: "Combines two matching item streams into one smart output.",
-    recipe: [
-      { type: ResourceType.STONE, amount: 1 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.merger,
     icon: GitMerge,
   },
@@ -3165,9 +3189,7 @@ const BUILD_CATALOG: Array<{
     kind: "joint",
     title: "Joint",
     description: "A compact pass-through for shaping and organizing cable routes.",
-    recipe: [
-      { type: ResourceType.WOOD, amount: 1 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.joint,
     icon: Cable,
   },
@@ -3175,10 +3197,7 @@ const BUILD_CATALOG: Array<{
     kind: "road",
     title: "Road",
     description: "Creates paired edge terminals with a shared Import / Export direction toggle.",
-    recipe: [
-      { type: ResourceType.STONE, amount: 5 },
-      { type: ResourceType.BRICK, amount: 5 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.road,
     icon: RoadIcon,
   },
@@ -3186,10 +3205,7 @@ const BUILD_CATALOG: Array<{
     kind: "powerSplitter",
     title: "Power Splitter",
     description: "Branches one Power cable into three compact directional outputs.",
-    recipe: [
-      { type: ResourceType.STONE, amount: 1 },
-      { type: ResourceType.COPPER_WIRE, amount: 1 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.powerSplitter,
     icon: Zap,
   },
@@ -3197,10 +3213,7 @@ const BUILD_CATALOG: Array<{
     kind: "filter",
     title: "Filter",
     description: "Passes only the selected stored item type through its output.",
-    recipe: [
-      { type: ResourceType.WOOD, amount: 1 },
-      { type: ResourceType.IRON_PLATE, amount: 1 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.filter,
     icon: FilterIcon,
   },
@@ -3208,10 +3221,7 @@ const BUILD_CATALOG: Array<{
     kind: "inventorySource",
     title: "Inventory",
     description: "Retrieves stored materials for every connected Filter every four seconds.",
-    recipe: [
-      { type: ResourceType.STONE, amount: 3 },
-      { type: ResourceType.IRON_PLATE, amount: 2 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.inventorySource,
     icon: PackageOpen,
   },
@@ -3219,10 +3229,7 @@ const BUILD_CATALOG: Array<{
     kind: "kiln",
     title: "Kiln",
     description: "Fires Wood into Charcoal for metal processing.",
-    recipe: [
-      { type: ResourceType.WOOD, amount: 2 },
-      { type: ResourceType.STONE, amount: 3 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.kiln,
     icon: FlameKindling,
   },
@@ -3230,10 +3237,7 @@ const BUILD_CATALOG: Array<{
     kind: "generator",
     title: "Charcoal Generator",
     description: "Burns Charcoal into a shared 100W reserve for advanced machines.",
-    recipe: [
-      { type: ResourceType.STONE, amount: 3 },
-      { type: ResourceType.IRON_PLATE, amount: 2 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.generator,
     icon: Zap,
   },
@@ -3241,10 +3245,7 @@ const BUILD_CATALOG: Array<{
     kind: "furnace",
     title: "Furnace",
     description: "Smelts metal with Charcoal into matching Plates.",
-    recipe: [
-      { type: ResourceType.STONE, amount: 4 },
-      { type: ResourceType.IRON, amount: 2 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.furnace,
     icon: Anvil,
   },
@@ -3252,10 +3253,7 @@ const BUILD_CATALOG: Array<{
     kind: "refiner",
     title: "Refiner",
     description: "Changes one input item into another product.",
-    recipe: [
-      { type: ResourceType.IRON_PLATE, amount: 1 },
-      { type: ResourceType.STONE, amount: 1 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.refiner,
     icon: Cog,
   },
@@ -3263,10 +3261,7 @@ const BUILD_CATALOG: Array<{
     kind: "assembler",
     title: "Assembler",
     description: "Combines two input items into another product.",
-    recipe: [
-      { type: ResourceType.WOOD, amount: 4 },
-      { type: ResourceType.STONE, amount: 5 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.assembler,
     icon: Hammer,
   },
@@ -3274,11 +3269,7 @@ const BUILD_CATALOG: Array<{
     kind: "automataCoreAssembler",
     title: "Automata Core Assembler",
     description: "Combines one Circuit A and one Brick into an Automata Core.",
-    recipe: [
-      { type: ResourceType.STONE, amount: 6 },
-      { type: ResourceType.MOTOR, amount: 1 },
-      { type: ResourceType.CIRCUIT_A, amount: 2 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.automataCoreAssembler,
     icon: Atom,
   },
@@ -3286,11 +3277,7 @@ const BUILD_CATALOG: Array<{
     kind: "researchFoundry",
     title: "Research Center",
     description: "Accepts all Cores and studies them for the next generation of machinery.",
-    recipe: [
-      { type: ResourceType.STONE, amount: 5 },
-      { type: ResourceType.WOOD, amount: 5 },
-      { type: ResourceType.IRON_PLATE, amount: 5 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.researchFoundry,
     icon: FlaskConical,
   },
@@ -3298,10 +3285,7 @@ const BUILD_CATALOG: Array<{
     kind: "treePlanter",
     title: "Tree Planter",
     description: "Uses power to restore one depleted Forest unit every second.",
-    recipe: [
-      { type: ResourceType.MOTOR, amount: 1 },
-      { type: ResourceType.IRON_PLATE, amount: 4 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.treePlanter,
     icon: Sprout,
   },
@@ -3309,9 +3293,7 @@ const BUILD_CATALOG: Array<{
     kind: "miningDrill",
     title: "Mining Drill",
     description: "Consumes twenty Motors, one per progression tick, then becomes a 1,000-unit deposit.",
-    recipe: [
-      { type: ResourceType.MOTOR, amount: 2 },
-    ],
+    recipe: [],
     buildTime: BUILD_TIMES.miningDrill,
     icon: MiningDrillIcon,
   },
@@ -4673,7 +4655,11 @@ type StoredItemLocation = {
 };
 type InventoryStorageBreakdown = {
   nodeCount: number;
-  nodeCapacity: number;
+};
+type InventoryDistributionEntry = {
+  id: string;
+  title: string;
+  amount: number;
 };
 
 type BuildMaterialAvailability = Record<InventoryItemType, {
@@ -4728,16 +4714,6 @@ const getStoredItemLocations = (
 ): StoredItemLocation[] => {
   const nodeById = new Map(nodes.map((node) => [node.id, node] as const));
   const locations: StoredItemLocation[] = [];
-  const baseInventoryAmount = runtime.inventory?.[type] ?? 0;
-  if (baseInventoryAmount > 0) {
-    locations.push({
-      nodeId: BASE_INVENTORY_NODE_ID,
-      nodeTitle: "Base Inventory",
-      detail: `Personal storage · ${baseInventoryAmount} / ${BASE_INVENTORY_CAPACITY}`,
-      bucket: "storage",
-      amount: baseInventoryAmount,
-    });
-  }
   const add = (
     nodeId: NodeId,
     amount: number,
@@ -7150,8 +7126,14 @@ const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
   {
     group: "General",
     name: "Pan the field",
-    keys: ["Right-click", "Drag"],
-    description: "Right-click and drag anywhere on the field to pan.",
+    keys: ["Two-finger pan / Right-click + drag"],
+    description: "Pan naturally with two fingers on a trackpad, or right-click and drag anywhere on the field.",
+  },
+  {
+    group: "General",
+    name: "Zoom the field",
+    keys: ["Pinch / Mouse wheel"],
+    description: "Pinch on a trackpad or use a mouse wheel to zoom around the pointer.",
   },
   {
     group: "General",
@@ -7271,10 +7253,6 @@ export default function Home() {
   const [productionFlashTokens, setProductionFlashTokens] = useState<Record<NodeId, number>>({});
   const [rapidClickAnimations, setRapidClickAnimations] = useState<Record<NodeId, RapidClickAnimation>>({});
   const [rapidClickWarningOpen, setRapidClickWarningOpen] = useState(false);
-  const [stoneCollectHintVisible, setStoneCollectHintVisible] = useState(false);
-  const [stoneCollectHintEncouraging, setStoneCollectHintEncouraging] = useState(false);
-  const [forestCollectHintVisible, setForestCollectHintVisible] = useState(false);
-  const [forestCollectHintEncouraging, setForestCollectHintEncouraging] = useState(false);
   const [starterBuildHintTarget, setStarterBuildHintTarget] = useState<"menu" | "extractor" | null>(null);
   const [connectionTutorialExtractorId, setConnectionTutorialExtractorId] = useState<NodeId | null>(null);
   const [starterTutorialOutroOpen, setStarterTutorialOutroOpen] = useState(false);
@@ -7361,6 +7339,7 @@ export default function Home() {
   }));
   const [buildAttention, setBuildAttention] = useState(false);
   const [journalAttention, setJournalAttention] = useState(false);
+  const [researchAttention, setResearchAttention] = useState(false);
   const [logisticsUnlocked, setLogisticsUnlocked] = useState(false);
   const [configuringFilterId, setConfiguringFilterId] = useState<NodeId | null>(null);
   const [configuringMiningDrillId, setConfiguringMiningDrillId] = useState<NodeId | null>(null);
@@ -7483,6 +7462,7 @@ export default function Home() {
   const connectionsRef = useRef(connections);
   const positionsRef = useRef(positions);
   const isRunningRef = useRef(isRunning);
+  const researchOpenRef = useRef(false);
   const zoomRef = useRef(zoom);
   const lastSimulationTickRef = useRef(0);
   const lastSimulationUiUpdateRef = useRef(0);
@@ -8137,6 +8117,11 @@ export default function Home() {
   }, [isRunning]);
 
   useEffect(() => {
+    researchOpenRef.current = researchOpen;
+    if (researchOpen) setResearchAttention(false);
+  }, [researchOpen]);
+
+  useEffect(() => {
     if (!configuringAssemblerId) setHoveredRecipeOptionId(null);
   }, [configuringAssemblerId]);
 
@@ -8160,94 +8145,6 @@ export default function Home() {
   useEffect(() => {
     const timer = window.setInterval(() => {
       const elapsed = gameElapsedMsRef.current;
-      if (stoneCollectSecondHintActiveRef.current) return;
-      if (stoneCollectSecondHintPendingRef.current) {
-        if (
-          elapsed - lastPlayerActivityElapsedRef.current <
-          SUBSEQUENT_COLLECT_HINT_DELAY_MS
-        ) return;
-        stoneCollectSecondHintPendingRef.current = false;
-        stoneCollectSecondHintActiveRef.current = true;
-        starterTutorialSeenRef.current.stoneSecond = true;
-        setStoneCollectHintEncouraging(true);
-        setStoneCollectHintVisible(true);
-        return;
-      }
-      if (stoneCollectHintActivatedRef.current) return;
-      if (!stoneCollectHintDismissedRef.current) {
-        const hasCollectedResource = Array.from(STARTING_INVENTORY_ITEM_TYPES).some(
-          (type) => (runtimeRef.current.produced[type] ?? 0) > 0,
-        );
-        if (hasCollectedResource) {
-          stoneCollectHintDismissedRef.current = true;
-        } else {
-          if (elapsed < STONE_COLLECT_HINT_DELAY_MS) return;
-          stoneCollectHintActivatedRef.current = true;
-          starterTutorialSeenRef.current.stoneFirst = true;
-          setStoneCollectHintEncouraging(false);
-          setStoneCollectHintVisible(true);
-          return;
-        }
-      }
-
-      const availability = getBuildMaterialAvailability(
-        runtimeRef.current,
-        nodesRef.current,
-        connectionsRef.current,
-      );
-      const stoneAvailable = availability[ResourceType.STONE].total;
-      const woodAvailable = availability[ResourceType.WOOD].total;
-      if (!forestCollectHintDismissedRef.current) {
-        if (woodAvailable >= 2) {
-          forestCollectHintDismissedRef.current = true;
-          forestCollectHintActivatedRef.current = false;
-          forestCollectSecondHintPendingRef.current = false;
-          forestCollectSecondHintActiveRef.current = false;
-          setForestCollectHintVisible(false);
-        } else {
-          if (
-            forestCollectHintActivatedRef.current ||
-            forestCollectSecondHintActiveRef.current
-          ) return;
-          if (forestCollectSecondHintPendingRef.current) {
-            if (
-              elapsed - lastPlayerActivityElapsedRef.current <
-              SUBSEQUENT_COLLECT_HINT_DELAY_MS
-            ) return;
-            forestCollectSecondHintPendingRef.current = false;
-            forestCollectSecondHintActiveRef.current = true;
-            starterTutorialSeenRef.current.forestSecond = true;
-            setForestCollectHintEncouraging(true);
-            setForestCollectHintVisible(true);
-            return;
-          }
-          if (stoneAvailable < 2) {
-            forestCollectHintEligibleAtRef.current = 0;
-            return;
-          }
-          if (forestCollectHintEligibleAtRef.current <= 0) {
-            forestCollectHintEligibleAtRef.current = elapsed;
-            return;
-          }
-          const inactiveSince = Math.max(
-            forestCollectHintEligibleAtRef.current,
-            lastPlayerActivityElapsedRef.current,
-          );
-          if (elapsed - inactiveSince < SUBSEQUENT_COLLECT_HINT_DELAY_MS) return;
-          if (woodAvailable >= 1) {
-            forestCollectSecondHintActiveRef.current = true;
-            starterTutorialSeenRef.current.forestSecond = true;
-            setForestCollectHintEncouraging(true);
-          } else {
-            forestCollectHintActivatedRef.current = true;
-            starterTutorialSeenRef.current.forestFirst = true;
-            setForestCollectHintEncouraging(false);
-          }
-          setForestCollectHintVisible(true);
-          return;
-        }
-      }
-
       const placedExtractor = nodesRef.current.find(
         (node) =>
           node.kind === "extractor" &&
@@ -8257,25 +8154,6 @@ export default function Home() {
         starterBuildHintStageRef.current = "complete";
         starterBuildHintEligibleAtRef.current = 0;
         setStarterBuildHintTarget(null);
-      }
-      if (starterBuildHintStageRef.current === "waiting") {
-        if (stoneAvailable < 2 || woodAvailable < 2) {
-          starterBuildHintEligibleAtRef.current = 0;
-          return;
-        }
-        if (starterBuildHintEligibleAtRef.current <= 0) {
-          starterBuildHintEligibleAtRef.current = elapsed;
-          return;
-        }
-        const buildHintInactiveSince = Math.max(
-          starterBuildHintEligibleAtRef.current,
-          lastPlayerActivityElapsedRef.current,
-        );
-        if (elapsed - buildHintInactiveSince < SUBSEQUENT_COLLECT_HINT_DELAY_MS) return;
-        starterBuildHintStageRef.current = "menu";
-        starterTutorialSeenRef.current.extractorBuilding = true;
-        setStarterBuildHintTarget("menu");
-        return;
       }
       if (starterBuildHintStageRef.current !== "complete") return;
 
@@ -8315,7 +8193,6 @@ export default function Home() {
           );
           if (elapsed - outroInactiveSince >= SUBSEQUENT_COLLECT_HINT_DELAY_MS) {
             starterTutorialOutroShownRef.current = true;
-            unlockAchievement("handHolding");
             setStarterTutorialOutroOpen(true);
           }
         }
@@ -8336,13 +8213,13 @@ export default function Home() {
         starterConnectionHintEligibleAtRef.current,
         lastPlayerActivityElapsedRef.current,
       );
-      if (elapsed - connectionHintInactiveSince < SUBSEQUENT_COLLECT_HINT_DELAY_MS) return;
+      if (elapsed - connectionHintInactiveSince < STARTER_CONNECTION_HINT_DELAY_MS) return;
       starterConnectionHintStageRef.current = "active";
       starterTutorialSeenRef.current.connectionMaking = true;
       setConnectionTutorialExtractorId(placedExtractor.id);
     }, 500);
     return () => window.clearInterval(timer);
-  }, [unlockAchievement]);
+  }, []);
 
   const recordRapidNodeClick = useCallback((nodeId: NodeId) => {
     const now = performance.now();
@@ -8398,6 +8275,7 @@ export default function Home() {
       let changed = false;
       let researchChanged = false;
       let inactiveResearchProgressChanged = false;
+      let backgroundResearchCompleted = false;
       let sharedResearch = runtimeRef.current.research;
       let sharedMapPoints = runtimeRef.current.mapPoints;
       const advancedFactories: MapFactoriesBySector = {};
@@ -8417,12 +8295,19 @@ export default function Home() {
         changed = true;
         const previousResearchProgress = Object.values(factory.runtime.researchFoundries)
           .reduce((total, foundry) => total + foundry.progress, 0);
+        const activeResearchBeforeAdvance = sharedResearch.activeProject;
         const advanced = advanceMapFactoryInBackground(factory, {
           sectorKey,
           elapsedMs: elapsed,
           sharedResearch,
           sharedMapPoints,
         });
+        if (
+          activeResearchBeforeAdvance &&
+          advanced.runtime.research.activeProject !== activeResearchBeforeAdvance
+        ) {
+          backgroundResearchCompleted = true;
+        }
         advancedFactories[sectorKey] = advanced;
         const nextResearchProgress = Object.values(advanced.runtime.researchFoundries)
           .reduce((total, foundry) => total + foundry.progress, 0);
@@ -8481,6 +8366,9 @@ export default function Home() {
         setRuntime(nextActiveRuntime);
       } else if (inactiveResearchProgressChanged) {
         setBackgroundResearchRevision((revision) => revision + 1);
+      }
+      if (backgroundResearchCompleted && !researchOpenRef.current) {
+        setResearchAttention(true);
       }
     }, BACKGROUND_SIMULATION_STEP_MS);
     return () => window.clearInterval(timer);
@@ -9321,86 +9209,6 @@ export default function Home() {
     toast.success("Black Hole filled in");
   }, [captureGraphUndoSnapshot, measureAnchors, pushUndoEntry]);
 
-  const manuallyExtractResource = useCallback((nodeId: NodeId) => {
-    const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
-    if (!node || !isResourceNodeKind(node.kind)) return false;
-    const outputType = node.outputs[0]?.type;
-    const productType = getManualResourceProductType(node);
-    if (!outputType || !productType) return false;
-
-    const current = runtimeRef.current;
-    if (getResourceRemaining(current, nodeId, outputType, connectionsRef.current) <= 0) {
-      toast.error(`${node.title} is depleted`);
-      return false;
-    }
-    const baseInventory = normalizeItemStore(current.inventory, BASE_INVENTORY_CAPACITY);
-    if ((baseInventory[productType] ?? 0) >= BASE_INVENTORY_CAPACITY) {
-      toast.error("Base inventory full", {
-        description: `Use some ${formatResourceType(productType)} before extracting more.`,
-      });
-      return false;
-    }
-
-    const undoSnapshot = captureGraphUndoSnapshot();
-    const next = cloneStoredMaterialRuntime(current);
-    consumeResource(next, nodeId, outputType, connectionsRef.current);
-    next.inventory[productType] = (next.inventory[productType] ?? 0) + 1;
-    next.produced[productType] = (next.produced[productType] ?? 0) + 1;
-    runtimeRef.current = next;
-    lastPublishedRuntimeSignatureRef.current = null;
-    setRuntime(next);
-    setProductionFlashTokens((tokens) => ({
-      ...tokens,
-      [nodeId]: (tokens[nodeId] ?? 0) + 1,
-    }));
-    lastManualResourceCollectionElapsedRef.current = gameElapsedMsRef.current;
-    lastPlayerActivityElapsedRef.current = gameElapsedMsRef.current;
-    if (nodeId === "stone") {
-      stoneManualCollectionCountRef.current = Math.min(
-        2,
-        stoneManualCollectionCountRef.current + 1,
-      );
-      stoneCollectHintActivatedRef.current = false;
-      if (stoneManualCollectionCountRef.current === 1) {
-        stoneCollectHintDismissedRef.current = false;
-        stoneCollectSecondHintPendingRef.current = true;
-        stoneCollectSecondHintActiveRef.current = false;
-      } else {
-        stoneCollectHintDismissedRef.current = true;
-        stoneCollectSecondHintPendingRef.current = false;
-        stoneCollectSecondHintActiveRef.current = false;
-      }
-      setStoneCollectHintEncouraging(false);
-      setStoneCollectHintVisible(false);
-    } else if (nodeId === "forest") {
-      const availability = getBuildMaterialAvailability(
-        next,
-        nodesRef.current,
-        connectionsRef.current,
-      );
-      const woodAvailable = availability[ResourceType.WOOD].total;
-      const stoneAvailable = availability[ResourceType.STONE].total;
-      forestCollectHintActivatedRef.current = false;
-      if (woodAvailable >= 2) {
-        forestCollectHintDismissedRef.current = true;
-        forestCollectSecondHintPendingRef.current = false;
-        forestCollectSecondHintActiveRef.current = false;
-      } else if (
-        stoneAvailable >= 2 ||
-        forestCollectHintEligibleAtRef.current > 0 ||
-        forestCollectSecondHintActiveRef.current
-      ) {
-        forestCollectHintDismissedRef.current = false;
-        forestCollectSecondHintPendingRef.current = true;
-        forestCollectSecondHintActiveRef.current = false;
-      }
-      setForestCollectHintEncouraging(false);
-      setForestCollectHintVisible(false);
-    }
-    pushUndoEntry({ kind: "graph", snapshot: undoSnapshot });
-    return true;
-  }, [captureGraphUndoSnapshot, pushUndoEntry]);
-
   const buildNode = useCallback((
     kind: PurchasableKind,
     recipe: BuildIngredient[],
@@ -9840,16 +9648,13 @@ export default function Home() {
     const construction = current.construction[nodeId];
     if (construction && !construction.complete) return;
     const excludedNodeIds = new Set([nodeId]);
-    const isResearchCoreFeed = node.kind === "researchFoundry" && isCoreType(itemType);
-    const available = isResearchCoreFeed
-      ? normalizeItemStore(current.inventory, BASE_INVENTORY_CAPACITY)[itemType] ?? 0
-      : getStoredItemAmount(
-          current,
-          nodesRef.current,
-          connectionsRef.current,
-          itemType,
-          excludedNodeIds,
-        );
+    const available = getStoredItemAmount(
+      current,
+      nodesRef.current,
+      connectionsRef.current,
+      itemType,
+      excludedNodeIds,
+    );
     if (available <= 0) return;
 
     if (isProcessorKind(node.kind)) {
@@ -9993,7 +9798,14 @@ export default function Home() {
       const transferred = Math.min(1, available);
       if (transferred <= 0) return;
       const next = cloneStoredMaterialRuntime(current);
-      next.inventory[itemType] = Math.max(0, (next.inventory[itemType] ?? 0) - transferred);
+      consumeStoredMaterialInPlace(
+        next,
+        nodesRef.current,
+        connectionsRef.current,
+        itemType,
+        transferred,
+        excludedNodeIds,
+      );
       next.researchFoundries = {
           ...next.researchFoundries,
           [nodeId]: {
@@ -10201,19 +10013,16 @@ export default function Home() {
     const viewport = workspaceRef.current;
     if (!viewport) return;
     const handleWheel = (event: WheelEvent) => {
-      if (Math.abs(event.deltaY) < 0.01) return;
+      const isPinchGesture = event.ctrlKey;
 
-      const now = performance.now();
-      event.preventDefault();
-      const delta = event.deltaY * (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1);
-      const sensitivity = event.ctrlKey ? 0.0045 : 0.0018;
-      const rawFactor = Math.exp(-delta * sensitivity);
-      const factor = Math.min(
-        event.ctrlKey ? 1.16 : 1.18,
-        Math.max(event.ctrlKey ? 0.86 : 0.84, rawFactor),
-      );
-
-      if (event.ctrlKey) {
+      // Browsers expose trackpad pinches as Ctrl+pixel-wheel events. Handle that
+      // signal before ordinary scrolling so a pinch stays anchored to the cursor.
+      if (isPinchGesture) {
+        if (Math.abs(event.deltaY) < 0.01) return;
+        event.preventDefault();
+        const now = performance.now();
+        const rawFactor = Math.exp(-event.deltaY * 0.0045);
+        const factor = Math.min(1.16, Math.max(0.86, rawFactor));
         if (now > pinchAnchorRef.current.activeUntil) {
           pinchAnchorRef.current = {
             clientX: event.clientX,
@@ -10241,6 +10050,69 @@ export default function Home() {
         return;
       }
 
+      // Chromium also reports many conventional mouse wheels as pixel-mode
+      // events. Their legacy deltas retain the hardware's discrete 120-unit
+      // notches, which lets us restore wheel zoom without treating ordinary
+      // continuous trackpad movement as zoom.
+      if (event.deltaMode === WheelEvent.DOM_DELTA_PIXEL) {
+        const legacyEvent = event as WheelEvent & {
+          wheelDelta?: number;
+          wheelDeltaX?: number;
+          wheelDeltaY?: number;
+        };
+        const legacyDeltaY = Math.abs(
+          legacyEvent.wheelDeltaY ?? legacyEvent.wheelDelta ?? 0,
+        );
+        const legacyDeltaX = Math.abs(legacyEvent.wheelDeltaX ?? 0);
+        const legacySteps = legacyDeltaY / 120;
+        const hasDiscreteLegacySteps =
+          Math.abs(event.deltaX) < 0.01 &&
+          legacyDeltaX < 0.01 &&
+          legacyDeltaY >= 120 &&
+          Math.abs(legacySteps - Math.round(legacySteps)) < 0.01;
+        const pixelSteps = Math.abs(event.deltaY) / 100;
+        const hasDiscretePixelFallback =
+          legacyDeltaY < 0.01 &&
+          legacyDeltaX < 0.01 &&
+          Math.abs(event.deltaX) < 0.01 &&
+          Math.abs(event.deltaY) >= 80 &&
+          Math.abs(pixelSteps - Math.round(pixelSteps)) < 0.02;
+
+        if (hasDiscreteLegacySteps || hasDiscretePixelFallback) {
+          if (Math.abs(event.deltaY) < 0.01) return;
+          event.preventDefault();
+          const stepCount = Math.max(
+            1,
+            Math.min(3, Math.round(hasDiscreteLegacySteps ? legacySteps : pixelSteps)),
+          );
+          const factor = Math.pow(1.1, -Math.sign(event.deltaY) * stepCount);
+          zoomAtPoint(zoomRef.current * factor, event.clientX, event.clientY);
+          return;
+        }
+
+        // Unmodified continuous pixel gestures are trackpad pans, including
+        // fast and diagonal two-finger swipes. Pinch zoom was handled above.
+        if (Math.abs(event.deltaX) < 0.01 && Math.abs(event.deltaY) < 0.01) return;
+        event.preventDefault();
+        viewport.scrollLeft += event.deltaX;
+        viewport.scrollTop += event.deltaY;
+        return;
+      }
+
+      // Discrete line/page wheel events come from conventional mouse wheels.
+      // Keep the existing mouse-wheel zoom behavior without compromising
+      // trackpad gesture detection.
+      const primaryDelta = Math.abs(event.deltaY) >= Math.abs(event.deltaX)
+        ? event.deltaY
+        : event.deltaX;
+      if (Math.abs(primaryDelta) < 0.01) return;
+      event.preventDefault();
+      const delta = primaryDelta * (
+        event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? Math.max(viewport.clientHeight, 1)
+          : 16
+      );
+      const factor = Math.min(1.18, Math.max(0.84, Math.exp(-delta * 0.0018)));
       zoomAtPoint(zoomRef.current * factor, event.clientX, event.clientY);
     };
     viewport.addEventListener("wheel", handleWheel, { passive: false });
@@ -10282,7 +10154,10 @@ export default function Home() {
       LOGISTICS_BUILD_KINDS.forEach((kind) => next.add(kind));
       return next;
     });
-    if (newlyCompleted) announceResearchCompletion("logistics");
+    if (newlyCompleted) {
+      announceResearchCompletion("logistics");
+      if (!researchOpenRef.current) setResearchAttention(true);
+    }
     if (!buildOpenRef.current) setBuildAttention(true);
   }, []);
 
@@ -10577,6 +10452,9 @@ export default function Home() {
     newlyCompletedProjects.forEach((project) => {
       announceResearchCompletion(project.id);
     });
+    if (newlyCompletedProjects.length > 0 && !researchOpenRef.current) {
+      setResearchAttention(true);
+    }
   }, [unlockLogisticsBuildings]);
 
   const unlockAllMapNodesForDevelopment = useCallback(() => {
@@ -13276,6 +13154,7 @@ export default function Home() {
             if (next.research.progress[activeProject] >= projectCost) {
               applyResearchProjectCompletion(next, activeProject);
               announceResearchCompletion(activeProject);
+              if (!researchOpenRef.current) setResearchAttention(true);
             }
           }
         });
@@ -14484,16 +14363,13 @@ export default function Home() {
     starterTutorialSeenRef.current = makeStarterTutorialSeenState();
     starterTutorialOutroShownRef.current = false;
     starterTutorialOutroEligibleAtRef.current = 0;
-    setStoneCollectHintVisible(false);
-    setStoneCollectHintEncouraging(false);
-    setForestCollectHintVisible(false);
-    setForestCollectHintEncouraging(false);
     setStarterBuildHintTarget(null);
     setConnectionTutorialExtractorId(null);
     setStarterTutorialOutroOpen(false);
     setUnlockTimes({ extractor: 0, woodenChest: 0 });
     setBuildAttention(false);
     setJournalAttention(false);
+    setResearchAttention(false);
     logisticsUnlockedRef.current = false;
     setLogisticsUnlocked(false);
     buildSequenceRef.current = makeBuildSequence();
@@ -14546,6 +14422,7 @@ export default function Home() {
         isRunning: isRunningRef.current,
         buildAttention,
         journalAttention,
+        researchAttention,
         shortcutBars,
         shortcutBarGroups,
         achievements: [...unlockedAchievementsRef.current],
@@ -14603,6 +14480,7 @@ export default function Home() {
     captureActiveMapFactory,
     connectionTutorialExtractorId,
     journalAttention,
+    researchAttention,
     mapNodeProgress,
     newBuildKinds,
     placedBuildKinds,
@@ -14732,9 +14610,6 @@ export default function Home() {
       const nextUnlockedAchievements = new Set(
         (payload.achievements ?? []).filter(isAchievementId),
       );
-      if (payload.starterTutorialOutro?.shown === true) {
-        nextUnlockedAchievements.add("handHolding");
-      }
       const migrateLegacyMapCoordinates = hasLegacyMapCoordinates(payload.mapFactories);
       const nextMapNodeProgress = normalizeMapNodeProgress(
         payload.mapNodeProgress,
@@ -15163,25 +15038,11 @@ export default function Home() {
             )
           : 0;
       const savedStarterTutorialSeen = payload.starterTutorialOutro?.seen;
-      const loadedStarterTutorialSeen: StarterTutorialSeenState = savedStarterTutorialSeen
-        ? {
-            stoneFirst: savedStarterTutorialSeen.stoneFirst === true,
-            stoneSecond: savedStarterTutorialSeen.stoneSecond === true,
-            forestFirst: savedStarterTutorialSeen.forestFirst === true,
-            forestSecond: savedStarterTutorialSeen.forestSecond === true,
-            extractorBuilding: savedStarterTutorialSeen.extractorBuilding === true,
-            connectionMaking: savedStarterTutorialSeen.connectionMaking === true,
-          }
-        : {
-            stoneFirst:
-              loadedStoneManualCollections >= 1 || savedStoneCollectHint?.activated === true,
-            stoneSecond: loadedStoneManualCollections >= 2,
-            forestFirst:
-              loadedWoodAvailable >= 1 || savedForestCollectHint?.activated === true,
-            forestSecond: loadedWoodAvailable >= 2,
-            extractorBuilding: loadedStarterBuildHintStage !== "waiting",
-            connectionMaking: loadedStarterConnectionHintStage !== "waiting",
-          };
+      const loadedStarterTutorialSeen: StarterTutorialSeenState = {
+        ...makeStarterTutorialSeenState(),
+        connectionMaking: savedStarterTutorialSeen?.connectionMaking === true ||
+          loadedStarterConnectionHintStage !== "waiting",
+      };
       const loadedStarterTutorialOutroShown =
         payload.starterTutorialOutro?.shown === true;
       const loadedStarterTutorialOutroEligibleAt =
@@ -15235,6 +15096,7 @@ export default function Home() {
       setUnlockTimes(nextUnlockTimes);
       setBuildAttention(payload.buildAttention ?? false);
       setJournalAttention(payload.journalAttention ?? false);
+      setResearchAttention(payload.researchAttention ?? false);
       shortcutBarsRef.current = nextShortcutBars;
       shortcutBarGroupsRef.current = nextShortcutBarGroups;
       shortcutBarDragRef.current = null;
@@ -15309,19 +15171,11 @@ export default function Home() {
       stoneCollectSecondHintActiveRef.current = loadedStoneCollectSecondActive;
       stoneManualCollectionCountRef.current = loadedStoneManualCollections;
       lastManualResourceCollectionElapsedRef.current = loadedLastManualResourceCollectionElapsed;
-      setStoneCollectHintEncouraging(loadedStoneCollectSecondActive);
-      setStoneCollectHintVisible(
-        loadedStoneCollectHintActivated || loadedStoneCollectSecondActive,
-      );
       forestCollectHintActivatedRef.current = loadedForestCollectHintActivated;
       forestCollectHintDismissedRef.current = loadedForestCollectHintDismissed;
       forestCollectSecondHintPendingRef.current = loadedForestCollectSecondPending;
       forestCollectSecondHintActiveRef.current = loadedForestCollectSecondActive;
       forestCollectHintEligibleAtRef.current = loadedForestCollectHintEligibleAt;
-      setForestCollectHintEncouraging(loadedForestCollectSecondActive);
-      setForestCollectHintVisible(
-        loadedForestCollectHintActivated || loadedForestCollectSecondActive,
-      );
       starterBuildHintStageRef.current = loadedStarterBuildHintStage;
       starterBuildHintEligibleAtRef.current = loadedStarterBuildHintEligibleAt;
       lastPlayerActivityElapsedRef.current = loadedLastPlayerActivityElapsed;
@@ -15951,6 +15805,7 @@ export default function Home() {
     runtimeRef.current = next;
     setRuntime(next);
     completedProjects.forEach((project) => announceResearchCompletion(project.id));
+    if (!researchOpenRef.current) setResearchAttention(true);
   }, [builtBuildKinds, milestoneResearchTriggerKey]);
 
   useEffect(() => {
@@ -16217,17 +16072,15 @@ export default function Home() {
   );
   const storageBreakdownByType = useMemo(() => {
     const breakdown = Object.fromEntries(
-      INVENTORY_ITEMS.map(({ type }) => [type, { nodeCount: 0, nodeCapacity: 0 }]),
+      INVENTORY_ITEMS.map(({ type }) => [type, { nodeCount: 0 }]),
     ) as Record<InventoryItemType, InventoryStorageBreakdown>;
     const addMapStorage = (mapRuntime: Runtime, mapNodes: NodeSpec[]) => {
       mapNodes.forEach((node) => {
         const construction = mapRuntime.construction[node.id];
         if (construction && !construction.complete) return;
         if (node.kind === "storage") {
-          const capacity = mapRuntime.storages[node.id]?.capacityPerItem ?? STORAGE_NODE_CAPACITY;
           INVENTORY_ITEMS.forEach(({ type }) => {
             breakdown[type].nodeCount += 1;
-            breakdown[type].nodeCapacity += capacity;
           });
           return;
         }
@@ -16237,7 +16090,6 @@ export default function Home() {
         INVENTORY_ITEMS.forEach(({ type }) => {
           if (chest.itemType && chest.itemType !== type) return;
           breakdown[type].nodeCount += 1;
-          breakdown[type].nodeCapacity += WOODEN_CHEST_CAPACITY;
         });
       });
     };
@@ -16252,6 +16104,87 @@ export default function Home() {
     });
     return breakdown;
   }, [activeMapSector, mapNodeProgress, nodes, runtime]);
+  const inventoryDistributionByType = useMemo(() => {
+    const distribution = Object.fromEntries(
+      INVENTORY_ITEMS.map(({ type }) => [type, []]),
+    ) as Record<InventoryItemType, InventoryDistributionEntry[]>;
+    const addMapDistribution = (
+      sectorKey: string,
+      mapRuntime: Runtime,
+      mapNodes: NodeSpec[],
+      mapConnections: Connection[],
+    ) => {
+      mapNodes.forEach((node) => {
+        const construction = mapRuntime.construction[node.id];
+        if (construction && !construction.complete) return;
+        if (node.kind === "storage") {
+          const storage = mapRuntime.storages[node.id];
+          INVENTORY_ITEMS.forEach(({ type }) => {
+            distribution[type].push({
+              id: `${sectorKey}:${node.id}:storage`,
+              title: "Storage",
+              amount: storage?.items?.[type] ?? 0,
+            });
+          });
+          return;
+        }
+        if (node.kind !== "woodenChest") return;
+        const chest = mapRuntime.woodenChests[node.id];
+        INVENTORY_ITEMS.forEach(({ type }) => {
+          if (chest?.itemType && chest.itemType !== type) return;
+          distribution[type].push({
+            id: `${sectorKey}:${node.id}:chest`,
+            title: "Wooden Chest",
+            amount: chest?.stored ?? 0,
+          });
+        });
+      });
+
+      INVENTORY_ITEMS.forEach(({ type }) => {
+        getStoredItemLocations(mapRuntime, mapNodes, mapConnections, type)
+          .filter((location) => location.bucket === "production" || location.bucket === "buffer")
+          .forEach((location, index) => {
+            distribution[type].push({
+              id: `${sectorKey}:${location.nodeId}:${location.bucket}:${index}`,
+              title: mapNodes.find((node) => node.id === location.nodeId)?.title ?? location.nodeTitle,
+              amount: location.amount,
+            });
+          });
+      });
+    };
+
+    addMapDistribution(activeMapSector, runtime, nodes, connections);
+    Object.entries(mapFactoriesRef.current).forEach(([sectorKey, factory]) => {
+      if (
+        sectorKey === activeMapSector ||
+        !isMapNodeUnlocked(mapNodeProgress, sectorKey)
+      ) return;
+      addMapDistribution(
+        sectorKey,
+        factory.runtime,
+        getMapFactoryNodes(factory),
+        factory.connections,
+      );
+    });
+    return Object.fromEntries(
+      INVENTORY_ITEMS.map(({ type }) => {
+        const totalsByNodeType = new Map<string, InventoryDistributionEntry>();
+        distribution[type].forEach((entry) => {
+          const existing = totalsByNodeType.get(entry.title);
+          if (existing) {
+            existing.amount += entry.amount;
+          } else {
+            totalsByNodeType.set(entry.title, {
+              id: entry.title,
+              title: entry.title,
+              amount: entry.amount,
+            });
+          }
+        });
+        return [type, Array.from(totalsByNodeType.values())];
+      }),
+    ) as Record<InventoryItemType, InventoryDistributionEntry[]>;
+  }, [activeMapSector, connections, mapNodeProgress, nodes, runtime]);
   const visibleInventoryItems = useMemo(() => {
     const visibleTypes = new Set<InventoryItemType>(STARTING_INVENTORY_ITEM_TYPES);
 
@@ -16730,10 +16663,11 @@ export default function Home() {
           >
             <DialogTrigger asChild>
               <Button
-                className={`research-trigger ${researchSelectionAvailable && !activeResearchProject && completedResearchCount < permanentResearchCount ? "attention" : ""}`}
+                className={`research-trigger ${researchAttention ? "attention" : ""}`}
                 size="sm"
                 variant="outline"
-                aria-label={`Research, ${completedResearchCount} of ${permanentResearchCount} permanent projects complete, ${runtime.research.mapNodeResearchCompletions} Map Node research completions${activeResearchProject ? `, researching ${activeResearchProject.title}` : researchSelectionAvailable ? "" : ", awaiting Research Center"}`}
+                aria-label={`${researchAttention ? "Research complete, " : "Research, "}${completedResearchCount} of ${permanentResearchCount} permanent projects complete, ${runtime.research.mapNodeResearchCompletions} Map Node research completions${activeResearchProject ? `, researching ${activeResearchProject.title}` : researchSelectionAvailable ? "" : ", awaiting Research Center"}`}
+                title={researchAttention ? "Research complete" : undefined}
               >
                 <FlaskConical aria-hidden="true" />
                 <span className="research-trigger-label">Research</span>
@@ -16883,14 +16817,15 @@ export default function Home() {
                   const availability = buildMaterialAvailability[item.type];
                   const count = availability.total;
                   const breakdown = storageBreakdownByType[item.type];
+                  const distribution = inventoryDistributionByType[item.type];
                   return (
-                    <Tooltip key={item.type} open={breakdown.nodeCount > 0 ? undefined : false}>
+                    <Tooltip key={item.type}>
                       <TooltipTrigger asChild>
                         <div
                           className="inventory-row"
                           style={{ "--item-color": RESOURCE_COLORS[item.type] } as React.CSSProperties}
-                          tabIndex={breakdown.nodeCount > 0 ? 0 : undefined}
-                          aria-label={`${item.label}, ${count} stored; ${BASE_INVENTORY_CAPACITY} base capacity${breakdown.nodeCount > 0 ? ` plus ${breakdown.nodeCapacity} from ${breakdown.nodeCount} storage ${breakdown.nodeCount === 1 ? "node" : "nodes"}` : ""}`}
+                          tabIndex={0}
+                          aria-label={`${item.label}, ${count} total. Hover or focus for resource distribution.`}
                         >
                           <span className="inventory-swatch" />
                           <div className="inventory-copy">
@@ -16900,22 +16835,28 @@ export default function Home() {
                             <strong>{count}</strong>
                             <span>stored</span>
                           </div>
-                          <span className="inventory-location-count">
-                            {breakdown.nodeCount === 0
-                              ? "No node storage"
-                              : `${breakdown.nodeCount} storage ${breakdown.nodeCount === 1 ? "node" : "nodes"}`}
-                          </span>
+                          {breakdown.nodeCount > 0 ? (
+                            <span className="inventory-location-count">
+                              {breakdown.nodeCount} storage {breakdown.nodeCount === 1 ? "node" : "nodes"}
+                            </span>
+                          ) : null}
                         </div>
                       </TooltipTrigger>
                       <TooltipContent
                         className="inventory-breakdown-tooltip"
                         side="top"
                         sideOffset={10}
-                        aria-label={`${item.label} storage capacity`}
+                        aria-label={`${item.label} resource distribution`}
                       >
-                        <p>
-                          <strong>{BASE_INVENTORY_CAPACITY}</strong> base, <strong>+{breakdown.nodeCapacity}</strong> from {breakdown.nodeCount} storage {breakdown.nodeCount === 1 ? "node" : "nodes"}
-                        </p>
+                        <p><strong>{count}</strong> {item.label} distributed across:</p>
+                        <ul>
+                          {distribution.map((location) => (
+                            <li key={location.id}>
+                              <span>{location.title}</span>
+                              <b>{location.amount}</b>
+                            </li>
+                          ))}
+                        </ul>
                       </TooltipContent>
                     </Tooltip>
                   );
@@ -17123,7 +17064,7 @@ export default function Home() {
                             <section className="build-compact-tooltip-section build-cost-spec">
                               <span className="build-spec-label">Build cost</span>
                               <div className="build-recipe">
-                                {removeBuildCosts ? (
+                                {removeBuildCosts || item.recipe.length === 0 ? (
                                   <span className="build-cost ready free-build-cost">
                                     <Minus aria-hidden="true" />
                                     <b>Free</b>
@@ -17226,11 +17167,11 @@ export default function Home() {
                           <section className="build-spec build-cost-spec" aria-label={`Build cost for ${item.title}`}>
                             <span className="build-spec-label">Build cost</span>
                             <div className="build-recipe">
-                              {removeBuildCosts ? (
+                              {removeBuildCosts || item.recipe.length === 0 ? (
                                 <span className="build-cost ready free-build-cost">
                                   <Minus aria-hidden="true" />
                                   <b>Free</b>
-                                  Developer override
+                                  No materials deducted
                                 </span>
                               ) : item.recipe.map((ingredient) => {
                                 const availability = buildMaterialAvailability[ingredient.type];
@@ -17654,17 +17595,6 @@ export default function Home() {
                       <strong>Oops.</strong>
                       <span>Create a Black Hole by rapidly clicking an empty part of the field.</span>
                       <em>Did I do thaaaaat?</em>
-                    </span>
-                  </article>
-                ) : null}
-                {unlockedAchievements.has("handHolding") ? (
-                  <article className="achievement-entry unlocked">
-                    <span className="achievement-entry-icon"><BookOpenText aria-hidden="true" /></span>
-                    <span className="achievement-entry-copy">
-                      <small>Achievement unlocked</small>
-                      <strong>Hand Holding</strong>
-                      <span>See the final tutorial after completing every previous tutorial.</span>
-                      <em>You are either very deliberate, or very slow.  Or both?</em>
                     </span>
                   </article>
                 ) : null}
@@ -18162,21 +18092,6 @@ export default function Home() {
                     <small>Complete every research technology instantly</small>
                   </span>
                   <em>{allResearchUnlocked ? "Unlocked" : "Developer"}</em>
-                </Button>
-                <Button
-                  className={`build-cost-toggle ${removeBuildCosts ? "active" : ""}`}
-                  size="sm"
-                  variant="outline"
-                  type="button"
-                  aria-pressed={removeBuildCosts}
-                  onClick={() => setRemoveBuildCosts((current) => !current)}
-                >
-                  <Minus aria-hidden="true" />
-                  <span>
-                    <strong>Remove Build Costs</strong>
-                    <small>Build unlocked nodes without consuming stored materials</small>
-                  </span>
-                  <em>{removeBuildCosts ? "Enabled" : "Disabled"}</em>
                 </Button>
                 <Button
                   className="build-cost-toggle"
@@ -19428,21 +19343,8 @@ export default function Home() {
             const isMythrilOreDeposit = node.kind === "mythrilOre";
             const isStoneDeposit = node.kind === "stone";
             const isForest = node.kind === "forest";
-            const starterCollectHintVisible =
-              (isStoneDeposit && stoneCollectHintVisible) ||
-              (isForest && forestCollectHintVisible);
-            const starterCollectHintEncouraging = isStoneDeposit
-              ? stoneCollectHintEncouraging
-              : forestCollectHintEncouraging;
-            const starterCollectHintTarget = isForest ? "Forest" : "Stone";
             const isFiniteResource =
               isIronOreDeposit || isCopperOreDeposit || isMythrilOreDeposit || isStoneDeposit || isForest;
-            const manualResourceProduct = isFiniteResource
-              ? getManualResourceProductType(node)
-              : null;
-            const baseInventoryAmount = manualResourceProduct
-              ? runtime.inventory?.[manualResourceProduct] ?? 0
-              : 0;
             const minedDeposit = runtime.minedDeposits[node.id];
             const resourceRemaining = minedDeposit?.remaining ?? (
               isForest
@@ -19541,14 +19443,23 @@ export default function Home() {
               researchFoundryState ?? undefined,
               ResourceType.AUTOMATA_CORE,
             );
-            const researchFoundryBaseInventory = isResearchFoundry
-              ? normalizeItemStore(runtime.inventory, BASE_INVENTORY_CAPACITY)
-              : null;
             const researchFoundryBasicCoresAvailable = isResearchFoundry
-              ? researchFoundryBaseInventory?.[ResourceType.BASIC_CORE] ?? 0
+              ? getStoredItemAmount(
+                  runtime,
+                  nodes,
+                  connections,
+                  ResourceType.BASIC_CORE,
+                  new Set([node.id]),
+                )
               : 0;
             const researchFoundryAutomataCoresAvailable = isResearchFoundry
-              ? researchFoundryBaseInventory?.[ResourceType.AUTOMATA_CORE] ?? 0
+              ? getStoredItemAmount(
+                  runtime,
+                  nodes,
+                  connections,
+                  ResourceType.AUTOMATA_CORE,
+                  new Set([node.id]),
+                )
               : 0;
             const activeResearchProjectProgress = runtime.research.activeProject
               ? runtime.research.progress[runtime.research.activeProject]
@@ -20432,8 +20343,8 @@ export default function Home() {
                       <button
                         type="button"
                         disabled={researchFoundryBasicCoresAvailable <= 0}
-                        title={`Feed 1 Basic Core · ${researchFoundryBasicCoresAvailable} in base inventory`}
-                        aria-label={`Feed one Basic Core from base inventory to Research Center, ${researchFoundryBasicCores} currently loaded and ${researchFoundryBasicCoresAvailable} in base inventory`}
+                        title={`Feed 1 Basic Core · ${researchFoundryBasicCoresAvailable} in node storage`}
+                        aria-label={`Feed one Basic Core from node storage to Research Center, ${researchFoundryBasicCores} currently loaded and ${researchFoundryBasicCoresAvailable} in node storage`}
                         style={{ "--core-color": RESOURCE_COLORS[ResourceType.BASIC_CORE] } as React.CSSProperties}
                         onPointerDown={(event) => {
                           event.preventDefault();
@@ -20450,8 +20361,8 @@ export default function Home() {
                       <button
                         type="button"
                         disabled={researchFoundryAutomataCoresAvailable <= 0}
-                        title={`Feed 1 Automata Core · ${researchFoundryAutomataCoresAvailable} in base inventory`}
-                        aria-label={`Feed one Automata Core from base inventory to Research Center, ${researchFoundryAutomataCores} currently loaded and ${researchFoundryAutomataCoresAvailable} in base inventory`}
+                        title={`Feed 1 Automata Core · ${researchFoundryAutomataCoresAvailable} in node storage`}
+                        aria-label={`Feed one Automata Core from node storage to Research Center, ${researchFoundryAutomataCores} currently loaded and ${researchFoundryAutomataCoresAvailable} in node storage`}
                         style={{ "--core-color": RESOURCE_COLORS[ResourceType.AUTOMATA_CORE] } as React.CSSProperties}
                         onPointerDown={(event) => {
                           event.preventDefault();
@@ -20533,71 +20444,6 @@ export default function Home() {
                       <div className="progress-label">
                         <span>{resourceRemaining > 0 ? `${node.title} remaining` : "Deposit exhausted"}</span>
                         <strong>{resourceRemaining} / {resourceCapacity}</strong>
-                      </div>
-                      <div className="resource-manual-extract-row">
-                        {starterCollectHintVisible ? (
-                          <StarterActionHint
-                            encouraging={starterCollectHintEncouraging}
-                            targetLabel={starterCollectHintTarget}
-                          />
-                        ) : null}
-                        <Tooltip delayDuration={250}>
-                          <TooltipTrigger asChild>
-                            <span className="resource-manual-extract-trigger">
-                              <button
-                                type="button"
-                                className="resource-manual-extract"
-                                disabled={
-                                  resourceRemaining <= 0 ||
-                                  !manualResourceProduct ||
-                                  baseInventoryAmount >= BASE_INVENTORY_CAPACITY
-                                }
-                                aria-label={manualResourceProduct
-                                  ? `Extract one ${formatResourceType(manualResourceProduct)} to base inventory, ${baseInventoryAmount} of ${BASE_INVENTORY_CAPACITY} stored`
-                                  : "Resource cannot be extracted"}
-                                onPointerDown={(event) => {
-                                  if (event.button !== 0) return;
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                }}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  manuallyExtractResource(node.id);
-                                }}
-                              >
-                                <Pickaxe aria-hidden="true" />
-                              </button>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent
-                            className="resource-manual-extract-tooltip"
-                            side="top"
-                            sideOffset={10}
-                            collisionPadding={{ top: 12, right: 12, bottom: 12, left: 12 }}
-                            avoidCollisions
-                            style={{
-                              "--item-color": manualResourceProduct
-                                ? RESOURCE_COLORS[manualResourceProduct]
-                                : RESOURCE_COLORS.RESOURCE,
-                            } as React.CSSProperties}
-                          >
-                            <span className="resource-manual-extract-tooltip-icon">
-                              <Pickaxe aria-hidden="true" />
-                            </span>
-                            <div>
-                              <strong>
-                                {resourceRemaining <= 0
-                                  ? "Resource depleted"
-                                  : baseInventoryAmount >= BASE_INVENTORY_CAPACITY
-                                    ? "Base inventory full"
-                                    : manualResourceProduct
-                                      ? `Extract 1 ${formatResourceType(manualResourceProduct)}`
-                                      : "Cannot extract"}
-                              </strong>
-                              <span>{baseInventoryAmount} / {BASE_INVENTORY_CAPACITY} stored</span>
-                            </div>
-                          </TooltipContent>
-                        </Tooltip>
                       </div>
                       <Progress className="machine-progress" value={nodeProgress} aria-label={`${node.title} remaining`} />
                       <div className="node-meta">
